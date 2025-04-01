@@ -1,0 +1,19 @@
+name: "Build"
+description: "Executes a compilation."
+
+runs:
+  using: "composite"
+  steps:
+      - name: Compile
+        shell: bash
+        run: |
+          SRC_FOLDER=$(pwd)/src
+
+          mkdir -p build && cd build
+          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make
+
+          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make"
+
+          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make
+
+          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make"
