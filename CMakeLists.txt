@@ -9,11 +9,17 @@ include_directories(include/common)
 if(BUILD_TARGET STREQUAL "server")
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBPQXX REQUIRED libpqxx)
+    include_directories(${LIBPQXX_INCLUDE_DIRS})
+    link_directories(${LIBPQXX_LIBRARY_DIRS})
     file(GLOB SOURCES
         src/server/*.cpp
         src/common/*.cpp
+        include/server/*.cpp
     )
     add_executable(dhl_server ${SOURCES})
+    target_link_libraries(dhl_server ${LIBPQXX_LIBRARIES} pq)
 
 elseif(BUILD_TARGET STREQUAL "client")
     add_definitions(-DTARGET_CLIENT)

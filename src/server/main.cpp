@@ -1,6 +1,9 @@
+#include "server.hpp"
 #include <iostream>
+#include <pqxx/pqxx>
 
-int main() {
-    std::cout << "Hi, Im the server" << std::endl;
+int main()
+{
+    example_database();
     return 0;
 }
