@@ -1,6 +1,8 @@
+#include "facade.h"
 #include <stdio.h>
 
-int main() {
-    printf("Hi, Im the client\n");
+int main()
+{
+    send_data();
     return 0;
 }

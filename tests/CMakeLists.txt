@@ -1,13 +1,31 @@
 cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
-
 # Collect test
-file(GLOB TESTS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/unit/*.c)
-file(GLOB SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/../src/logic.c)
+file(GLOB CLIENT_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/*.c)
+file(GLOB SERVER_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/server/*.cpp)
+file(GLOB COMMON_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/common/*.c)
 
-# Link with Unity header
-target_link_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/external/Unity/src)
+# Collect source files
+file(GLOB CLIENT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src/client/*.c)
+file(GLOB SERVER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src/server/*.cpp)
+file(GLOB COMMON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src/common/*.c)
+
+list(FILTER CLIENT_SRC EXCLUDE REGEX ".*main\\.c$")
+list(FILTER SERVER_SRC EXCLUDE REGEX ".*main\\.cpp$")
+list(FILTER COMMON_SRC EXCLUDE REGEX ".*main\\.c$")
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/common)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/server)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/client)
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../external/common/cjson) 
+
+list(APPEND COMMON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../external/common/cjson/cJSON.c)
+
+# Link with Unity and gtest
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../external/client/unity/src)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../external/server/gtest/googletest/include)
 
 # Coverage (Optional)
 if(RUN_COVERAGE)
@@ -28,14 +46,28 @@ if(RUN_COVERAGE)
     endif()
 
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -fprofile-arcs -ftest-coverage --coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fprofile-arcs -ftest-coverage --coverage")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov --coverage")
 endif()
 
-# Create test executable
-add_executable(test_${PROJECT_NAME} ${TESTS_FILES} ${SRC_FILES})
+option(TEST_TARGET "Test target: server, client or common")
 
-# Link with Unity
-target_link_libraries(test_${PROJECT_NAME} unity)
+if(TEST_TARGET STREQUAL "client")
+    add_executable(test_client ${CLIENT_TEST} ${CLIENT_SRC} ${COMMON_SRC})
+    target_link_libraries(test_client unity)
+    add_test(NAME test_client COMMAND test_client)
 
-# Add test
-add_test(NAME test_${PROJECT_NAME} COMMAND test_${PROJECT_NAME})%  
+elseif(TEST_TARGET STREQUAL "server")
+    add_executable(test_server ${SERVER_TEST} ${SERVER_SRC} ${COMMON_SRC})
+    target_link_libraries(test_server gtest gtest_main pthread)
+    add_test(NAME test_server COMMAND test_server)
+
+elseif(TEST_TARGET STREQUAL "common")
+    add_executable(test_common ${COMMON_TEST} ${COMMON_SRC})
+    target_link_libraries(test_common unity)
+    add_test(NAME test_common COMMAND test_common)
+
+else()
+    message(FATAL_ERROR "Invalid test target specified. Use 'client', 'server', or 'common'.")
+endif()
+

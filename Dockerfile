@@ -1,8 +1,6 @@
 FROM ubuntu:22.04
 
-# Install tools
-RUN apt update && apt install -y \
-    python3-pip \
+RUN apt-get update && apt-get install -y \
     cmake \
     g++ \
     make \
@@ -11,21 +9,11 @@ RUN apt update && apt install -y \
 
 WORKDIR /app
 
-COPY . .
+COPY / /
 
-RUN mkdir -p build && \
-    cd build && \
-    cmake .. -DBUILD_TARGET=server && \
-    make
-
-RUN cd build && \
-    cmake .. -DBUILD_TARGET=client && \
-    make
-
-COPY /scripts/run.sh /scripts/run.sh
+RUN chmod +x /scripts/build.sh
+RUN /scripts/build.sh
 
 RUN chmod +x /scripts/run.sh
 
 CMD ["/scripts/run.sh"]
-
-
