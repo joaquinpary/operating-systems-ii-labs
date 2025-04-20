@@ -1,12 +1,21 @@
 #ifndef DATABASE_HPP
 #define DATABASE_HPP
 
+#include <string>
 #include <memory>
 #include <pqxx/pqxx>
 
-std::unique_ptr<pqxx::connection> connectToDatabase();
-int createTable(pqxx::work& txn);
-int insertDatabase(pqxx::work& txn, const int& packet_id, const std::string& event, const std::string& origin,
-                   const std::string& level);
+class database_manager {
+public:
+    database_manager();
+    void log_message(const std::string& message);
+    bool authenticate_client(const std::string& username, const std::string& password);
 
-#endif
+private:
+    std::string get_env(const char* name, const std::string& default_val);
+    void initialize_database();
+
+    std::unique_ptr<pqxx::connection> database_conn_handle;
+};
+
+#endif // DATABASE_HPP

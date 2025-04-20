@@ -65,20 +65,25 @@ include_directories(include/common)
 if(BUILD_TARGET STREQUAL "server")
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
+    include_directories(include/common)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include)
     find_package(PkgConfig REQUIRED)
+    find_package(PostgreSQL REQUIRED)
+    
     pkg_check_modules(LIBPQXX REQUIRED libpqxx)
     include_directories(${LIBPQXX_INCLUDE_DIRS})
     link_directories(${LIBPQXX_LIBRARY_DIRS})
+    
     file(GLOB SOURCES
-        src/server/*.cpp
-        src/common/*.cpp
         include/server/*.hpp
+        include/common/*.h    
+        src/common/*.c
+        src/common/*.cpp
+        src/server/*.cpp
     )
     set(TARGET_EXEC dhl_server)
     add_executable(${TARGET_EXEC} ${SOURCES})
-    target_link_libraries(${TARGET_EXEC} PRIVATE pthread)
-    target_link_libraries(${TARGET_EXEC} ${LIBPQXX_LIBRARIES} pq)
+    target_link_libraries(${TARGET_EXEC} PRIVATE pthread ${LIBPQXX_LIBRARIES} pq)
 
 
 elseif(BUILD_TARGET STREQUAL "client")
@@ -91,13 +96,14 @@ elseif(BUILD_TARGET STREQUAL "client")
     )
     set(TARGET_EXEC dhl_client)
     add_executable(${TARGET_EXEC} ${SOURCES})
-
+    
 else()
     message(FATAL_ERROR "Invalid TARGET. Use -DTARGET=server or -DTARGET=client")
 endif()
 # Include dirs y linkeo para ambos ejecutables
+find_package(ZLIB REQUIRED)
 target_include_directories(${TARGET_EXEC} PRIVATE ${cjson_SOURCE_DIR})
-target_link_libraries(${TARGET_EXEC} PRIVATE cjson)
+target_link_libraries(${TARGET_EXEC} PRIVATE cjson ZLIB::ZLIB)
 # Add subdirectory of test
 if(RUN_TEST EQUAL 1 OR RUN_COVERAGE EQUAL 1)
     enable_testing()

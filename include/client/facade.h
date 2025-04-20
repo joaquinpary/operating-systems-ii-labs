@@ -4,6 +4,6 @@
 #include "connection.h"
 #include <stdio.h>
 
-int send_data(void);
+int connection(init_params_client params);
 
 #endif

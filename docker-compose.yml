@@ -15,6 +15,9 @@ services:
       POSTGRES_PASSWORD: dhl_pass
     networks:
       - dhl_net
+    ports:
+      - "9999:9999/udp"
+      - "9999:9999/tcp"
 
   db:
     image: postgres:15
