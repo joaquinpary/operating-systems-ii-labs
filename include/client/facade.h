@@ -5,5 +5,6 @@
 #include <stdio.h>
 
 int connection(init_params_client params);
+int connection_cli(init_params_client params);
 
 #endif

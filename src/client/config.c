@@ -32,23 +32,3 @@ void set_client_id(const char* client_id)
     else
         perror("Error creating shm path file");
 }
-
-void generate_prefixed_client_id(const char* prefix, char* client_type, size_t size)
-{
-    if (!prefix || !client_type || size < 16)
-    {
-        fprintf(stderr, "Invalid arguments for client ID generation\n");
-        return;
-    }
-
-    srand(time(NULL) ^ getpid());
-    int unique_number = rand() % 10000;
-    snprintf(client_type, size, "%s%04d", prefix, unique_number);
-}
-
-void generate_and_set_client_id(const char* prefix)
-{
-    char client_id[MIN_SIZE];
-    generate_prefixed_client_id(prefix, client_id, sizeof(client_id));
-    set_client_id(client_id);
-}

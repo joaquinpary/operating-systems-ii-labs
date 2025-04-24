@@ -12,16 +12,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define SOCKET_SIZE 1024
-#define BUFFER_SIZE 256
-#define MIN_SIZE 64
-#define PATH_CONFIG "config/config_launch.json"
-#define SECTION "client"
-#define UDP "udp"
-#define TCP "tcp"
-#define IPV4 "ipv4"
-#define IPV6 "ipv6"
-
 int setup_socket_udp(const char* ip_version, const char* ip_address, const char* port,
                      struct sockaddr_storage* dest_addr, socklen_t* addr_len)
 {
@@ -71,14 +61,15 @@ int receiver_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, s
 {
     int bytes_recv_udp;
     bytes_recv_udp = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, NULL, NULL); // Dont care about the source address
-    // num_fd = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, (struct sockaddr*)dest_addr, addr_len)
+    //bytes_recv_udp = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, (struct sockaddr*)dest_addr, &addr_len);
+
     if (bytes_recv_udp < 0)
     {
         perror("Error recvfrom");
         close(sockfd);
         exit(EXIT_FAILURE);
     }
-    printf("Response: %s\n", buffer); // Later, comment this line
+    //printf("Response: %s\n", buffer); // Later, comment this line
     return bytes_recv_udp;
 }
 
@@ -127,18 +118,6 @@ int sender_tpc(int sockfd, char* buffer)
         close(sockfd);
         exit(EXIT_FAILURE);
     }
-    buffer[strlen(buffer) - 1] = '\0';
-    if (!strcmp("quit", buffer))
-    {
-        finish = 1;
-    }
-
-    if (finish)
-    {
-        printf("Finish execution\n");
-        close(sockfd);
-        exit(0);
-    }
     return bytes_send_tcp;
 }
 
@@ -152,7 +131,8 @@ int receiver_tcp(int sockfd, char* buffer)
         close(sockfd);
         exit(EXIT_FAILURE);
     }
-    printf("Response: %s\n", buffer);
+    buffer[bytes_recv_tcp] = '\0';
+    //printf("Response: %s\n", buffer);
     return bytes_recv_tcp;
 }
 
@@ -161,7 +141,8 @@ connection_context init_connection_udp(init_params_client params)
     int sockfd;
     struct sockaddr_storage dest_addr;
     socklen_t addr_len;
-    sockfd = setup_socket_udp(params.ip_version, params.host, params.port, &dest_addr, &addr_len);
+    sockfd = setup_socket_udp(params.connection_params.ip_version, params.connection_params.host,
+                              params.connection_params.port, &dest_addr, &addr_len);
     if (sockfd < 0)
     {
         fprintf(stderr, "Error setting up UDP socket\n");
@@ -174,7 +155,8 @@ connection_context init_connection_udp(init_params_client params)
 int init_connection_tcp(init_params_client params)
 {
     int sockfd;
-    sockfd = setup_socket_tpc(params.ip_version, params.host, params.port);
+    sockfd = setup_socket_tpc(params.connection_params.ip_version, params.connection_params.host,
+                              params.connection_params.port);
     if (sockfd < 0)
     {
         fprintf(stderr, "Error setting up TCP socket\n");

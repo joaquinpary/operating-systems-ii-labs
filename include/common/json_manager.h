@@ -6,13 +6,13 @@ extern "C" {
 #endif
 
 #include "cJSON.h"
-#include <string.h>
 #include <time.h>
 
 #define BUFFER_SIZE 256
-#define MIN_SIZE 64
+#define MIN_SIZE 32
 #define TIMESTAMP_SIZE 32
 #define CHECKSUM_SIZE 9
+#define USER_PASS_SIZE 17
 #define SESSION_TOKEN_SIZE 37
 #define ITEM_TYPE 6
 
@@ -20,9 +20,17 @@ typedef struct
 {
     char host[BUFFER_SIZE];
     char port[MIN_SIZE];
-    char ip_version[MIN_SIZE];
     char protocol[MIN_SIZE];
+    char ip_version[MIN_SIZE];
+} connection_parameters;
+
+typedef struct
+{
     char client_type[MIN_SIZE];
+    char client_id[MIN_SIZE];
+    char username[USER_PASS_SIZE];
+    char password[USER_PASS_SIZE];
+    connection_parameters connection_params;
 } init_params_client;
 
 // PAYLOADS
@@ -30,25 +38,25 @@ typedef struct
 {
     char client_id[MIN_SIZE];
     char type[MIN_SIZE];
-    char username[MIN_SIZE];
-    char password[MIN_SIZE];
+    char username[USER_PASS_SIZE];
+    char password[USER_PASS_SIZE];
     char timestamp[TIMESTAMP_SIZE];
 } payload_client_auth_request;
 
 typedef struct
 {
     char status[MIN_SIZE];
-    char session_token[SESSION_TOKEN_SIZE];
+    char session_token[SESSION_TOKEN_SIZE]; //borrar
     char message[BUFFER_SIZE];
     char timestamp[TIMESTAMP_SIZE];
 } payload_server_auth_response;
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_client_keepalive;           //
+} payload_client_keepalive;
 
 typedef struct
 {
@@ -58,32 +66,32 @@ typedef struct
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     inventory_item items[ITEM_TYPE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_client_inventory_update;   //
+} payload_client_inventory_update;
 
 typedef struct
 {
     char alert_type[MIN_SIZE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_server_emergency_alert;    // 
+} payload_server_emergency_alert;
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     char status[MIN_SIZE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_client_acknowledgment;       //
+} payload_client_acknowledgment;
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_client_infection_alert;   //
+} payload_client_infection_alert;
 
 typedef struct
 {
@@ -93,19 +101,19 @@ typedef struct
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     inventory_item items[ITEM_TYPE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_warehouse_send_stock_to_hub;  //
+} payload_warehouse_send_stock_to_hub;
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     inventory_item items[ITEM_TYPE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_warehouse_request_stock;  //
+} payload_warehouse_request_stock;
 
 typedef struct
 {
@@ -120,11 +128,11 @@ typedef struct
 
 typedef struct
 {
-    char username[MIN_SIZE];
+    char username[USER_PASS_SIZE];
     char session_token[SESSION_TOKEN_SIZE];
     inventory_item items[ITEM_TYPE];
     char timestamp[TIMESTAMP_SIZE];
-} payload_hub_request_stock;    //
+} payload_hub_request_stock; 
 
 typedef struct
 {
@@ -232,9 +240,51 @@ typedef struct
     char checksum[BUFFER_SIZE];
 } server_h_send_stock;
 
+typedef struct
+{
+    char type[MIN_SIZE];
+    char username[USER_PASS_SIZE];
+    char session_token[SESSION_TOKEN_SIZE];
+    char type_message[MIN_SIZE]; // historial cliente exit 
+    char timestamp[TIMESTAMP_SIZE];
+    char checksum[CHECKSUM_SIZE];
+} cli_message;          // Manda el cliente
+
+typedef struct
+{
+    char type[MIN_SIZE];
+    char timestamp[TIMESTAMP_SIZE];
+    char checksum[CHECKSUM_SIZE];
+} end_of_message;
+
+typedef struct
+{
+    char type[MIN_SIZE];
+    int id;   
+    int hub_id;  
+    int warehouse_id;   
+    char timestamp_requested[TIMESTAMP_SIZE]; 
+    char timestamp_dispatched[TIMESTAMP_SIZE]; 
+    char timestamp_received[TIMESTAMP_SIZE]; 
+    inventory_item items[ITEM_TYPE];  
+    char origin[MIN_SIZE]; 
+    char destination[MIN_SIZE]; 
+    char checksum[CHECKSUM_SIZE]; 
+} server_transaction_history; 
+
+typedef struct
+{
+    char type[MIN_SIZE];
+    char username[USER_PASS_SIZE];     
+    char client_type[MIN_SIZE];    
+    char status[MIN_SIZE]; 
+    char checksum[CHECKSUM_SIZE];
+} server_client_alive;   
+
+
 char* get_timestamp();
 int validate_checksum(const char* json_string);
-init_params_client load_config_client(const char* filename, const char* section);
+init_params_client load_config_client(const char* filename, const int index);
 client_auth_request deserialize_client_auth_request(const char* json_string);
 server_auth_response deserialize_server_auth_response(const char* json_string);
 client_keepalive deserialize_client_keepalive(const char* json_string);
@@ -249,6 +299,11 @@ server_w_stock_warehouse deserialize_server_w_stock_warehouse(const char* json_s
 server_h_request_delivery deserialize_sever_h_request_delivery(const char* json_string);
 hub_request_stock deserialize_hub_request_stock(const char* json_string);
 server_h_send_stock deserialize_server_h_send_stock(const char* json_string);
+cli_message deserialize_cli_message(const char* json_string);
+end_of_message deserialize_end_of_message(const char* json_string);
+server_transaction_history deserialize_server_transaction_history(const char* json_string);
+server_client_alive deserialize_server_client_alive(const char* json_string);
+
 char* get_type(const char* json_string);
 char* serialize_client_auth_request(const client_auth_request* client_auth_request);
 char* serialize_server_auth_response(const server_auth_response* server_auth_response);
@@ -266,6 +321,10 @@ char* serialize_server_w_stock_warehouse(const server_w_stock_warehouse* server_
 char* serialize_server_h_request_delivery(const server_h_request_delivery* server_h_request_delivery);
 char* serialize_hub_request_stock(const hub_request_stock* hub_request_stock, const int item_count);
 char* serialize_server_h_send_stock(const server_h_send_stock* server_h_send_stock, const int item_count);
+char* serialize_cli_message(const cli_message* cli_message);
+char* serialize_end_of_message(const end_of_message* end_of_message);
+char* serialize_server_transaction_history(const server_transaction_history* server_transaction_history, const int item_count);
+char* serialize_server_client_alive(const server_client_alive* server_client_alive);
 client_auth_request create_client_auth_request(init_params_client params);
 server_auth_response create_server_auth_response(const char* status, const char* session_token, const char* message);
 client_keepalive create_client_keepalive(const char* username, const char* session_token);
@@ -284,6 +343,15 @@ server_w_stock_warehouse create_server_w_stock_warehouse(const inventory_item* i
 hub_request_stock create_hub_request_stock(const char* username, const char* session_token, const inventory_item* items,
                                            const int item_count);
 server_h_send_stock create_server_h_send_stock(const inventory_item* items, const int item_count);
+cli_message create_cli_message(const char* username, const char* session_token, const int type_message);
+end_of_message create_end_of_message();
+server_transaction_history create_server_transaction_history(const int id, const int hub_id, const int warehouse_id,
+    const char* timestamp_requested,
+    const char* timestamp_dispatched,
+    const char* timestamp_received,
+    const inventory_item* items, const char* origin,
+    const char* destination);
+server_client_alive create_server_client_alive(const char* username, const char* type, const char* status);
 
 #endif
 

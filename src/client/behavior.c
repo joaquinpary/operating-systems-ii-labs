@@ -87,7 +87,7 @@ int authenticate(init_params_client params, connection_context context)
     {
         message_sender(params, context, CLIENT_AUTH_REQUEST);
 
-        response = receiver(context, params.protocol);
+        response = receiver(context, params.connection_params.protocol);
         if (response == NULL)
         {
             log_error("Error receiving response with ID: %s", get_identifiers()->client_id);
@@ -274,7 +274,7 @@ int message_sender(init_params_client params, connection_context context, int ty
             log_error("Error serializing client_auth_request");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -283,14 +283,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         }
         break;
     case CLIENT_KEEP_ALIVE:
-        client_keepalive keep_alive = create_client_keepalive("user", get_identifiers()->session_token);
+        client_keepalive keep_alive = create_client_keepalive(params.username, get_identifiers()->session_token);
         buffer = serialize_client_keepalive(&keep_alive);
         if (buffer == NULL)
         {
             log_error("Error serializing client_keepalive");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -300,15 +300,15 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case CLIENT_INVENTORY_UPDATE:
         inventory_item* items = get_full_inventory();
-        client_inventory_update inv_upd =
-            create_client_inventory_update("user", get_identifiers()->session_token, items, get_inventory_size());
+        client_inventory_update inv_upd = create_client_inventory_update(
+            params.username, get_identifiers()->session_token, items, get_inventory_size());
         buffer = serialize_client_inventory_update(&inv_upd, get_inventory_size());
         if (buffer == NULL)
         {
             log_error("Error serializing client_inventory_update");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         sleep(1);
         free(buffer);
         if (bytes_send < 0)
@@ -319,14 +319,15 @@ int message_sender(init_params_client params, connection_context context, int ty
         }
         break;
     case CLIENT_ACK_SUCCESS:
-        client_acknowledgment ack = create_client_acknowledgment("user", get_identifiers()->session_token, SUCCESS);
+        client_acknowledgment ack =
+            create_client_acknowledgment(params.username, get_identifiers()->session_token, SUCCESS);
         buffer = serialize_client_acknowledgment(&ack);
         if (buffer == NULL)
         {
             log_error("Error serializing client_acknowledgment");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -335,14 +336,15 @@ int message_sender(init_params_client params, connection_context context, int ty
         }
         break;
     case CLIENT_ACK_FAILURE:
-        client_acknowledgment ack_fail = create_client_acknowledgment("user", get_identifiers()->session_token, FAILURE);
+        client_acknowledgment ack_fail =
+            create_client_acknowledgment(params.username, get_identifiers()->session_token, FAILURE);
         buffer = serialize_client_acknowledgment(&ack_fail);
         if (buffer == NULL)
         {
             log_error("Error serializing client_acknowledgment");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -351,14 +353,15 @@ int message_sender(init_params_client params, connection_context context, int ty
         }
         break;
     case CLIENT_INFECTION_ALERT:
-        client_infection_alert infec_alert = create_client_infection_alert("user", get_identifiers()->session_token);
+        client_infection_alert infec_alert =
+            create_client_infection_alert(params.username, get_identifiers()->session_token);
         buffer = serialize_client_infection_alert(&infec_alert);
         if (buffer == NULL)
         {
             log_error("Error serializing client_infection_alert");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -368,14 +371,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case WAREHOUSE_SEND_STOCK_TO_HUB:
         warehouse_send_stock_to_hub send_stock_hub = create_warehouse_send_stock_to_hub(
-            "user", get_identifiers()->session_token, get_full_inventory_to_send(), get_inventory_size());
+            params.username, get_identifiers()->session_token, get_full_inventory_to_send(), get_inventory_size());
         buffer = serialize_warehouse_send_stock_to_hub(&send_stock_hub, get_inventory_size());
         if (buffer == NULL)
         {
             fprintf(stderr, "Error serializing warehouse_send_stock_to_hub\n");
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         if (bytes_send < 0)
         {
@@ -386,8 +389,8 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case WAREHOUSE_REQUEST_STOCK:
         get_items_to_replenish(items_to_replenish);
-        warehouse_request_stock restock_warehouse =
-            create_warehouse_request_stock("user", get_identifiers()->session_token, items_to_replenish, get_inventory_size());
+        warehouse_request_stock restock_warehouse = create_warehouse_request_stock(
+            params.username, get_identifiers()->session_token, items_to_replenish, get_inventory_size());
         buffer = serialize_warehouse_request_stock(&restock_warehouse, get_inventory_size());
         if (buffer == NULL)
         {
@@ -395,7 +398,7 @@ int message_sender(init_params_client params, connection_context context, int ty
             free(items_to_replenish);
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         free(items_to_replenish);
         if (bytes_send < 0)
@@ -403,12 +406,11 @@ int message_sender(init_params_client params, connection_context context, int ty
             log_error("Error sending warehouse_request_stock");
             return 1;
         }
-        // Verificar luego
         break;
     case HUB_REQUEST_STOCK:
         get_items_to_replenish(items_to_replenish);
-        hub_request_stock restock_hub =
-            create_hub_request_stock("user", get_identifiers()->session_token, items_to_replenish, get_inventory_size());
+        hub_request_stock restock_hub = create_hub_request_stock(params.username, get_identifiers()->session_token,
+                                                                 items_to_replenish, get_inventory_size());
         buffer = serialize_hub_request_stock(&restock_hub, get_inventory_size());
         if (buffer == NULL)
         {
@@ -416,7 +418,7 @@ int message_sender(init_params_client params, connection_context context, int ty
             free(items_to_replenish);
             return 1;
         }
-        bytes_send = sender(context, params.protocol, buffer);
+        bytes_send = sender(context, params.connection_params.protocol, buffer);
         free(buffer);
         free(items_to_replenish);
         if (bytes_send < 0)
@@ -703,7 +705,7 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
     char* recv = NULL;
     while (1)
     {
-        recv = receiver(context, params.protocol);
+        recv = receiver(context, params.connection_params.protocol);
         if (recv == NULL)
         {
             fprintf(stderr, "Error receiving response\n");
@@ -872,7 +874,7 @@ int hub_logic_receiver(init_params_client params, connection_context context, sh
     char* recv = NULL;
     while (1)
     {
-        recv = receiver(context, params.protocol);
+        recv = receiver(context, params.connection_params.protocol);
         if (recv == NULL)
         {
             fprintf(stderr, "Error receiving response\n");

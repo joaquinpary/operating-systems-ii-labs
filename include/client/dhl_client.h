@@ -2,8 +2,8 @@
 #define DHL_CLIENT_H
 
 #include "facade.h"
-#include <stdio.h>
 
-int start();
+int start_client(char* client);
+int start_cli();
 
 #endif

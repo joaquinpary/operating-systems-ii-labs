@@ -2,7 +2,6 @@
 #define CONFIG_H
 
 #include "json_manager.h"
-#include <stdio.h>
 
 #define SHM_PATH_SIZE 128
 typedef struct
@@ -15,7 +14,5 @@ typedef struct
 identifiers* get_identifiers();
 void set_session_token(const char* session_token);
 void set_client_id(const char* client_id);
-void generate_prefixed_client_id(const char* prefix, char* client_type, size_t size);
-void generate_and_set_client_id(const char* prefix);
 
 #endif
