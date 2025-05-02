@@ -3,16 +3,14 @@
 
 #include <asio.hpp>
 #include "database.hpp"
+#include "config.hpp"
 #include <chrono>
 #include <queue>
 #include <unordered_map>
 #include <string>
 
-#define MAX_AUTH_ATTEMPTS 3
-#define ACKNOWLEDGEMENT_TIMEOUT 5
-#define MAX_AUTH_ATTEMPTS_MAP_SIZE 2000
+#define PATH_CONFIG "config/server_parameters.json"
 
-const int PORT = 9999;
 const size_t BUFFER_SIZE = 1024;
 
 struct last_ongoing_message {
@@ -34,22 +32,22 @@ struct udp_client {
 
   udp_client(asio::io_context& io_context)
     : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context)) {}
-
 };
 
 class tcp_session : public std::enable_shared_from_this<tcp_session>
 {
   public:
-    explicit tcp_session(asio::ip::tcp::socket socket, database_manager& db_manager);
+    explicit tcp_session(asio::ip::tcp::socket socket, database_manager& db_manager, config& config_params);
     void start();
 
   private:
     void do_auth();
     void do_read();
-    void do_write(size_t length);
     void do_write_ack(const std::string& message);
     void close_connection(const std::string& reason);
     void start_ack_timer();
+
+    config m_config_params;
 
     asio::ip::tcp::socket m_socket;
     std::array<char, BUFFER_SIZE> m_data;
@@ -65,7 +63,7 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
 class udp_server
 {
   public:
-    explicit udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, database_manager& db_manager);
+    explicit udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, database_manager& db_manager, config& config_params);
 
   private:
     void do_receive();           // Recepción asíncrona
@@ -75,6 +73,7 @@ class udp_server
     void start_udp_ack_timer(const std::string& username);
     bool check_auth(const std::string& username);
 
+    config m_config_params;
 
     asio::ip::udp::socket m_socket;            // Socket UDP
     asio::ip::udp::endpoint m_sender_endpoint; // Dirección del cliente
@@ -83,7 +82,6 @@ class udp_server
     std::unordered_map <std::string, std::unique_ptr<udp_client>> m_client_map;
     std::unordered_map <std::string, int> m_auth_attempts_map;
     std::queue <std::string> m_auth_attempts_fifo;
-    
 
     database_manager& m_database_manager; // Referencia a la base de datos
 
@@ -95,14 +93,15 @@ class server
     ~server()
     {
         m_tcp4_acceptor.close();
-        m_tcp6_acceptor.close();
+        m_tcp6_acceptor.close(); // udp?
     }
-    explicit server(asio::io_context& io_context);
+    explicit server(asio::io_context& io_context, config& config_params);
 
   private:
     void do_accept();
 
     asio::io_context& m_io_context;
+    config m_config_params;
     asio::ip::tcp::acceptor m_tcp4_acceptor;
     asio::ip::tcp::acceptor m_tcp6_acceptor;
     udp_server m_udp4_server;

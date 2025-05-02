@@ -1,0 +1,8 @@
+{
+    "ip_v4" : "127.0.0.1",
+    "ip_v6" : "::1",
+    "port" : 9999,
+    "ack_timeout" : 5,
+    "max_auth_attempts" : 3,
+    "max_auth_attempts_map_size" : 10000
+}
