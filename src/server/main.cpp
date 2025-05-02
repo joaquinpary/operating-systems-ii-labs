@@ -1,6 +1,6 @@
-#include "dhl_server.hpp"
 #include "config.hpp"
 #include "database.hpp"
+#include "dhl_server.hpp"
 #include <asio.hpp>
 #include <csignal>
 #include <iostream>
@@ -18,7 +18,7 @@ int main()
         asio::signal_set signals(io_context, SIGINT);
         signals.async_wait([&](auto, auto) { io_context.stop(); });
 
-        config server_config_params = config::load_from_file(PATH_CONFIG);
+        config server_config_params = config::load_config_from_file(PATH_CONFIG);
 
         server s(io_context, server_config_params); // Create the server instance, initializing all 4 sockets
 

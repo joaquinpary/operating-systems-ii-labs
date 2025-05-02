@@ -1,15 +1,17 @@
 #include "config.hpp"
 #include <fstream>
-#include <sstream>
 #include <iostream>
+#include <sstream>
 
 #include "cJSON.h"
 
-config config::load_from_file(const std::string& filepath) {
+config config::load_config_from_file(const std::string& filepath)
+{
     config cfg;
     std::ifstream file(filepath);
 
-    if (!file.is_open()) {
+    if (!file.is_open())
+    {
         std::cerr << "Error opening config file: " << filepath << "\n";
         return cfg;
     }
@@ -19,7 +21,8 @@ config config::load_from_file(const std::string& filepath) {
     file.close();
 
     cJSON* json = cJSON_Parse(json_str.c_str());
-    if (!json) {
+    if (!json)
+    {
         std::cerr << "Error parsing JSON: " << cJSON_GetErrorPtr() << "\n";
         return cfg;
     }
@@ -32,14 +35,17 @@ config config::load_from_file(const std::string& filepath) {
     cJSON* max_auth_attempts_map_size = cJSON_GetObjectItemCaseSensitive(json, "max_auth_attempts_map_size");
 
     if (cJSON_IsString(ip_v4) && cJSON_IsString(ip_v6) && cJSON_IsNumber(port) && cJSON_IsNumber(ack_timeout) &&
-        cJSON_IsNumber(max_auth_attempts) && cJSON_IsNumber(max_auth_attempts_map_size)) {
+        cJSON_IsNumber(max_auth_attempts) && cJSON_IsNumber(max_auth_attempts_map_size))
+    {
         cfg.ip_v4 = ip_v4->valuestring;
         cfg.ip_v6 = ip_v6->valuestring;
         cfg.port = port->valueint;
         cfg.ack_timeout = ack_timeout->valueint;
         cfg.max_auth_attempts = max_auth_attempts->valueint;
         cfg.max_auth_attempts_map_size = max_auth_attempts_map_size->valueint;
-    } else {
+    }
+    else
+    {
         std::cerr << "Invalid JSON format.\n";
     }
     cJSON_Delete(json);

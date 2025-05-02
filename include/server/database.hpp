@@ -14,6 +14,7 @@ public:
 private:
     std::string get_env(const char* name, const std::string& default_val);
     void initialize_database();
+    void load_clients_from_json(const std::string& filepath);
 
     std::unique_ptr<pqxx::connection> database_conn_handle;
 };

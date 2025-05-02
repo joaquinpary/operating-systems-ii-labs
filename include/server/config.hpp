@@ -11,7 +11,7 @@ struct config {
     int max_auth_attempts;
     int max_auth_attempts_map_size;
 
-    static config load_from_file(const std::string& filepath);
+    static config load_config_from_file(const std::string& filepath);
 };
 
 #endif
