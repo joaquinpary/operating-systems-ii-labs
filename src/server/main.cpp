@@ -1,13 +1,13 @@
 #include "dhl_server.hpp"
+#include "config.hpp"
+#include "database.hpp"
 #include <asio.hpp>
 #include <csignal>
 #include <iostream>
 #include <thread>
-#include "database.hpp"
 
 int main()
 {
-    std::cout<<"iniciando sv"<< std::flush;
     try
     {
         const auto processor_count = std::thread::hardware_concurrency();
@@ -18,7 +18,9 @@ int main()
         asio::signal_set signals(io_context, SIGINT);
         signals.async_wait([&](auto, auto) { io_context.stop(); });
 
-        server s(io_context); // Create the server instance, initializing all 4 sockets
+        config server_config_params = config::load_from_file(PATH_CONFIG);
+
+        server s(io_context, server_config_params); // Create the server instance, initializing all 4 sockets
 
         asio::post(cpu_pool, [&] { io_context.run(); });
 

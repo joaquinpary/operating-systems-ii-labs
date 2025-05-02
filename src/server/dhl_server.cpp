@@ -2,12 +2,13 @@
 #include "database.hpp"
 #include "json_manager.h"
 #include "utilities.hpp"
+#include "logger.h"
 #include <iostream>
 #include <pqxx/pqxx>
 
 // TCP Session implementation
-tcp_session::tcp_session(asio::ip::tcp::socket socket, database_manager& db)
-    : m_socket(std::move(socket)), m_database_manager(db), m_last_ongoing_message(static_cast<asio::io_context&>(m_socket.get_executor().context())) {}
+tcp_session::tcp_session(asio::ip::tcp::socket socket, database_manager& db, config& config_params)
+    : m_socket(std::move(socket)), m_config_params(config_params), m_database_manager(db), m_last_ongoing_message(static_cast<asio::io_context&>(m_socket.get_executor().context())) {}
 
 void tcp_session::start()
 {
@@ -38,7 +39,7 @@ void tcp_session::do_auth()
 
         if (!valid_credentials) {
             m_auth_attempts++;
-            if (m_auth_attempts > MAX_AUTH_ATTEMPTS) {
+            if (m_auth_attempts > m_config_params.max_auth_attempts) {
                 close_connection("Max authentication attempts reached.");
                 return;
             } else {
@@ -179,7 +180,6 @@ void tcp_session::do_read()
 //             m_last_ongoing_message.waiting_ack = true;
 //             m_last_ongoing_message.timestamp = std::chrono::steady_clock::now();
 //             start_ack_timer();
-
 //         }
 //     });
 // }
@@ -211,8 +211,9 @@ void tcp_session::close_connection(const std::string& reason)
 }
 
 // Implementación de udp_server
-udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, database_manager& db_manager)
+udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, database_manager& db_manager, config& config_params)
     : m_socket(io_context, endpoint),
+      m_config_params(config_params), 
       m_database_manager(db_manager)
 {
     do_receive();
@@ -338,6 +339,7 @@ void udp_server::do_send(const std::string& message, const asio::ip::udp::endpoi
     );
 }
 
+// refactorizar esto para que no se repita el código de tcp
 void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sender_endpoint){
 
     client_auth_request req = deserialize_client_auth_request(msg.c_str());
@@ -419,7 +421,7 @@ bool udp_server::check_auth(const std::string& username){
 
 bool udp_server::register_auth_attempt(const std::string& username) {
     if (m_auth_attempts_map.find(username) == m_auth_attempts_map.end()) {
-        if (m_auth_attempts_map.size() >= MAX_AUTH_ATTEMPTS_MAP_SIZE) {
+        if (m_auth_attempts_map.size() >= m_config_params.max_auth_attempts_map_size) {
             const std::string& oldest = m_auth_attempts_fifo.front();
             m_auth_attempts_map.erase(oldest);
             m_auth_attempts_fifo.pop();
@@ -427,11 +429,11 @@ bool udp_server::register_auth_attempt(const std::string& username) {
         m_auth_attempts_fifo.push(username);
         m_auth_attempts_map[username] = 1;
     } else {
-        if (m_auth_attempts_map[username] <= MAX_AUTH_ATTEMPTS) {
+        if (m_auth_attempts_map[username] <= m_config_params.max_auth_attempts) {
             m_auth_attempts_map[username]++;
         }
     }
-    return m_auth_attempts_map[username] > MAX_AUTH_ATTEMPTS;
+    return m_auth_attempts_map[username] > m_config_params.max_auth_attempts;
 }
 
 void udp_server::start_udp_ack_timer(const std::string& username) {
@@ -440,7 +442,7 @@ void udp_server::start_udp_ack_timer(const std::string& username) {
 
     udp_client& client = *iterator->second;
 
-    client.udp_last_ongoing_message->ack_timer.expires_after(std::chrono::seconds(ACKNOWLEDGEMENT_TIMEOUT));
+    client.udp_last_ongoing_message->ack_timer.expires_after(std::chrono::seconds(m_config_params.ack_timeout));
     client.udp_last_ongoing_message->ack_timer.async_wait([this, username](const asio::error_code& ec) {
         auto iterator = m_client_map.find(username);
         if (iterator == m_client_map.end()) return;
@@ -451,7 +453,7 @@ void udp_server::start_udp_ack_timer(const std::string& username) {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - client.udp_last_ongoing_message->timestamp);
 
-            if (elapsed.count() >= ACKNOWLEDGEMENT_TIMEOUT) {
+            if (elapsed.count() >= m_config_params.ack_timeout) {
                 do_send(client.udp_last_ongoing_message->data, client.endpoint, username);
             }
         } else if (ec != asio::error::operation_aborted) {
@@ -462,20 +464,22 @@ void udp_server::start_udp_ack_timer(const std::string& username) {
 
 
 // Implementación de server
-server::server(asio::io_context& io_context)
+server::server(asio::io_context& io_context, config& config_params)
     : m_io_context(io_context),
-      
-      m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 9999)),        
-    //   m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::make_address("127.0.0.1"), 9999)),     
-      
-    //  m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v6(), 9999)),        
-      m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::make_address("::1"), 9999)),
 
-      m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 9999), m_database_manager),
-    //   m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::make_address("127.0.0.1"), 9999), m_database_manager),
+      m_config_params(config_params),
+      
+    //   m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 9999)),        
+      m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port)),
+      
+    //  m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v6(), 9999)),
+      m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port)),
+
+    //   m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 9999), m_database_manager),
+      m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port), m_database_manager, config_params),
 
     //  m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v6(), 9999), m_database_manager)
-      m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::make_address("::1"), 9999), m_database_manager)
+      m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port), m_database_manager, config_params)
 
 {
     m_tcp4_acceptor.set_option(asio::socket_base::reuse_address(true));
@@ -492,10 +496,12 @@ void server::do_accept()
         if (!ec)
         {
             std::cout << "Nueva conexión desde: " << socket.remote_endpoint() << "\n"<< std::flush;
-            std::make_shared<tcp_session>(std::move(socket), m_database_manager)->start();
+            std::make_shared<tcp_session>(std::move(socket), m_database_manager, m_config_params)->start();
         }
         else
         {
+            //log_error("Error en accept: %s", ec.message().c_str());
+
             std::cerr << "Error en accept: " << ec.message() << "\n";
         }
         do_accept();
@@ -505,7 +511,7 @@ void server::do_accept()
         if (!ec)
         {
             std::cout << "Nueva conexión desde: " << socket.remote_endpoint() << "\n"<< std::flush;
-            std::make_shared<tcp_session>(std::move(socket), m_database_manager)->start();
+            std::make_shared<tcp_session>(std::move(socket), m_database_manager, m_config_params)->start();
         }
         else
         {
@@ -515,15 +521,16 @@ void server::do_accept()
     });
 }
 
+// refactorizar esto para evitar duplicación con el ack timer de udp
 void tcp_session::start_ack_timer(){
-    m_last_ongoing_message.ack_timer.expires_after(std::chrono::seconds(ACKNOWLEDGEMENT_TIMEOUT));
+    m_last_ongoing_message.ack_timer.expires_after(std::chrono::seconds(m_config_params.ack_timeout));
     m_last_ongoing_message.ack_timer.async_wait([this, self = shared_from_this()](const asio::error_code& ec) {
         if (!ec && m_last_ongoing_message.waiting_ack) 
         {
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_last_ongoing_message.timestamp);
             
-            if (elapsed.count() >= ACKNOWLEDGEMENT_TIMEOUT) {
+            if (elapsed.count() >= m_config_params.ack_timeout) {
                 do_write_ack(m_last_ongoing_message.data);
             }
         }

@@ -1,0 +1,17 @@
+#ifndef CONFIG_HPP
+#define CONFIG_HPP
+
+#include <string>
+
+struct config {
+    std::string ip_v4;
+    std::string ip_v6;
+    int port;
+    int ack_timeout;
+    int max_auth_attempts;
+    int max_auth_attempts_map_size;
+
+    static config load_from_file(const std::string& filepath);
+};
+
+#endif
