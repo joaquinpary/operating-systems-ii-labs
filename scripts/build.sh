@@ -7,14 +7,18 @@ echo "Estoy en: $(pwd)"
 mkdir -p ./build/
 echo "Estoy en: $(pwd)"
 cd ./build/ || exit 1
-#cmake .. -DBUILD_TARGET=client
-#make
-cmake .. -DBUILD_TARGET=server
-make
-#cmake .. -DRUN_TEST=1 -DTEST_TARGET=client
-#make
-#cmake .. -DRUN_TEST=1 -DTEST_TARGET=server
-#make
-#cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=common
-#make
-cd ..
+echo "Target: $1"
+case "$1" in
+    client)
+        cmake .. -DBUILD_TARGET=client
+        make
+        ;;
+    server)
+        cmake .. -DBUILD_TARGET=server
+        make
+        ;;
+    *)
+    echo "Invalid TARGET: $1"
+    exit 1
+    ;;
+esac

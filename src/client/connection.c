@@ -26,7 +26,7 @@ int setup_socket_udp(const char* ip_version, const char* ip_address, const char*
     if ((status = getaddrinfo(ip_address, port, &hints, &res)) != 0)
     {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-        return 1;
+        return -1;
     }
 
     sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -34,12 +34,11 @@ int setup_socket_udp(const char* ip_version, const char* ip_address, const char*
     {
         perror("socket");
         freeaddrinfo(res);
-        return 1;
+        return -1;
     }
 
     memcpy(dest_addr, res->ai_addr, res->ai_addrlen);
     *addr_len = res->ai_addrlen;
-
     freeaddrinfo(res);
     return sockfd;
 }
@@ -52,25 +51,24 @@ int sender_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, soc
     {
         perror("Error sendto");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return 1;
     }
-    return bytes_send_udp;
+    return 0;
 }
 
 int receiver_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, socklen_t addr_len)
 {
     int bytes_recv_udp;
     bytes_recv_udp = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, NULL, NULL); // Dont care about the source address
-    //bytes_recv_udp = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, (struct sockaddr*)dest_addr, &addr_len);
-
+    // bytes_recv_udp = recvfrom(sockfd, buffer, SOCKET_SIZE - 1, 0, (struct sockaddr*)dest_addr, &addr_len);
     if (bytes_recv_udp < 0)
     {
         perror("Error recvfrom");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return 1;
     }
-    //printf("Response: %s\n", buffer); // Later, comment this line
-    return bytes_recv_udp;
+    // printf("Response: %s\n", buffer); // Later, comment this line
+    return 0;
 }
 
 int setup_socket_tpc(const char* ip_version, const char* ip_address, const char* port_number)
@@ -86,7 +84,7 @@ int setup_socket_tpc(const char* ip_version, const char* ip_address, const char*
     if ((status = getaddrinfo(ip_address, port_number, &hints, &res)) != 0)
     {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -94,14 +92,14 @@ int setup_socket_tpc(const char* ip_version, const char* ip_address, const char*
     {
         perror("socket");
         freeaddrinfo(res);
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0)
     {
         perror("connect");
         freeaddrinfo(res);
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
     freeaddrinfo(res);
@@ -110,15 +108,15 @@ int setup_socket_tpc(const char* ip_version, const char* ip_address, const char*
 
 int sender_tpc(int sockfd, char* buffer)
 {
-    int bytes_send_tcp, finish = 0;
+    int bytes_send_tcp;
     bytes_send_tcp = write(sockfd, buffer, strlen(buffer));
     if (bytes_send_tcp < 0)
     {
         perror("Error write");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return 1;
     }
-    return bytes_send_tcp;
+    return 0;
 }
 
 int receiver_tcp(int sockfd, char* buffer)
@@ -129,11 +127,11 @@ int receiver_tcp(int sockfd, char* buffer)
     {
         perror("Error read");
         close(sockfd);
-        exit(EXIT_FAILURE);
+        return 1;
     }
     buffer[bytes_recv_tcp] = '\0';
-    //printf("Response: %s\n", buffer);
-    return bytes_recv_tcp;
+    // printf("Response: %s\n", buffer);
+    return 0;
 }
 
 connection_context init_connection_udp(init_params_client params)
@@ -146,7 +144,7 @@ connection_context init_connection_udp(init_params_client params)
     if (sockfd < 0)
     {
         fprintf(stderr, "Error setting up UDP socket\n");
-        exit(EXIT_FAILURE);
+        return (connection_context){.sockfd = -1};
     }
     connection_context context = {.sockfd = sockfd, .dest_addr = dest_addr, .addr_len = addr_len};
     return context;
@@ -160,7 +158,7 @@ int init_connection_tcp(init_params_client params)
     if (sockfd < 0)
     {
         fprintf(stderr, "Error setting up TCP socket\n");
-        exit(EXIT_FAILURE);
+        return -1;
     }
     return sockfd;
 }

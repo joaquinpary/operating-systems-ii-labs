@@ -8,7 +8,6 @@
 #define SOCKET_SIZE 1024
 #define BUFFER_SIZE 256
 #define MIN_SIZE 32
-#define PATH_CONFIG "config/clients_credentials.json"
 #define UDP "udp"
 #define TCP "tcp"
 #define IPV4 "ipv4"

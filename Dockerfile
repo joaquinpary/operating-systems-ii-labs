@@ -1,5 +1,7 @@
 FROM ubuntu:24.04
 
+ARG TARGET
+
 RUN apt-get update && apt-get install -y \
     cmake \
     g++ \
@@ -24,11 +26,23 @@ RUN git clone https://github.com/jtv/libpqxx.git /tmp/libpqxx && \
 
 WORKDIR /app
 
-COPY . .
+COPY src/ /app/src/
+COPY include/ /app/include/
+COPY CMakeLists.txt /app/
+COPY scripts/ /app/scripts/
+
+RUN mkdir -p /var/log/dhl_client \
+             /etc/dhl_client \
+             /var/log/dhl_server \
+             /etc/dhl_server
+
+COPY config/clients_credentials.json /etc/dhl_client/
+COPY config/server_credentials.json /etc/dhl_server/
 
 RUN chmod +x scripts/build.sh
-RUN ./scripts/build.sh
+RUN ./scripts/build.sh $TARGET
 
 RUN chmod +x scripts/run.sh
 
-CMD ["./scripts/run.sh"]
+ENTRYPOINT ["sh", "-c"]
+CMD ["./scripts/run.sh \"$TARGET\""]

@@ -1,13 +1,19 @@
 #include "dhl_client.h"
 #include "config.h"
 #include "facade.h"
-#include "inventory.h"
 #include "logger.h"
-#include <string.h>
+#include "shared_state.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#ifdef TESTING
 #define PATH_LOG "logs/client.log"
+#define PATH_CONFIG "config/clients_credentials.json"
+#else
+#define PATH_LOG "/var/log/dhl_client/client.log"
+#define PATH_CONFIG "/etc/dhl_client/clients_credentials.json"
+#endif
 #define CLIENT "CLIENT"
 #define ADMIN "admin"
 #define IP "ipv4"
@@ -17,13 +23,15 @@ int start_client(char* client)
 {
     init_params_client params = load_config_client(PATH_CONFIG, atoi(client));
     set_client_id(params.client_id);
+    set_client_type(params.client_type);
     printf("Client: %s\n", get_identifiers()->client_id);
     printf("Client SHM path: %s\n", get_identifiers()->shm_path);
     log_init(PATH_LOG, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     log_info("Client started with ID: %s", get_identifiers()->client_id);
-    init_inventory_random();
-    connection(params);
+    init_shared_memory();
+    if (connection(params))
+        return 1;
     return 0;
 }
 
@@ -32,13 +40,7 @@ int start_cli()
     init_params_client params = {0};
     char command[BUFFER_SIZE];
     printf("Welcome to the CLI!\n");
-    printf("Please enter: \n\t- username:\n\t- password: \n\t -host: \n\t -port:\n");
-    printf("username: ");
-    fgets(command, sizeof(command), stdin);
-    sscanf(command, "%s", params.username);
-    printf("password: ");
-    fgets(command, sizeof(command), stdin);
-    sscanf(command, "%s", params.password);
+    printf("Please enter: \n\t -host: \n\t -port:\n");
     printf("host: ");
     fgets(command, sizeof(command), stdin);
     sscanf(command, "%s", params.connection_params.host);
@@ -56,8 +58,6 @@ int start_cli()
 
     printf("client_type: %s\n", params.client_type);
     printf("client_id: %s\n", params.client_id);
-    printf("username: %s\n", params.username);
-    printf("password: %s\n", params.password);
     printf("host: %s\n", params.connection_params.host);
     printf("port: %s\n", params.connection_params.port);
     printf("protocol: %s\n", params.connection_params.protocol);
@@ -70,6 +70,5 @@ int start_cli()
     set_log_level(LOG_LEVEL_DEBUG);
     if (connection_cli(params))
         return 1;
-
     return 0;
 }

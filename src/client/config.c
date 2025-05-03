@@ -32,3 +32,9 @@ void set_client_id(const char* client_id)
     else
         perror("Error creating shm path file");
 }
+
+void set_client_type(const char* client_type)
+{
+    strncpy(ident.client_type, client_type, MIN_SIZE - 1);
+    ident.client_type[MIN_SIZE - 1] = '\0';
+}

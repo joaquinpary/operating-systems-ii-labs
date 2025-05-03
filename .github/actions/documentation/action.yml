@@ -7,26 +7,22 @@ runs:
     - name: "Run doxygen command"
       shell: bash
       run: |
-          # We only make check, not changes
           DOX_CONF_FILE=$(pwd)/Doxyfile
 
-              cat $DOX_CONF_FILE
-              echo "INPUT" = $(pwd)/src $(pwd)/include $(pwd)/lib
-          } > $DOX_CONF_FILE
+          echo "Using: $DOX_CONF_FILE"
+          cat $DOX_CONF_FILE
 
-          # Generate documentation
-          sudo dot -c
+          ERROR_FILE_FLAG=dox_errors.txt
+          doxygen -s "$DOX_CONF_FILE"
 
-          ERROR_FILE_FLAG=$(pwd)/dox_errors.txt
-
-          DOXYGEN_COMMAND=$(doxygen -s $DOX_CONF_FILE) > $ERROR_FILE_FLAG
-
-          if [ -s $ERROR_FILE_FLAG ]; then
-              echo "Error: There are some files that are not documented correctly"
-              exit 1
+          # Verificamos si el archivo de errores existe y tiene contenido
+          if [ -s "$ERROR_FILE_FLAG" ]; then
+            echo "❌ Error: There are poorly documented files or warnings."
+            cat "$ERROR_FILE_FLAG"
+            exit 1
           else
-              echo "All files are documented correctly. Niiiceee"
-              exit 0
+            echo "✅ All documentation is correct."
+            exit 0
           fi
     # Upload errors as an artifact, when failed
     - uses: actions/upload-artifact@v3

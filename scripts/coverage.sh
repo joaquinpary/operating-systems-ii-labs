@@ -4,10 +4,7 @@
 cd ../build/ || exit 1
 
 # Run the tests
-#ctest --output-on-failure
-./tests/test_server
-#./tests/test_client
-./tests/test_common
+ctest -VV --output-on-failure
 
 # Create output folder for coverage
 mkdir -p coverage

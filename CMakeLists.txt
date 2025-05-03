@@ -100,11 +100,11 @@ elseif(BUILD_TARGET STREQUAL "client")
 else()
     message(FATAL_ERROR "Invalid TARGET. Use -DTARGET=server or -DTARGET=client")
 endif()
-# Include dirs y linkeo para ambos ejecutables
+
 find_package(ZLIB REQUIRED)
 target_include_directories(${TARGET_EXEC} PRIVATE ${cjson_SOURCE_DIR})
 target_link_libraries(${TARGET_EXEC} PRIVATE cjson ZLIB::ZLIB)
-# Add subdirectory of test
+
 if(RUN_TEST EQUAL 1 OR RUN_COVERAGE EQUAL 1)
     enable_testing()
     add_subdirectory(tests)

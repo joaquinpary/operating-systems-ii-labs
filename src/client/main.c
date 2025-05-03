@@ -7,14 +7,12 @@
 int main(int argc, char* argv[])
 {
     if (argc < 2)
-    {
         return 1;
-    }
     if (!strcmp(argv[1], CLI))
     {
         printf("Client: %s\n", argv[1]);
-        printf("Welcome to the CLI!\n");
-        start_cli();
+        if (start_cli())
+            return 1;
     }
     else
     {

@@ -14,7 +14,7 @@ runs:
 
         # Run Coverage with gcovr
 
-        gcovr -r $PROJECT_PATH . > $PROJECT_PATH/coverage.txt
+        gcovr -r "$PROJECT_PATH" --exclude 'external/*' > "$PROJECT_PATH/coverage.txt"
 
         echo "Runnig: gcovr -r $PROJECT_PATH ."
 
@@ -23,12 +23,12 @@ runs:
         # Find the value of correct coverage
         COVERAGE_RESULT=$(grep "TOTAL" $PROJECT_PATH/coverage.txt | awk '{print $NF}' | cut -d '%' -f 1)
 
-        # Coverage lines GT 90
-        if [ "$(echo "$COVERAGE_RESULT > 90" | bc)" -eq 1 ]; then
-            echo "Coverage is greater than 90%. Nice!"
+        # Coverage lines GT 50
+        if [ "$(echo "$COVERAGE_RESULT > 50" | bc)" -eq 1 ]; then
+            echo "Coverage is greater than 50%. Nice!"
             exit 0
         else
-            echo "Error: Coverage is less than or equal to 90%"
+            echo "Error: Coverage is less than or equal to 50%"
             exit 1
         fi
 

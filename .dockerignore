@@ -1,0 +1,8 @@
+.git
+.vscode
+build
+external
+*.log
+*.swp
+*.tmp
+*.out

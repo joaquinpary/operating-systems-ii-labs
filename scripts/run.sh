@@ -1,9 +1,18 @@
 #!/bin/bash
 echo "rEstoy en: $(pwd)"
-./build/dhl_server
+case "$1" in
+    client)
+        # for i in $(seq 1 5); do # (seq 1 2000)
+        #     ./build/dhl_client "$i" &
+        # done
+        ./build/dhl_client 0
+        ;;
+    server)
+        ./build/dhl_server
+        ;;
+    *)
+    echo "Invalid TARGET: $1"
+    exit 1
+    ;;
+esac
 
-# for ((i=0; i<10; i++)) 
-# do
-#    ./build/dhl_client
-# done
-wait

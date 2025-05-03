@@ -1,11 +1,14 @@
+#define _POSIX_C_SOURCE 200809L
 #include "behavior_cli.h"
 #include "config.h"
 #include "connection.h"
-#include "logger.h"
 #include "json_manager.h"
+#include "logger.h"
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define SUCCESS "success"
@@ -23,29 +26,30 @@
 
 int cli_authenticate(init_params_client params, int sockfd)
 {
-    int bytes;
-    int val_check;
     char* response = malloc(SOCKET_SIZE);
     if (!response)
     {
         fprintf(stderr, "malloc failed\n");
         return 1;
     }
-    bytes = cli_message_sender(params, sockfd, AUTH_REQUEST);
-    if (bytes < 0)
+    if (cli_message_sender(params, sockfd, AUTH_REQUEST))
+    {
+        free(response);
         return 1;
-    bytes = receiver_tcp(sockfd, response);
-    val_check = validate_checksum(response);
-    if (val_check)
+    }
+    if (receiver_tcp(sockfd, response))
+    {
+        free(response);
+        return 1;
+    }
+    if (validate_checksum(response))
     {
         log_error("Checksum error with ID: %s", get_identifiers()->client_id);
         free(response);
         return 1;
     }
-    if (bytes < 0 || response == NULL)
-        return 1;
     server_auth_response auth_res = deserialize_server_auth_response(response);
-    if (strcmp(auth_res.payload.status, SUCCESS) == 0)
+    if (!strcmp(auth_res.payload.status, SUCCESS))
     {
         log_info("Authentication successful with ID: %s", get_identifiers()->client_id);
         printf("Authentication successful.\n");
@@ -53,52 +57,9 @@ int cli_authenticate(init_params_client params, int sockfd)
         free(response);
         return 0;
     }
-    else
+    else if (!strcmp(auth_res.payload.status, FAILURE))
     {
-        log_info("Authentication failed with ID: %s", get_identifiers()->client_id);
-        memset(response, 0, SOCKET_SIZE);
     }
-    for (int i = 0; i < 2; i++)
-    {
-        printf("Authentication failed. Please try again.\n");
-        char command[BUFFER_SIZE];
-        printf("username: ");
-        fgets(command, sizeof(command), stdin);
-        sscanf(command, "%s", params.username);
-        printf("password: ");
-        fgets(command, sizeof(command), stdin);
-        sscanf(command, "%s", params.password);
-        bytes = cli_message_sender(params, sockfd, AUTH_REQUEST);
-        if (bytes < 0)
-            return 1;
-        bytes = receiver_tcp(sockfd, response);
-        val_check = validate_checksum(response);
-        if (val_check)
-        {
-            log_error("Checksum error with ID: %s", get_identifiers()->client_id);
-            free(response);
-            return 1;
-        }
-        if (bytes < 0 || response == NULL)
-            return 1;
-        auth_res = deserialize_server_auth_response(response);
-        if (strcmp(auth_res.payload.status, SUCCESS) == 0)
-        {
-            log_info("Authentication successful with ID: %s", get_identifiers()->client_id);
-            printf("Authentication successful.\n");
-            set_session_token(auth_res.payload.session_token);
-            free(response);
-            return 0;
-        }
-        else
-        {
-            log_info("Authentication failed with ID: %s", get_identifiers()->client_id);
-            memset(response, 0, SOCKET_SIZE);
-        }
-    }
-    log_info("Authentication failed after 3 attempts with ID: %s", get_identifiers()->client_id);
-    printf("Authentication failed. Exiting...\n");
-    close(sockfd);
     free(response);
     return 1;
 }
@@ -113,23 +74,22 @@ int decode_transaction_history(init_params_client params, int sockfd)
         return 1;
     }
     print_transaction_table_header();
-    while(1)
+    while (1)
     {
         memset(buffer, 0, SOCKET_SIZE);
-        int bytes = receiver_tcp(sockfd, buffer);
-        if (bytes < 0)
+        if (receiver_tcp(sockfd, buffer))
         {
             free(buffer);
             return 1;
         }
-        if(validate_checksum(buffer))
+        if (validate_checksum(buffer))
         {
             log_error("Checksum error with ID: %s", get_identifiers()->client_id);
             free(buffer);
             return 1;
         }
         type = get_type(buffer);
-        if(!strcmp(type, END_OF_MESSAGE))
+        if (!strcmp(type, END_OF_MESSAGE))
         {
             free(type);
             break;
@@ -152,23 +112,22 @@ int decode_client_lives(init_params_client params, int sockfd)
         return 1;
     }
     print_client_table_header();
-    while(1)
+    while (1)
     {
         memset(buffer, 0, SOCKET_SIZE);
-        int bytes = receiver_tcp(sockfd, buffer);
-        if (bytes < 0)
+        if (receiver_tcp(sockfd, buffer))
         {
             free(buffer);
             return 1;
         }
-        if(validate_checksum(buffer))
+        if (validate_checksum(buffer))
         {
             log_error("Checksum error with ID: %s", get_identifiers()->client_id);
             free(buffer);
             return 1;
         }
         type = get_type(buffer);
-        if(!strcmp(type, END_OF_MESSAGE))
+        if (!strcmp(type, END_OF_MESSAGE))
         {
             free(type);
             break;
@@ -183,7 +142,6 @@ int decode_client_lives(init_params_client params, int sockfd)
 
 int cli_message_sender(init_params_client params, int sockfd, int type_message)
 {
-    int bytes_send;
     char* buffer = NULL;
     switch (type_message)
     {
@@ -192,8 +150,7 @@ int cli_message_sender(init_params_client params, int sockfd, int type_message)
         buffer = serialize_client_auth_request(&auth_req);
         if (buffer == NULL)
             return 1;
-        bytes_send = sender_tpc(sockfd, buffer);
-        if (bytes_send < 0)
+        if (sender_tpc(sockfd, buffer))
         {
             free(buffer);
             return 1;
@@ -205,8 +162,7 @@ int cli_message_sender(init_params_client params, int sockfd, int type_message)
         buffer = serialize_cli_message(&msg);
         if (buffer == NULL)
             return 1;
-        bytes_send = sender_tpc(sockfd, buffer);
-        if (bytes_send < 0)
+        if (sender_tpc(sockfd, buffer))
         {
             free(buffer);
             return 1;
@@ -216,7 +172,7 @@ int cli_message_sender(init_params_client params, int sockfd, int type_message)
         {
             printf("Exiting...\n");
             close(sockfd);
-            return 1;
+            return 0;
         }
         break;
     }
@@ -228,16 +184,15 @@ int cli_message_receiver(init_params_client params, int sockfd, int request_type
     switch (request_type)
     {
     case CLI_TRANSACTION_HISTORY:
-        if(decode_transaction_history(params, sockfd)) return 1;
+        if (decode_transaction_history(params, sockfd))
+            return 1;
         printf("Transaction history received.\n");
         break;
     case CLI_ALL_CLIENT_LIVES:
-        if(decode_client_lives(params, sockfd)) return 1;
+        if (decode_client_lives(params, sockfd))
+            return 1;
         printf("All clients' lives received.\n");
         break;
-    // case CLI_EXIT:
-    //     printf("Exiting...\n"); 
-    //     break;
     default:
         break;
     }
@@ -246,7 +201,9 @@ int cli_message_receiver(init_params_client params, int sockfd, int request_type
 
 int logic_cli_sender_recv(init_params_client params, int sockfd)
 {
-    int bytes;
+    pid_t pid;
+    int action;
+    int authentication_status;
     char command[BUFFER_SIZE];
     char* response = malloc(SOCKET_SIZE);
     if (!response)
@@ -254,47 +211,85 @@ int logic_cli_sender_recv(init_params_client params, int sockfd)
         fprintf(stderr, "malloc failed\n");
         return 1;
     }
+    for (int i = 0; i < 3; i++)
+    {
+        printf("username: ");
+        fgets(command, sizeof(command), stdin);
+        sscanf(command, "%s", params.username);
+        printf("password: ");
+        fgets(command, sizeof(command), stdin);
+        sscanf(command, "%s", params.password);
+        authentication_status = cli_authenticate(params, sockfd);
+        if (!authentication_status)
+            break;
+        printf("Authentication failed\n");
+    }
+    if (authentication_status)
+    {
+        printf("Exiting...\n");
+        return 1;
+    }
     while (1)
     {
         printf("OPTIONS:\n \t- 1: REQUEST TRANSACTIONS HISTORY\n \t- 2: REQUEST ALL CLIENT LIVES\n \t- 3: EXIT\n");
         printf("CLI> ");
         fgets(command, sizeof(command), stdin);
-        if (atoi(command) < 1 || atoi(command) > 3)
+        action = atoi(command);
+        if (action < 1 || action > 3)
         {
             printf("Invalid option. Please try again.\n");
             continue;
         }
-        if(cli_message_sender(params, sockfd, atoi(command))) return 1;
-        if(cli_message_receiver(params, sockfd, atoi(command))) return 1;
+        pid = fork();
+        if (pid < 0)
+        {
+            fprintf(stderr, "Fork failed\n");
+            exit(EXIT_FAILURE);
+        }
+        else if (pid == 0)
+        {
+            if (cli_message_receiver(params, sockfd, action))
+                exit(EXIT_FAILURE);
+            exit(EXIT_SUCCESS);
+        }
+        else
+        {
+            if (cli_message_sender(params, sockfd, action))
+            {
+                kill(pid, SIGTERM);
+                wait(NULL);
+                return 1;
+            }
+            wait(NULL);
+            if (action == CLI_EXIT)
+                break;
+        }
     }
     return 0;
 }
 
 void print_transaction_table_header()
 {
-    printf(
-        "+------+-------------+-----------------+----------------------+----------------------+----------------------+-------------------------------------------------------------+---------------+--------------+\n");
-    printf(
-        "| ID   | Hub ID      | Warehouse ID    | Requested            | Dispatched           | Received             | Items                                                       | Origin        | Destination  |\n");
-    printf(
-        "+------+-------------+-----------------+----------------------+----------------------+----------------------+-------------------------------------------------------------+---------------+--------------+\n");
+    printf("+------+-------------+-----------------+----------------------+----------------------+---------------------"
+           "-+-------------------------------------------------------------+---------------+--------------+\n");
+    printf("| ID   | Hub ID      | Warehouse ID    | Requested            | Dispatched           | Received            "
+           " | Items                                                       | Origin        | Destination  |\n");
+    printf("+------+-------------+-----------------+----------------------+----------------------+---------------------"
+           "-+-------------------------------------------------------------+---------------+--------------+\n");
+    return;
 }
 
 void print_client_table_header()
 {
-    printf(
-        "+------------+-----------+-----------+\n");
-    printf(
-        "| Username   | Type      | Status    |\n");
-    printf(
-        "+------------+-----------+-----------+\n");
-    
+    printf("+------------+-----------+-----------+\n");
+    printf("| Username   | Type      | Status    |\n");
+    printf("+------------+-----------+-----------+\n");
+    return;
 }
 
 void print_transaction_row(const server_transaction_history* t)
 {
-    printf("| %-4d | %-11d | %-15d | %-20s | %-20s | %-20s | ",
-           t->id, t->hub_id, t->warehouse_id,
+    printf("| %-4d | %-11d | %-15d | %-20s | %-20s | %-20s | ", t->id, t->hub_id, t->warehouse_id,
            t->timestamp_requested, t->timestamp_dispatched, t->timestamp_received);
 
     for (int i = 0; i < ITEM_TYPE; i++)
@@ -308,10 +303,11 @@ void print_transaction_row(const server_transaction_history* t)
     }
 
     printf(" | %-13s | %-12s |\n", t->origin, t->destination);
+    return;
 }
 
 void print_client_row(const server_client_alive* c)
 {
-    printf("| %-10s | %-9s | %-9s |\n",
-           c->username, c->client_type, c->status);
+    printf("| %-10s | %-9s | %-9s |\n", c->username, c->client_type, c->status);
+    return;
 }

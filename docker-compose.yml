@@ -1,14 +1,15 @@
-version: "3.8"
-
 services:
   server:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TARGET: server
     container_name: dhl_server
     depends_on:
       - db
     environment:
+      TARGET: server
       POSTGRES_HOST: db
       POSTGRES_DB: dhl_db
       POSTGRES_USER: dhl_user
@@ -19,6 +20,19 @@ services:
       - "9999:9999/udp"
       - "9999:9999/tcp"
 
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TARGET: client
+    environment:
+      TARGET: client
+    stdin_open: true
+    tty: true
+    container_name: dhl_client
+    networks:
+      - dhl_net
   db:
     image: postgres:15
     container_name: dhl_db

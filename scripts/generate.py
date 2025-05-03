@@ -10,8 +10,7 @@ def deterministic_password(client_id):
     random.seed(client_id)
     return ''.join(random.choices(string.ascii_letters + string.digits, k=10))
 
-# Opciones aleatorias para los nuevos campos
-host = "localhost"
+host = "dhl_server"
 port = "9999"
 PROTOCOLS = ["tcp", "udp"]
 VERSIONS = ["ipv4", "ipv6"]
@@ -19,7 +18,6 @@ VERSIONS = ["ipv4", "ipv6"]
 clients = []
 server_credentials = []
 
-# Generar información para los clientes
 for i in range(1, NUM_WAREHOUSES + 1):
     client_id = f"warehouse{i:04d}"
     username = f"user{i:04d}"
@@ -59,16 +57,13 @@ for i in range(1, NUM_HUBS + 1):
     }
     clients.append(entry)
 
-# Generar contraseñas falsas para algunos clientes
 num_fakes = int(len(clients) * FAKE_RATE)
 fake_indices = random.sample(range(len(clients)), num_fakes)
 
 for idx in fake_indices:
     clients[idx]["password"] = "wrongpass123"
 
-# Para el servidor, sólo queremos las credenciales sin los datos de "connect"
 for client in clients:
-    # Se crea una entrada para el servidor (sin el campo "connect")
     server_entry = {
         "client_id": client["client_id"],
         "username": client["username"],
@@ -76,11 +71,9 @@ for client in clients:
     }
     server_credentials.append(server_entry)
 
-# Guardar el archivo de credenciales de los clientes
 with open("../config/clients_credentials.json", "w") as f:
     json.dump({"clients": clients}, f, indent=4)
 
-# Guardar el archivo de credenciales del servidor
 with open("../config/server_credentials.json", "w") as f:
     json.dump({"clients": server_credentials}, f, indent=4)
 

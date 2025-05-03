@@ -9,18 +9,6 @@
 #define ACTIONS 2
 #define MAX_ITEMS 6
 
-typedef struct
-{
-    inventory_item items[MAX_ITEMS];
-    inventory_item items_to_send[MAX_ITEMS];
-    int warehouse_load_stock;
-    int request_stock_from_hub;
-    int hub_delivery;
-    int hub_load_stock;
-    int timer_tick;
-    int next_action[ACTIONS];
-} shared_data;
-
 /* @brief
  * Function to authenticate the client with the server.
  * @param params The parameters for the client initialization.
@@ -34,14 +22,14 @@ int authenticate(init_params_client params, connection_context context);
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_sender(init_params_client params, connection_context context);
+int manager_sender(init_params_client params, connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_receiver(init_params_client params, connection_context context);
+int manager_receiver(init_params_client params, connection_context context, int finish);
 /* @brief
  * Function to send a message to the server.
  * @param context The connection context.
@@ -79,7 +67,7 @@ int* message_receiver(char* response, init_params_client params, connection_cont
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_sender(init_params_client params, connection_context context, shared_data* shm_ptr, int semid);
+int warehouse_logic_sender(init_params_client params, connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -88,7 +76,7 @@ int warehouse_logic_sender(init_params_client params, connection_context context
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_receiver(init_params_client params, connection_context context, shared_data* shm_ptr, int semid);
+int warehouse_logic_receiver(init_params_client params, connection_context context, int finish);
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -97,7 +85,7 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_sender(init_params_client params, connection_context context, shared_data* shm_ptr, int semid);
+int hub_logic_sender(init_params_client params, connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -106,6 +94,6 @@ int hub_logic_sender(init_params_client params, connection_context context, shar
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_receiver(init_params_client params, connection_context context, shared_data* shm_ptr, int semid);
+int hub_logic_receiver(init_params_client params, connection_context context, int finish);
 
 #endif

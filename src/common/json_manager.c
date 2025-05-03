@@ -55,7 +55,7 @@ int validate_checksum(const char* json_string)
     computed_crc = crc32(computed_crc, (const Bytef*)json_str_no_checksum, strlen(json_str_no_checksum));
     char computed_checksum_str[CHECKSUM_SIZE + 1];
     snprintf(computed_checksum_str, sizeof(computed_checksum_str), "%08lX", computed_crc);
-    int result = strcmp(expected_checksum, computed_checksum_str) != 0;
+    int result = strcmp(expected_checksum, computed_checksum_str);
 
     if (result)
     {
@@ -390,7 +390,7 @@ client_acknowledgment deserialize_client_acknowledgment(const char* json_string)
         strncpy(client_acknowledgment.type, type->valuestring, MIN_SIZE - 1);
         strncpy(client_acknowledgment.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
-        cJSON* username = cJSON_GetObjectItemCaseSensitive(json, "username");
+        cJSON* username = cJSON_GetObjectItemCaseSensitive(payload, "username");
         cJSON* session_token = cJSON_GetObjectItemCaseSensitive(payload, "session_token");
         cJSON* status = cJSON_GetObjectItemCaseSensitive(payload, "status");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
@@ -431,11 +431,13 @@ client_infection_alert deserialize_client_infection_alert(const char* json_strin
         strncpy(client_infection_alert.type, type->valuestring, MIN_SIZE - 1);
         strncpy(client_infection_alert.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
+        cJSON* username = cJSON_GetObjectItemCaseSensitive(payload, "username");
         cJSON* session_token = cJSON_GetObjectItemCaseSensitive(payload, "session_token");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsString(session_token) && cJSON_IsString(timestamp))
+        if (cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(timestamp))
         {
+            strncpy(client_infection_alert.payload.username, username->valuestring, USER_PASS_SIZE - 1);
             strncpy(client_infection_alert.payload.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
             strncpy(client_infection_alert.payload.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
         }
@@ -783,18 +785,20 @@ cli_message deserialize_cli_message(const char* json_string)
         fprintf(stderr, "Error parsing JSON: %s\n", cJSON_GetErrorPtr());
         return cli_message;
     }
+    cJSON* type = cJSON_GetObjectItemCaseSensitive(json, "type");
     cJSON* username = cJSON_GetObjectItemCaseSensitive(json, "username");
     cJSON* session_token = cJSON_GetObjectItemCaseSensitive(json, "session_token");
-    cJSON* type_message = cJSON_GetObjectItemCaseSensitive(json, "type_message");
+    cJSON* message_type = cJSON_GetObjectItemCaseSensitive(json, "message_type");
     cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(json, "timestamp");
     cJSON* checksum = cJSON_GetObjectItemCaseSensitive(json, "checksum");
 
-    if (cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(type_message) &&
-        cJSON_IsString(timestamp) && cJSON_IsString(checksum))
+    if (cJSON_IsString(type) && cJSON_IsString(username) && cJSON_IsString(session_token) &&
+        cJSON_IsString(message_type) && cJSON_IsString(timestamp) && cJSON_IsString(checksum))
     {
+        strncpy(cli_message.type, type->valuestring, MIN_SIZE - 1);
         strncpy(cli_message.username, username->valuestring, USER_PASS_SIZE - 1);
         strncpy(cli_message.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
-        strncpy(cli_message.type_message, type_message->valuestring, MIN_SIZE - 1);
+        strncpy(cli_message.message_type, message_type->valuestring, MIN_SIZE - 1);
         strncpy(cli_message.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
         strncpy(cli_message.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
     }
@@ -858,12 +862,20 @@ server_transaction_history deserialize_server_transaction_history(const char* js
     cJSON* destination = cJSON_GetObjectItemCaseSensitive(json, "destination");
     cJSON* checksum = cJSON_GetObjectItemCaseSensitive(json, "checksum");
 
-    if (cJSON_IsNumber(id)) server_transaction_history.id = id->valueint;
-    if (cJSON_IsNumber(hub_id)) server_transaction_history.hub_id = hub_id->valueint;
-    if (cJSON_IsNumber(warehouse_id)) server_transaction_history.warehouse_id = warehouse_id->valueint;
-    if (cJSON_IsString(timestamp_requested)) strncpy(server_transaction_history.timestamp_requested, timestamp_requested->valuestring, TIMESTAMP_SIZE - 1);
-    if (cJSON_IsString(timestamp_dispatched)) strncpy(server_transaction_history.timestamp_dispatched, timestamp_dispatched->valuestring, TIMESTAMP_SIZE - 1);
-    if (cJSON_IsString(timestamp_received)) strncpy(server_transaction_history.timestamp_received, timestamp_received->valuestring, TIMESTAMP_SIZE - 1);
+    if (cJSON_IsString(type))
+        strncpy(server_transaction_history.type, type->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsNumber(id))
+        server_transaction_history.id = id->valueint;
+    if (cJSON_IsNumber(hub_id))
+        server_transaction_history.hub_id = hub_id->valueint;
+    if (cJSON_IsNumber(warehouse_id))
+        server_transaction_history.warehouse_id = warehouse_id->valueint;
+    if (cJSON_IsString(timestamp_requested))
+        strncpy(server_transaction_history.timestamp_requested, timestamp_requested->valuestring, TIMESTAMP_SIZE - 1);
+    if (cJSON_IsString(timestamp_dispatched))
+        strncpy(server_transaction_history.timestamp_dispatched, timestamp_dispatched->valuestring, TIMESTAMP_SIZE - 1);
+    if (cJSON_IsString(timestamp_received))
+        strncpy(server_transaction_history.timestamp_received, timestamp_received->valuestring, TIMESTAMP_SIZE - 1);
     if (cJSON_IsArray(items))
     {
         int item_count = cJSON_GetArraySize(items);
@@ -882,9 +894,12 @@ server_transaction_history deserialize_server_transaction_history(const char* js
             }
         }
     }
-    if (cJSON_IsString(origin)) strncpy(server_transaction_history.origin, origin->valuestring, MIN_SIZE - 1);
-    if (cJSON_IsString(destination)) strncpy(server_transaction_history.destination, destination->valuestring, MIN_SIZE - 1);
-    if (cJSON_IsString(checksum)) strncpy(server_transaction_history.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
+    if (cJSON_IsString(origin))
+        strncpy(server_transaction_history.origin, origin->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsString(destination))
+        strncpy(server_transaction_history.destination, destination->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsString(checksum))
+        strncpy(server_transaction_history.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
     cJSON_Delete(json);
     return server_transaction_history;
 }
@@ -904,11 +919,16 @@ server_client_alive deserialize_server_client_alive(const char* json_string)
     cJSON* status = cJSON_GetObjectItemCaseSensitive(json, "status");
     cJSON* checksum = cJSON_GetObjectItemCaseSensitive(json, "checksum");
 
-    if(cJSON_IsString(type)) strncpy(server_client_alive.type, type->valuestring, MIN_SIZE - 1);
-    if(cJSON_IsString(username)) strncpy(server_client_alive.username, username->valuestring, USER_PASS_SIZE - 1);
-    if(cJSON_IsString(client_type)) strncpy(server_client_alive.client_type, client_type->valuestring, MIN_SIZE - 1);
-    if(cJSON_IsString(status)) strncpy(server_client_alive.status, status->valuestring, MIN_SIZE - 1);
-    if(cJSON_IsString(checksum)) strncpy(server_client_alive.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
+    if (cJSON_IsString(type))
+        strncpy(server_client_alive.type, type->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsString(username))
+        strncpy(server_client_alive.username, username->valuestring, USER_PASS_SIZE - 1);
+    if (cJSON_IsString(client_type))
+        strncpy(server_client_alive.client_type, client_type->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsString(status))
+        strncpy(server_client_alive.status, status->valuestring, MIN_SIZE - 1);
+    if (cJSON_IsString(checksum))
+        strncpy(server_client_alive.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
     cJSON_Delete(json);
     return server_client_alive;
@@ -928,6 +948,38 @@ char* get_type(const char* json_string)
         return NULL;
     }
     cJSON* type = cJSON_GetObjectItemCaseSensitive(json, "type");
+    if (!type || !cJSON_IsString(type))
+    {
+        fprintf(stderr, "Error: type not found or not a string\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+    char* type_string = malloc(strlen(type->valuestring) + 1);
+    if (!type_string)
+    {
+        fprintf(stderr, "Error allocating memory for type string\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+    strcpy(type_string, type->valuestring);
+    cJSON_Delete(json);
+    return type_string;
+}
+
+char* get_cli_type(const char* json_string)
+{
+    if (!json_string)
+    {
+        fprintf(stderr, "Error: json_string is NULL\n");
+        return NULL;
+    }
+    cJSON* json = cJSON_Parse(json_string);
+    if (!json)
+    {
+        fprintf(stderr, "Error parsing JSON: %s\n", cJSON_GetErrorPtr());
+        return NULL;
+    }
+    cJSON* type = cJSON_GetObjectItemCaseSensitive(json, "message_type");
     if (!type || !cJSON_IsString(type))
     {
         fprintf(stderr, "Error: type not found or not a string\n");
@@ -2002,9 +2054,10 @@ char* serialize_cli_message(const cli_message* cli_message)
         return NULL;
     }
 
-    cJSON_AddStringToObject(json, "type", cli_message->username);
+    cJSON_AddStringToObject(json, "type", cli_message->type);
+    cJSON_AddStringToObject(json, "username", cli_message->username);
     cJSON_AddStringToObject(json, "session_token", cli_message->session_token);
-    cJSON_AddStringToObject(json, "message_type", cli_message->type_message);
+    cJSON_AddStringToObject(json, "message_type", cli_message->message_type);
     cJSON_AddStringToObject(json, "timestamp", cli_message->timestamp);
 
     char* temp_json_str = cJSON_PrintUnformatted(json);
@@ -2100,7 +2153,8 @@ char* serialize_end_of_message(const end_of_message* end_of_message)
     return json_string;
 }
 
-char* serialize_server_transaction_history(const server_transaction_history* server_transaction_history, const int item_count)
+char* serialize_server_transaction_history(const server_transaction_history* server_transaction_history,
+                                           const int item_count)
 {
     if (!server_transaction_history)
     {
@@ -2558,7 +2612,12 @@ server_h_send_stock create_server_h_send_stock(const inventory_item* items, cons
 
 cli_message create_cli_message(const char* username, const char* session_token, const int type_message)
 {
-    cli_message msg = {.username = "", .session_token = "", .type_message = "", .timestamp = "", .checksum = ""};
+    cli_message msg = {.type = "cli_message",
+                       .username = "",
+                       .session_token = "",
+                       .message_type = "",
+                       .timestamp = "",
+                       .checksum = ""};
 
     strncpy(msg.username, username, USER_PASS_SIZE - 1);
     msg.username[USER_PASS_SIZE - 1] = '\0';
@@ -2567,18 +2626,18 @@ cli_message create_cli_message(const char* username, const char* session_token, 
     switch (type_message)
     {
     case 1:
-        strncpy(msg.type_message, "transactions_history", MIN_SIZE - 1);
+        strncpy(msg.message_type, "transactions_history", MIN_SIZE - 1);
         break;
     case 2:
-        strncpy(msg.type_message, "all_clients_live", MIN_SIZE - 1);
+        strncpy(msg.message_type, "all_clients_live", MIN_SIZE - 1);
         break;
     case 3:
-        strncpy(msg.type_message, "exit", MIN_SIZE - 1);
+        strncpy(msg.message_type, "exit", MIN_SIZE - 1);
         break;
     default:
         break;
     }
-    msg.type_message[MIN_SIZE - 1] = '\0';
+    msg.message_type[MIN_SIZE - 1] = '\0';
     char* timestamp = get_timestamp();
     if (!timestamp)
     {
@@ -2613,14 +2672,15 @@ server_transaction_history create_server_transaction_history(const int id, const
                                                              const inventory_item* items, const char* origin,
                                                              const char* destination)
 {
-    server_transaction_history history = {.type = "server_transaction_history", .id = id, .hub_id = hub_id, .warehouse_id = warehouse_id, .checksum = ""};
+    server_transaction_history history = {
+        .type = "server_transaction_history", .id = id, .hub_id = hub_id, .warehouse_id = warehouse_id, .checksum = ""};
     strncpy(history.timestamp_requested, timestamp_requested, TIMESTAMP_SIZE - 1);
     history.timestamp_requested[TIMESTAMP_SIZE - 1] = '\0';
     strncpy(history.timestamp_dispatched, timestamp_dispatched, TIMESTAMP_SIZE - 1);
     history.timestamp_dispatched[TIMESTAMP_SIZE - 1] = '\0';
     strncpy(history.timestamp_received, timestamp_received, TIMESTAMP_SIZE - 1);
     history.timestamp_received[TIMESTAMP_SIZE - 1] = '\0';
-    // Modify this if you want to change the size of the items array
+    // Modify later
     for (int i = 0; i < ITEM_TYPE; ++i)
     {
         strncpy(history.items[i].item, items[i].item, MIN_SIZE - 1);

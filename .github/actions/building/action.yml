@@ -4,16 +4,31 @@ description: "Executes a compilation."
 runs:
   using: "composite"
   steps:
-      - name: Compile
-        shell: bash
-        run: |
-          SRC_FOLDER=$(pwd)/src
+    - name: Set up paths
+      shell: bash
+      run: |
+        echo "LOCAL_INSTALL=$GITHUB_WORKSPACE/local" >> $GITHUB_ENV
 
-          mkdir -p build && cd build
-          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make
+    - name: Install libpqxx
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/jtv/libpqxx.git /tmp/libpqxx
+        cd /tmp/libpqxx
+        mkdir build && cd build
+        cmake .. \
+          -DCMAKE_INSTALL_PREFIX=$LOCAL_INSTALL \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20
+        make -j$(nproc)
+        make install
 
-          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make"
+    - name: Compile
+      shell: bash
+      run: |
+      
+        mkdir -p build && cd build
+        cmake .. -DBUILD_TARGET=client && make
+        cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=client && make
 
-          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make
-
-          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make"
+        cmake .. -DBUILD_TARGET=server -DCMAKE_PREFIX_PATH=$LOCAL_INSTALL && make
+        # cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=server && make
