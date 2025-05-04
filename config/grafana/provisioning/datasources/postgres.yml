@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: DHL PostgreSQL
+    type: postgres
+    access: proxy
+    url: db:5432
+    isDefault: true
+    database: dhl_db
+    user: dhl_user
+    secureJsonData:
+      password: dhl_pass
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false

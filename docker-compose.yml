@@ -48,8 +48,27 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: dhl_grafana
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    networks:
+      - dhl_net
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
 networks:
   dhl_net:
 
 volumes:
   pgdata:
+  grafana-storage:
+  

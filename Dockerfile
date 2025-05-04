@@ -38,6 +38,7 @@ RUN mkdir -p /var/log/dhl_client \
 
 COPY config/clients_credentials.json /etc/dhl_client/
 COPY config/server_credentials.json /etc/dhl_server/
+COPY config/server_parameters.json /etc/dhl_server/
 
 RUN chmod +x scripts/build.sh
 RUN ./scripts/build.sh $TARGET

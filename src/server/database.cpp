@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <thread>
 
-#define PATH_CREDENTIALS "config/server_credentials.json"
+#define PATH_CREDENTIALS "/etc/dhl_server/server_credentials.json"
 
 database_manager::database_manager()
 {

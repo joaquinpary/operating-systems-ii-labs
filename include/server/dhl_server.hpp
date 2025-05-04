@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_map>
 
-#define PATH_CONFIG "config/server_parameters.json"
+#define PATH_CONFIG "/etc/dhl_server/server_parameters.json"
 
 const size_t BUFFER_SIZE = 1024;
 
@@ -32,19 +32,6 @@ struct udp_client {
 
   udp_client(asio::io_context& io_context)
     : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context)) {}
-};
-
-struct last_ongoing_message
-{
-    std::string data;
-    std::chrono::steady_clock::time_point timestamp;
-    asio::steady_timer ack_timer;
-    bool waiting_ack = false;
-
-    udp_client(asio::io_context& io_context)
-        : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context))
-    {
-    }
 };
 
 class tcp_session : public std::enable_shared_from_this<tcp_session>
