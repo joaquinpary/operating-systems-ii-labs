@@ -3,7 +3,8 @@
 
 #include <string>
 
-struct config {
+struct config
+{
     std::string ip_v4;
     std::string ip_v6;
     int port;

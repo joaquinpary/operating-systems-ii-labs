@@ -1,9 +1,9 @@
 #ifndef DHL_SERVER_HPP
 #define DHL_SERVER_HPP
 
+#include "config.hpp"
 #include "database.hpp"
 #include <asio.hpp>
-#include "config.hpp"
 #include <chrono>
 #include <queue>
 #include <string>
@@ -13,6 +13,27 @@
 
 const size_t BUFFER_SIZE = 1024;
 
+struct last_ongoing_message {
+  std::string data;
+  std::chrono::steady_clock::time_point timestamp;
+  asio::steady_timer ack_timer;
+  bool waiting_ack = false;
+  
+  last_ongoing_message(asio::io_context& io_context)
+    : ack_timer(io_context) {}
+};
+
+struct udp_client {
+  bool authenticated = false;
+  std::string username;
+  std::string client_type;
+  asio::ip::udp::endpoint endpoint;
+  std::unique_ptr<last_ongoing_message> udp_last_ongoing_message;
+
+  udp_client(asio::io_context& io_context)
+    : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context)) {}
+};
+
 struct last_ongoing_message
 {
     std::string data;
@@ -20,8 +41,10 @@ struct last_ongoing_message
     asio::steady_timer ack_timer;
     bool waiting_ack = false;
 
-  udp_client(asio::io_context& io_context)
-    : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context)) {}
+    udp_client(asio::io_context& io_context)
+        : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context))
+    {
+    }
 };
 
 class tcp_session : public std::enable_shared_from_this<tcp_session>
@@ -53,8 +76,8 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
 class udp_server
 {
   public:
-
-    explicit udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, database_manager& db_manager, config& config_params);
+    explicit udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
+                        database_manager& db_manager, config& config_params);
 
   private:
     void do_receive(); // Recepción asíncrona
@@ -70,10 +93,9 @@ class udp_server
     asio::ip::udp::endpoint m_sender_endpoint; // Dirección del cliente
     std::array<char, BUFFER_SIZE> m_data;      // Buffer de datos
 
-
-    std::unordered_map <std::string, std::unique_ptr<udp_client>> m_client_map;
-    std::unordered_map <std::string, int> m_auth_attempts_map;
-    std::queue <std::string> m_auth_attempts_fifo;
+    std::unordered_map<std::string, std::unique_ptr<udp_client>> m_client_map;
+    std::unordered_map<std::string, int> m_auth_attempts_map;
+    std::queue<std::string> m_auth_attempts_fifo;
 
     database_manager& m_database_manager; // Referencia a la base de datos
 };

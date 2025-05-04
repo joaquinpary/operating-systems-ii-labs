@@ -22,11 +22,16 @@
 #define SEM_NUM 0
 #define SEM_READER 1
 
-#define HUB_MIN 5
-#define WAREHOUSE_MIN 20
-#define HUB_MAX 20
-#define WAREHOUSE_MAX 100
+#define WAREHOUSE_MAX 500
+#define HUB_MAX 200
+#define WAREHOUSE_MIN WAREHOUSE_MAX * 0.2
+#define HUB_MIN HUB_MAX * 0.2
+#define RELATION 5 // Relation between warehouse and hub quantities
+#define T_CONST 60
+#define REPLENISH_TIME 1
+#define DEMAND_HUB 80 / T_CONST
 
+static calculation calc = {0};
 static shared_data* shm_ptr = NULL;
 static int semid = -1;
 
@@ -79,11 +84,28 @@ int init_shared_memory()
     memset(shm_ptr, 0, sizeof(shared_data));
     init_inventory();
     sem_signal();
+    if (!strcmp(get_identifiers()->client_type, "warehouse"))
+    {
+        calculate_parameters((double)RELATION, (double)DEMAND_HUB, (double)T_CONST, (double)REPLENISH_TIME);
+    }
+    else if (!strcmp(get_identifiers()->client_type, "hub"))
+    {
+        calculate_parameters(1, (double)DEMAND_HUB, (double)T_CONST, (double)REPLENISH_TIME);
+    }
 
     return 0;
-    // finish
-    shmdt(shm_ptr);
-    shmctl(shmid, IPC_RMID, NULL);
+}
+
+void cleanup_shared_memory()
+{
+    if (shmdt(shm_ptr) == -1)
+    {
+        perror("Error detaching shared memory");
+    }
+    if (shmctl(shmget(ftok(get_identifiers()->shm_path, SHM_KEY), SHM_SIZE, 0666), IPC_RMID, NULL) == -1)
+    {
+        perror("Error removing shared memory");
+    }
 }
 
 int get_inventory_size()
@@ -139,6 +161,7 @@ inventory_item* get_inventory_to_send()
 
 inventory_item* get_inventory_to_replenish()
 {
+    double missing;
     inventory_item* inventory_to_replenish = malloc(sizeof(inventory_item) * get_inventory_size());
     if (inventory_to_replenish == NULL)
     {
@@ -151,25 +174,10 @@ inventory_item* get_inventory_to_replenish()
         for (int i = 0; i < get_inventory_size(); ++i)
         {
             strcpy(inventory_to_replenish[i].item, shm_ptr->items[i].item);
-            if (shm_ptr->items[i].quantity < WAREHOUSE_MIN)
+            missing = calc.objective_s - shm_ptr->items[i].quantity;
+            if (missing > 0)
             {
-
-                inventory_to_replenish[i].quantity = WAREHOUSE_MAX - shm_ptr->items[i].quantity;
-            }
-            else
-            {
-                inventory_to_replenish[i].quantity = 0;
-            }
-        }
-    }
-    else if (strcmp(get_identifiers()->client_type, "hub") == 0)
-    {
-        for (int i = 0; i < get_inventory_size(); ++i)
-        {
-            strcpy(inventory_to_replenish[i].item, shm_ptr->items[i].item);
-            if (shm_ptr->items[i].quantity < HUB_MIN)
-            {
-                inventory_to_replenish[i].quantity = HUB_MAX - shm_ptr->items[i].quantity;
+                inventory_to_replenish[i].quantity = (int)missing;
             }
             else
             {
@@ -222,7 +230,13 @@ void init_inventory()
             shm_ptr->items_to_send[i].quantity = 0;
         }
     }
-    return;
+}
+
+void calculate_parameters(double actors, double demand, double T, double rep_time)
+{
+    calc.demand_u = actors * demand * (T + rep_time);
+    calc.sec_stock = 0.2 * calc.demand_u;
+    calc.objective_s = calc.demand_u + calc.sec_stock;
 }
 
 void set_inventory_to_send(inventory_item* items_to_send)
@@ -256,6 +270,7 @@ void set_inventory(inventory_item* items)
 
 int replenish()
 {
+    double missing;
     inventory_item* items = malloc(sizeof(inventory_item) * get_inventory_size());
     if (items == NULL)
     {
@@ -265,24 +280,12 @@ int replenish()
     sem_wait();
     memcpy(items, shm_ptr->items, sizeof(inventory_item) * get_inventory_size());
     sem_signal();
-    if (!strcmp(get_identifiers()->client_type, "warehouse"))
+    for (int i = 0; i < get_inventory_size(); ++i)
     {
-        for (int i = 0; i < get_inventory_size(); ++i)
+        missing = calc.objective_s - items[i].quantity;
+        if (missing > 0)
         {
-            if (items[i].quantity < WAREHOUSE_MIN)
-            {
-                return 1;
-            }
-        }
-    }
-    else if (!strcmp(get_identifiers()->client_type, "hub"))
-    {
-        for (int i = 0; i < get_inventory_size(); ++i)
-        {
-            if (items[i].quantity < HUB_MIN)
-            {
-                return 1;
-            }
+            return 1;
         }
     }
     return 0;

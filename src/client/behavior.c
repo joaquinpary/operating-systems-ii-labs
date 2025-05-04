@@ -534,6 +534,17 @@ int warehouse_logic_sender(init_params_client params, connection_context context
             sem_signal();
             if (timer_tick >= time || finish)
             {
+                if (replenish())
+                {
+                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                             get_identifiers()->client_id);
+                    if (message_sender(params, context_warehouse, WAREHOUSE_REQUEST_STOCK))
+                    {
+                        fprintf(stderr, "Error sending infection alert\n");
+                        shmdt(shm_ptr);
+                        return 1;
+                    }
+                }
                 if (message_sender(params, context_warehouse, CLIENT_KEEP_ALIVE))
                 {
                     fprintf(stderr, "Error sending keepalive\n");
@@ -559,17 +570,17 @@ int warehouse_logic_sender(init_params_client params, connection_context context
                     shmdt(shm_ptr);
                     return 1;
                 }
-                if (next_action[1] == WAREHOUSE_SEND_STOCK_TO_HUB && replenish())
-                {
-                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                             get_identifiers()->client_id);
-                    if (message_sender(params, context_warehouse, WAREHOUSE_REQUEST_STOCK))
-                    {
-                        fprintf(stderr, "Error sending request for supply\n");
-                        shmdt(shm_ptr);
-                        return 1;
-                    }
-                }
+                // if (next_action[1] == WAREHOUSE_SEND_STOCK_TO_HUB && replenish())
+                // {
+                //     log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                //              get_identifiers()->client_id);
+                //     if (message_sender(params, context_warehouse, WAREHOUSE_REQUEST_STOCK))
+                //     {
+                //         fprintf(stderr, "Error sending request for supply\n");
+                //         shmdt(shm_ptr);
+                //         return 1;
+                //     }
+                // }
             }
             if (finish)
             {
@@ -693,6 +704,17 @@ int hub_logic_sender(init_params_client params, connection_context context, int 
             sem_signal();
             if (timer_tick >= time || finish)
             {
+                if (replenish())
+                {
+                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                             get_identifiers()->client_id);
+                    if (message_sender(params, context_hub, HUB_REQUEST_STOCK))
+                    {
+                        fprintf(stderr, "Error sending infection alert\n");
+                        shmdt(shm_ptr);
+                        return 1;
+                    }
+                }
                 if (message_sender(params, context_hub, CLIENT_KEEP_ALIVE))
                 {
                     fprintf(stderr, "Error sending keepalive\n");
@@ -719,17 +741,17 @@ int hub_logic_sender(init_params_client params, connection_context context, int 
                     shmdt(shm_ptr);
                     return 1;
                 }
-                if (next_action[1] == HUB_DELIVERY && replenish())
-                {
-                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                             get_identifiers()->client_id);
-                    if (message_sender(params, context_hub, HUB_REQUEST_STOCK))
-                    {
-                        fprintf(stderr, "Error sending request for supply\n");
-                        shmdt(shm_ptr);
-                        return 1;
-                    }
-                }
+                // if (next_action[1] == HUB_DELIVERY && replenish())
+                // {
+                //     log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                //              get_identifiers()->client_id);
+                //     if (message_sender(params, context_hub, HUB_REQUEST_STOCK))
+                //     {
+                //         fprintf(stderr, "Error sending request for supply\n");
+                //         shmdt(shm_ptr);
+                //         return 1;
+                //     }
+                // }
             }
             if (finish)
             {

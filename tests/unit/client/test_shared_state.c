@@ -5,6 +5,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define WATER "water"
+#define FOOD "food"
+#define MEDICINE "medicine"
+#define GUNS "guns"
+#define AMMO "ammo"
+#define TOOLS "tools"
+#define SHM_SIZE 1024 // Segment size for shared memory (may be adjusted for a int)
+#define SHM_KEY 50
+#define SEM_KEY 51
+#define SEM_NUM 0
+#define SEM_READER 1
+
+#define WAREHOUSE_MAX 500
+#define HUB_MAX 200
+#define WAREHOUSE_MIN WAREHOUSE_MAX * 0.2
+#define HUB_MIN HUB_MAX * 0.2
+#define RELATION 5 // Relation between warehouse and hub quantities
+#define T_CONST 60
+#define REPLENISH_TIME 1
+#define DEMAND_HUB 80 / T_CONST
+
 void setUp(void)
 {
     set_client_id("test_client");
@@ -28,7 +49,7 @@ void test_inventory_initialization_warehouse(void)
     TEST_ASSERT_NOT_NULL(inv);
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        TEST_ASSERT_EQUAL_INT(100, inv[i].quantity);
+        TEST_ASSERT_EQUAL_INT(WAREHOUSE_MAX, inv[i].quantity);
     }
     free(inv);
 }
@@ -51,7 +72,7 @@ void test_get_inventory(void)
     TEST_ASSERT_NOT_NULL(inv);
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        TEST_ASSERT_EQUAL_INT(100, inv[i].quantity);
+        TEST_ASSERT_EQUAL_INT(WAREHOUSE_MAX, inv[i].quantity);
     }
     free(inv);
 }
@@ -85,7 +106,7 @@ void test_set_inventory_to_send(void)
     inventory_item* inv = get_inventory();
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        TEST_ASSERT_EQUAL_INT(100 - items_to_send[i].quantity, inv[i].quantity);
+        TEST_ASSERT_EQUAL_INT(WAREHOUSE_MAX - items_to_send[i].quantity, inv[i].quantity);
     }
     free(inv);
 }
@@ -98,7 +119,7 @@ void test_set_inventory(void)
     inventory_item* inv = get_inventory();
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        TEST_ASSERT_LESS_OR_EQUAL_INT(100, inv[i].quantity);
+        TEST_ASSERT_LESS_OR_EQUAL_INT(WAREHOUSE_MAX, inv[i].quantity);
     }
     free(inv);
 }
