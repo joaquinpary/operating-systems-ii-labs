@@ -209,8 +209,12 @@ void tcp_session::close_connection(const std::string& reason)
 // Implementación de udp_server
 udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
                        database_manager& db_manager, config& config_params)
-    : m_socket(io_context, endpoint), m_config_params(config_params), m_database_manager(db_manager)
+    : m_socket(io_context), m_config_params(config_params), m_database_manager(db_manager)
 {
+    m_socket.open(endpoint.protocol());
+    m_socket.set_option(asio::socket_base::reuse_address(true));
+    m_socket.bind(endpoint);
+
     do_receive();
 }
 
@@ -227,6 +231,11 @@ void udp_server::do_receive()
             char* type = get_type(received_data_str.c_str()); // <- ¡No te olvides de hacer free!
 
             // Si el mensaje es de autenticación, lo procesamos primero
+            if (type == nullptr)
+            {
+                do_receive();
+                return;
+            }
             if (strcmp(type, "client_auth_request") == 0)
             {
                 do_auth_udp(received_data_str, m_sender_endpoint);
@@ -431,6 +440,7 @@ bool udp_server::register_auth_attempt(const std::string& username)
     {
         if (m_auth_attempts_map.size() >= m_config_params.max_auth_attempts_map_size)
         {
+            std::cout << "Max auth attempts map size reached, removing oldest entry\n" << std::flush;
             const std::string& oldest = m_auth_attempts_fifo.front();
             m_auth_attempts_map.erase(oldest);
             m_auth_attempts_fifo.pop();
@@ -483,27 +493,44 @@ void udp_server::start_udp_ack_timer(const std::string& username)
 }
 
 // Implementación de server
+// server::server(asio::io_context& io_context, config& config_params)
+//     : m_io_context(io_context),
+
+//       m_config_params(config_params),
+
+//       //   m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 9999)),
+//       m_tcp4_acceptor(io_context,
+//                       asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port)),
+
+//       //  m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v6(), 9999)),
+//       m_tcp6_acceptor(io_context,
+//                       asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port)),
+
+//       //   m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 9999), m_database_manager),
+//       m_udp4_server(io_context,
+//                     asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port),
+//                     m_database_manager, config_params),
+
+//       //  m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v6(), 9999), m_database_manager)
+//       m_udp6_server(io_context,
+//                     asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port),
+//                     m_database_manager, config_params)
+
 server::server(asio::io_context& io_context, config& config_params)
-    : m_io_context(io_context),
-
-      m_config_params(config_params),
-
-      //   m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 9999)),
+    : m_io_context(io_context), m_config_params(config_params),
+      // TCP IPv4
       m_tcp4_acceptor(io_context,
-                      asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port)),
-
-      //  m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v6(), 9999)),
+                      asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port_tcp_v4)),
+      // TCP IPv6
       m_tcp6_acceptor(io_context,
-                      asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port)),
-
-      //   m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 9999), m_database_manager),
+                      asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port_tcp_v6)),
+      // UDP IPv4
       m_udp4_server(io_context,
-                    asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port),
+                    asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port_udp_v4),
                     m_database_manager, config_params),
-
-      //  m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v6(), 9999), m_database_manager)
+      // UDP IPv6
       m_udp6_server(io_context,
-                    asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port),
+                    asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port_udp_v6),
                     m_database_manager, config_params)
 
 {

@@ -29,17 +29,24 @@ config config::load_config_from_file(const std::string& filepath)
 
     cJSON* ip_v4 = cJSON_GetObjectItemCaseSensitive(json, "ip_v4");
     cJSON* ip_v6 = cJSON_GetObjectItemCaseSensitive(json, "ip_v6");
-    cJSON* port = cJSON_GetObjectItemCaseSensitive(json, "port");
+    cJSON* port_tcp_v4 = cJSON_GetObjectItemCaseSensitive(json, "port_tcp_v4");
+    cJSON* port_tcp_v6 = cJSON_GetObjectItemCaseSensitive(json, "port_tcp_v6");
+    cJSON* port_udp_v4 = cJSON_GetObjectItemCaseSensitive(json, "port_udp_v4");
+    cJSON* port_udp_v6 = cJSON_GetObjectItemCaseSensitive(json, "port_udp_v6");
     cJSON* ack_timeout = cJSON_GetObjectItemCaseSensitive(json, "ack_timeout");
     cJSON* max_auth_attempts = cJSON_GetObjectItemCaseSensitive(json, "max_auth_attempts");
     cJSON* max_auth_attempts_map_size = cJSON_GetObjectItemCaseSensitive(json, "max_auth_attempts_map_size");
 
-    if (cJSON_IsString(ip_v4) && cJSON_IsString(ip_v6) && cJSON_IsNumber(port) && cJSON_IsNumber(ack_timeout) &&
+    if (cJSON_IsString(ip_v4) && cJSON_IsString(ip_v6) && cJSON_IsNumber(port_tcp_v4) && cJSON_IsNumber(port_tcp_v6) &&
+        cJSON_IsNumber(port_udp_v4) && cJSON_IsNumber(port_udp_v6) && cJSON_IsNumber(ack_timeout) &&
         cJSON_IsNumber(max_auth_attempts) && cJSON_IsNumber(max_auth_attempts_map_size))
     {
         cfg.ip_v4 = ip_v4->valuestring;
         cfg.ip_v6 = ip_v6->valuestring;
-        cfg.port = port->valueint;
+        cfg.port_tcp_v4 = port_tcp_v4->valueint;
+        cfg.port_tcp_v6 = port_tcp_v6->valueint;
+        cfg.port_udp_v4 = port_udp_v4->valueint;
+        cfg.port_udp_v6 = port_udp_v6->valueint;
         cfg.ack_timeout = ack_timeout->valueint;
         cfg.max_auth_attempts = max_auth_attempts->valueint;
         cfg.max_auth_attempts_map_size = max_auth_attempts_map_size->valueint;
