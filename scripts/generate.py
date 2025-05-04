@@ -10,8 +10,19 @@ def deterministic_password(client_id):
     random.seed(client_id)
     return ''.join(random.choices(string.ascii_letters + string.digits, k=10))
 
+def get_port(protocol, version):
+    if protocol == "tcp" and version == "ipv4":
+        return "9999"
+    elif protocol == "tcp" and version == "ipv6":
+        return "9998"
+    elif protocol == "udp" and version == "ipv4":
+        return "9997"
+    elif protocol == "udp" and version == "ipv6":
+        return "9996"
+    else:
+        raise ValueError("Invalid protocol/version combination")
+
 host = "dhl_server"
-port = "9999"
 PROTOCOLS = ["tcp", "udp"]
 VERSIONS = ["ipv4", "ipv6"]
 
@@ -24,6 +35,7 @@ for i in range(1, NUM_WAREHOUSES + 1):
     password = deterministic_password(client_id)
     protocol = random.choice(PROTOCOLS)
     version = random.choice(VERSIONS)
+    port = get_port(protocol, version)
     entry = {
         "client_id": client_id,
         "username": username,

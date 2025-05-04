@@ -17,8 +17,10 @@ services:
     networks:
       - dhl_net
     ports:
-      - "9999:9999/udp"
       - "9999:9999/tcp"
+      - "9998:9998/udp"
+      - "9997:9997/tcp"
+      - "9996:9996/udp"
 
   client:
     build:
