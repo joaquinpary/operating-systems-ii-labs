@@ -24,13 +24,12 @@ typedef struct
 {
     inventory_item items[ITEMS];
     inventory_item items_to_send[ITEMS];
-    int finish;
-    int timer_tick;
-    int next_action[ACTIONS];
 } shared_data;
 
 void sem_wait();
 void sem_signal();
+// void sem_wait_sender();
+// void sem_signal_sender();
 int init_shared_memory();
 void cleanup_shared_memory();
 shared_data* get_shared_data();

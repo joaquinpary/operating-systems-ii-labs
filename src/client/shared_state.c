@@ -20,7 +20,7 @@
 #define SHM_KEY 50
 #define SEM_KEY 51
 #define SEM_NUM 0
-#define SEM_READER 1
+#define SEM_SENDER 1
 
 #define WAREHOUSE_MAX 500
 #define HUB_MAX 200
@@ -46,6 +46,18 @@ void sem_signal()
     struct sembuf sb = {SEM_NUM, 1, 0};
     semop(semid, &sb, 1);
 }
+
+// void sem_wait_sender()
+// {
+//     struct sembuf sb = {SEM_SENDER, -1, 0};
+//     semop(semid, &sb, 1);
+// }
+
+// void sem_signal_sender()
+// {
+//     struct sembuf sb = {SEM_SENDER, 1, 0};
+//     semop(semid, &sb, 1);
+// }
 
 int init_shared_memory()
 {

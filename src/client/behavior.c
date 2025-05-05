@@ -477,137 +477,25 @@ int* message_receiver(char* response, init_params_client params, connection_cont
 
 int warehouse_logic_sender(init_params_client params, connection_context context, int time, int finish)
 {
-    pid_t pid = fork();
-
-    if (pid == 0)
+    while (1)
     {
-        shared_data* shm_ptr = get_shared_data();
-        int semid = get_semaphore_id();
-        if (semid == -1 || shm_ptr == NULL)
+        if (replenish())
         {
-            fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-            return 1;
+            log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                        get_identifiers()->client_id);
+            if (message_sender(params, context, WAREHOUSE_REQUEST_STOCK)) return 1;
         }
-        while (1)
-        {
-            sleep(1);
-            sem_wait();
-            shm_ptr->timer_tick++;
-            sem_signal();
-            if (finish)
-            {
-                shmdt(shm_ptr);
-                break;
-            }
-        }
-        exit(EXIT_SUCCESS);
+        if (message_sender(params, context, CLIENT_KEEP_ALIVE)) return 1;
+        if (message_sender(params, context, CLIENT_INVENTORY_UPDATE)) return 1;
+        if (finish) break;   
+        sleep(60);
     }
-    else if (pid > 0)
-    {
-        shared_data* shm_ptr = get_shared_data();
-        int semid = get_semaphore_id();
-        if (semid == -1 || shm_ptr == NULL)
-        {
-            fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-            return 1;
-        }
-        connection_context context_warehouse = context;
-        int timer_tick = 0;
-        int request_stock = 0;
-        int warehouse_load_stock = 0;
-        int request_stock_from_hub = 0;
-        int* next_action = malloc(ACTIONS * sizeof(int));
-        if (next_action == NULL)
-        {
-            fprintf(stderr, "Error allocating memory for next_action\n");
-            shmdt(shm_ptr);
-            return 1;
-        }
-        while (1)
-        {
-            sem_wait();
-            timer_tick = shm_ptr->timer_tick;
-            next_action[0] = shm_ptr->next_action[0];
-            next_action[1] = shm_ptr->next_action[1];
-            if (shm_ptr->timer_tick == time)
-                shm_ptr->timer_tick = 0;
-            sem_signal();
-            if (timer_tick >= time || finish)
-            {
-                if (replenish())
-                {
-                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                             get_identifiers()->client_id);
-                    if (message_sender(params, context_warehouse, WAREHOUSE_REQUEST_STOCK))
-                    {
-                        fprintf(stderr, "Error sending infection alert\n");
-                        shmdt(shm_ptr);
-                        return 1;
-                    }
-                }
-                if (message_sender(params, context_warehouse, CLIENT_KEEP_ALIVE))
-                {
-                    fprintf(stderr, "Error sending keepalive\n");
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-                if (message_sender(params, context_warehouse, CLIENT_INVENTORY_UPDATE))
-                {
-                    fprintf(stderr, "Error sending inventory update\n");
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-            }
-
-            if (next_action[0] == REPLY)
-            {
-                sem_wait();
-                shm_ptr->next_action[0] = NOTHING;
-                sem_signal();
-                if (message_sender(params, context_warehouse, next_action[1]))
-                {
-                    fprintf(stderr, "Error sending inventory update\n");
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-                // if (next_action[1] == WAREHOUSE_SEND_STOCK_TO_HUB && replenish())
-                // {
-                //     log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                //              get_identifiers()->client_id);
-                //     if (message_sender(params, context_warehouse, WAREHOUSE_REQUEST_STOCK))
-                //     {
-                //         fprintf(stderr, "Error sending request for supply\n");
-                //         shmdt(shm_ptr);
-                //         return 1;
-                //     }
-                // }
-            }
-            if (finish)
-            {
-                shmdt(shm_ptr);
-                break;
-            }
-        }
-    }
-    else
-    {
-        perror("Error en fork()");
-        return 1;
-    }
-
     return 0;
 }
 
 int warehouse_logic_receiver(init_params_client params, connection_context context, int finish)
 {
     char* recv = NULL;
-    shared_data* shm_ptr = get_shared_data();
-    int semid = get_semaphore_id();
-    if (semid == -1 || shm_ptr == NULL)
-    {
-        fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-        return 1;
-    }
     while (1)
     {
         recv = receiver(context, params.connection_params.protocol);
@@ -617,168 +505,38 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
             return 1;
         }
         int* next_action = message_receiver(recv, params, context);
-        sem_wait();
-        shm_ptr->next_action[0] = next_action[0];
-        shm_ptr->next_action[1] = next_action[1];
-        sem_signal();
+        if (next_action[0] == REPLY)
+        {
+            next_action[0] = NOTHING;
+            if (message_sender(params, context, next_action[1])) return 1;
+        }
         if (finish)
             break;
     }
-    shmdt(shm_ptr);
     return 0;
 }
 
 int hub_logic_sender(init_params_client params, connection_context context, int time, int finish)
 {
-    pid_t pid = fork();
-
-    if (pid == 0)
-    {
-        shared_data* shm_ptr = get_shared_data();
-        int semid = get_semaphore_id();
-        if (semid == -1 || shm_ptr == NULL)
+    while (1)
+    {   
+        if (replenish())
         {
-            fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-            return 1;
+            log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                        get_identifiers()->client_id);
+            if (message_sender(params, context, HUB_REQUEST_STOCK)) return 1;
         }
-        while (1)
-        {
-            sleep(1);
-            sem_wait();
-            shm_ptr->timer_tick++;
-            sem_signal();
-            if (finish)
-            {
-                shmdt(shm_ptr);
-                break;
-            }
-        }
-        exit(EXIT_SUCCESS);
+        if (message_sender(params, context, CLIENT_KEEP_ALIVE)) return 1;
+        if (message_sender(params, context, CLIENT_INVENTORY_UPDATE)) return 1;
+        if (finish) break;   
+        sleep(60);
     }
-    else if (pid > 0)
-    {
-        shared_data* shm_ptr = get_shared_data();
-        int semid = get_semaphore_id();
-        if (semid == -1 || shm_ptr == NULL)
-        {
-            fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-            return 1;
-        }
-        connection_context context_hub = context;
-        int timer_tick = 0;
-        int request_stock = 0;
-        int hub_load_stock = 0;
-        int hub_delivery = 0;
-        int* next_action = malloc(ACTIONS * sizeof(int));
-        if (next_action == NULL)
-        {
-            fprintf(stderr, "Error allocating memory for next_action\n");
-            shmdt(shm_ptr);
-            return 1;
-        }
-        inventory_item* items = malloc(sizeof(inventory_item) * get_inventory_size());
-        if (items == NULL)
-        {
-            fprintf(stderr, "Error allocating memory for items\n");
-            shmdt(shm_ptr);
-            return 1;
-        }
-        inventory_item* items_to_send = malloc(sizeof(inventory_item) * get_inventory_size());
-        if (items_to_send == NULL)
-        {
-            fprintf(stderr, "Error allocating memory for items_to_send\n");
-            free(items);
-            shmdt(shm_ptr);
-            return 1;
-        }
-        while (1)
-        {
-            sem_wait();
-            timer_tick = shm_ptr->timer_tick;
-            memcpy(items, shm_ptr->items, sizeof(inventory_item) * get_inventory_size());
-            memcpy(items_to_send, shm_ptr->items_to_send, sizeof(inventory_item) * get_inventory_size());
-            next_action[0] = shm_ptr->next_action[0];
-            next_action[1] = shm_ptr->next_action[1];
-            if (shm_ptr->timer_tick == time)
-                shm_ptr->timer_tick = 0;
-            sem_signal();
-            if (timer_tick >= time || finish)
-            {
-                if (replenish())
-                {
-                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                             get_identifiers()->client_id);
-                    if (message_sender(params, context_hub, HUB_REQUEST_STOCK))
-                    {
-                        fprintf(stderr, "Error sending infection alert\n");
-                        shmdt(shm_ptr);
-                        return 1;
-                    }
-                }
-                if (message_sender(params, context_hub, CLIENT_KEEP_ALIVE))
-                {
-                    fprintf(stderr, "Error sending keepalive\n");
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-                if (message_sender(params, context_hub, CLIENT_INVENTORY_UPDATE))
-                {
-                    fprintf(stderr, "Error sending inventory update\n");
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-            }
-
-            if (next_action[0] == REPLY)
-            {
-                sem_wait();
-                shm_ptr->next_action[0] = NOTHING;
-                sem_signal();
-                if (message_sender(params, context_hub, next_action[1]))
-                {
-                    fprintf(stderr, "Error sending inventory update\n");
-                    sem_signal();
-                    shmdt(shm_ptr);
-                    return 1;
-                }
-                // if (next_action[1] == HUB_DELIVERY && replenish())
-                // {
-                //     log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                //              get_identifiers()->client_id);
-                //     if (message_sender(params, context_hub, HUB_REQUEST_STOCK))
-                //     {
-                //         fprintf(stderr, "Error sending request for supply\n");
-                //         shmdt(shm_ptr);
-                //         return 1;
-                //     }
-                // }
-            }
-            if (finish)
-            {
-                shmdt(shm_ptr);
-                break;
-            }
-        }
-    }
-    else
-    {
-        perror("Error en fork()");
-        return 1;
-    }
-
     return 0;
 }
 
 int hub_logic_receiver(init_params_client params, connection_context context, int finish)
 {
     char* recv = NULL;
-    shared_data* shm_ptr = get_shared_data();
-    int semid = get_semaphore_id();
-    if (semid == -1 || shm_ptr == NULL)
-    {
-        fprintf(stderr, "Error getting shared memory or semaphore ID\n");
-        return 1;
-    }
     while (1)
     {
         recv = receiver(context, params.connection_params.protocol);
@@ -788,13 +546,13 @@ int hub_logic_receiver(init_params_client params, connection_context context, in
             return 1;
         }
         int* next_action = message_receiver(recv, params, context);
-        sem_wait();
-        shm_ptr->next_action[0] = next_action[0];
-        shm_ptr->next_action[1] = next_action[1];
-        sem_signal();
+        if (next_action[0] == REPLY)
+        {
+            next_action[0] = NOTHING;
+            if (message_sender(params, context, next_action[1])) return 1;
+        }
         if (finish)
             break;
     }
-    shmdt(shm_ptr);
     return 0;
 }

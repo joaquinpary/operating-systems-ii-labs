@@ -122,7 +122,7 @@ init_params_client load_config_client(const char* filename, const int index)
         {
             strncpy(params.client_type, WAREHOUSE, MIN_SIZE - 1);
         }
-        else if (strncmp(cJSON_GetStringValue(client_id), HUB, 9) == 0)
+        else if (strncmp(cJSON_GetStringValue(client_id), HUB, 3) == 0)
         {
             strncpy(params.client_type, HUB, MIN_SIZE - 1);
         }
@@ -1053,15 +1053,15 @@ char* serialize_client_auth_request(const client_auth_request* client_auth_reque
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1120,15 +1120,15 @@ char* serialize_server_auth_response(const server_auth_response* server_auth_res
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1188,15 +1188,15 @@ char* serialize_client_keepalive(const client_keepalive* client_keepalive)
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1278,15 +1278,15 @@ char* serialize_client_inventory_update(const client_inventory_update* client_in
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1344,15 +1344,15 @@ char* serialize_server_emergency_alert(const server_emergency_alert* server_emer
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1412,15 +1412,15 @@ char* serialize_client_acknowledgment(const client_acknowledgment* client_acknow
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1478,15 +1478,15 @@ char* serialize_client_infection_alert(const client_infection_alert* client_infe
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1568,15 +1568,15 @@ char* serialize_server_w_stock_hub(const server_w_stock_hub* server_w_stock_hub,
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1661,15 +1661,15 @@ char* serialize_warehouse_send_stock_to_hub(const warehouse_send_stock_to_hub* w
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1753,15 +1753,15 @@ char* serialize_warehouse_request_stock(const warehouse_request_stock* warehouse
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1843,15 +1843,15 @@ char* serialize_server_w_stock_warehouse(const server_w_stock_warehouse* server_
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1937,15 +1937,15 @@ char* serialize_hub_request_stock(const hub_request_stock* hub_request_stock, co
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -2027,15 +2027,15 @@ char* serialize_server_h_send_stock(const server_h_send_stock* server_h_send_sto
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
