@@ -1,5 +1,4 @@
 #!/bin/bash
-echo "rEstoy en: $(pwd)"
 case "$1" in
     client)
         for i in $(seq 0 1999); do # (seq 1 2000)
@@ -16,4 +15,3 @@ case "$1" in
     exit 1
     ;;
 esac
-

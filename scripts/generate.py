@@ -2,8 +2,9 @@ import json
 import random
 import string
 
-NUM_WAREHOUSES = 500
-NUM_HUBS = 1500
+CLIENTS = 2000
+NUM_WAREHOUSES = int(CLIENTS*0.20)
+NUM_HUBS = int(CLIENTS*0.80)
 FAKE_RATE = 0.05
 
 def deterministic_password(client_id):

@@ -1278,15 +1278,15 @@ char* serialize_client_inventory_update(const client_inventory_update* client_in
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
+    char* debug_json = cJSON_Print(json);
+    if (!debug_json)
+    {
+        fprintf(stderr, "Error printing debug JSON object\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+    printf("Debug JSON: %s\n", debug_json);
+    free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }

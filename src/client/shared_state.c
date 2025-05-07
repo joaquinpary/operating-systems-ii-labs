@@ -9,6 +9,11 @@
 #include <sys/shm.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <math.h>
+
+#ifndef M_PI
+#define M_PI 3.14
+#endif
 
 #define WATER "water"
 #define FOOD "food"
@@ -22,8 +27,8 @@
 #define SEM_NUM 0
 #define SEM_SENDER 1
 
-#define WAREHOUSE_MAX 500
-#define HUB_MAX 200
+#define WAREHOUSE_MAX 400
+#define HUB_MAX 100
 #define WAREHOUSE_MIN WAREHOUSE_MAX * 0.2
 #define HUB_MIN HUB_MAX * 0.2
 #define RELATION 5 // Relation between warehouse and hub quantities
@@ -299,6 +304,26 @@ int replenish()
         {
             return 1;
         }
+    }
+    return 0;
+}
+
+double get_uniform_random(double max, double min)
+{
+    double range = max - min;
+    return min + ((double)rand() / (double)RAND_MAX) * range;
+}
+
+int inventory_compsumption()
+{
+    int unit = 0;
+    for (int i = 0; i < get_inventory_size(); ++i)
+    {
+        unit = (int)get_uniform_random((DEMAND_HUB * 10) - 4, (DEMAND_HUB * 10) + 4);
+        sem_wait();
+        if(shm_ptr->items[i].quantity < unit) return 1;
+        shm_ptr->items[i].quantity -= unit;
+        sem_signal();
     }
     return 0;
 }

@@ -43,4 +43,6 @@ void calculate_parameters(double actors, double demand, double T, double rep_tim
 void set_inventory_to_send(inventory_item* items_to_send);
 void set_inventory(inventory_item* items);
 int replenish();
+double get_uniform_random(double min, double max);
+int inventory_compsumption();
 #endif

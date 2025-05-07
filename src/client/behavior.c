@@ -487,7 +487,7 @@ int warehouse_logic_sender(init_params_client params, connection_context context
         }
         if (message_sender(params, context, CLIENT_KEEP_ALIVE)) return 1;
         if (message_sender(params, context, CLIENT_INVENTORY_UPDATE)) return 1;
-        if (finish) break;   
+        if (finish) break;               
         sleep(60);
     }
     return 0;
@@ -518,18 +518,31 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
 
 int hub_logic_sender(init_params_client params, connection_context context, int time, int finish)
 {
+    int count = 60;
+    int next_compsumption = get_uniform_random(7, 13);
     while (1)
     {   
-        if (replenish())
+        if(--next_compsumption <= 0)
         {
-            log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                        get_identifiers()->client_id);
-            if (message_sender(params, context, HUB_REQUEST_STOCK)) return 1;
+            if(inventory_compsumption()) return 1;
+            next_compsumption = (int)get_uniform_random(7, 13);
+            log_info("Inventory consumption with ID: %s", get_identifiers()->client_id);
         }
-        if (message_sender(params, context, CLIENT_KEEP_ALIVE)) return 1;
-        if (message_sender(params, context, CLIENT_INVENTORY_UPDATE)) return 1;
-        if (finish) break;   
-        sleep(60);
+        if(count >= time)
+        {    
+            count = 0;
+            if (replenish())
+            {
+                log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                            get_identifiers()->client_id);
+                if (message_sender(params, context, HUB_REQUEST_STOCK)) return 1;
+            }
+            if (message_sender(params, context, CLIENT_KEEP_ALIVE)) return 1;
+            if (message_sender(params, context, CLIENT_INVENTORY_UPDATE)) return 1;
+            if (finish) break;   
+        }
+        sleep(1);
+        count++;
     }
     return 0;
 }
