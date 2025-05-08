@@ -1,6 +1,7 @@
 #include "shared_state.h"
 #include "config.h"
 #include "json_manager.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +10,6 @@
 #include <sys/shm.h>
 #include <sys/wait.h>
 #include <time.h>
-#include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14
@@ -321,7 +321,8 @@ int inventory_compsumption()
     {
         unit = (int)get_uniform_random((DEMAND_HUB * 10) - 4, (DEMAND_HUB * 10) + 4);
         sem_wait();
-        if(shm_ptr->items[i].quantity < unit) return 1;
+        if (shm_ptr->items[i].quantity < unit)
+            return 1;
         shm_ptr->items[i].quantity -= unit;
         sem_signal();
     }

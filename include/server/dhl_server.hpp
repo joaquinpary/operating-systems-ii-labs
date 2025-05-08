@@ -13,25 +13,30 @@
 
 const size_t BUFFER_SIZE = 1024;
 
-struct last_ongoing_message {
-  std::string data;
-  std::chrono::steady_clock::time_point timestamp;
-  asio::steady_timer ack_timer;
-  bool waiting_ack = false;
-  
-  last_ongoing_message(asio::io_context& io_context)
-    : ack_timer(io_context) {}
+struct last_ongoing_message
+{
+    std::string data;
+    std::chrono::steady_clock::time_point timestamp;
+    asio::steady_timer ack_timer;
+    bool waiting_ack = false;
+
+    last_ongoing_message(asio::io_context& io_context) : ack_timer(io_context)
+    {
+    }
 };
 
-struct udp_client {
-  bool authenticated = false;
-  std::string username;
-  std::string client_type;
-  asio::ip::udp::endpoint endpoint;
-  std::unique_ptr<last_ongoing_message> udp_last_ongoing_message;
+struct udp_client
+{
+    bool authenticated = false;
+    std::string username;
+    std::string client_type;
+    asio::ip::udp::endpoint endpoint;
+    std::unique_ptr<last_ongoing_message> udp_last_ongoing_message;
 
-  udp_client(asio::io_context& io_context)
-    : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context)) {}
+    udp_client(asio::io_context& io_context)
+        : udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context))
+    {
+    }
 };
 
 class tcp_session : public std::enable_shared_from_this<tcp_session>
@@ -43,9 +48,10 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
   private:
     void do_auth();
     void do_read();
-    void do_write_ack(const std::string& message);
+    void do_write(const std::string& message);
     void close_connection(const std::string& reason);
     void start_ack_timer();
+    void handle_tcp_message(const std::string& msg);
 
     config m_config_params;
 
@@ -73,6 +79,7 @@ class udp_server
     bool register_auth_attempt(const std::string& username);
     void start_udp_ack_timer(const std::string& username);
     bool check_auth(const std::string& username);
+    bool handle_udp_message(const std::string& message, const asio::ip::udp::endpoint& sender_endpoint);
 
     config m_config_params;
 

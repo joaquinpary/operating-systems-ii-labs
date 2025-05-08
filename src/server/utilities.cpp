@@ -18,3 +18,18 @@ int get_message_code(const std::string& type_str)
         return HUB_REQUEST_STOCK;
     return -1;
 }
+
+std::string build_auth_response_json(bool success, const std::string& message)
+{
+    server_auth_response resp =
+        create_server_auth_response(success ? "success" : "failure", success ? "token" : "", message.c_str());
+    char* serialized = serialize_server_auth_response(&resp);
+    std::string json(serialized);
+    free(serialized);
+    return json;
+}
+
+void copy_response_to_buffer(const std::string& json, std::array<char, DATA_BUFFER_SIZE>& buffer)
+{
+    std::copy(json.begin(), json.end(), buffer.begin());
+}

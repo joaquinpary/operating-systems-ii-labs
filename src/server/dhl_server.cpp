@@ -31,57 +31,18 @@ void tcp_session::do_auth()
 
         client_auth_request req = deserialize_client_auth_request(m_data.data());
 
-        std::cout << "Received auth request: " << std::string(m_data.data(), length) << "\n" << std::flush;
-
-        std::cout << "Username: " << req.payload.username << "\n" << std::flush;
-        std::cout << "Password: " << req.payload.password << "\n" << std::flush;
         bool valid_credentials = m_database_manager.authenticate_client(req.payload.username, req.payload.password);
+        std::string json = build_auth_response_json(valid_credentials, valid_credentials ? "Logged in successfully"
+                                                                                         : "Invalid credentials");
+        copy_response_to_buffer(json, m_data);
 
-        if (!valid_credentials)
+        if (m_auth_attempts > m_config_params.max_auth_attempts)
         {
-            m_auth_attempts++;
-            if (m_auth_attempts > m_config_params.max_auth_attempts)
-            {
-                close_connection("Max authentication attempts reached.");
-                return;
-            }
-            else
-            {
-                server_auth_response resp = create_server_auth_response("failure", // status
-                                                                        "",        // session_token vacío
-                                                                        "Invalid credentials");
-                char* serialized = serialize_server_auth_response(&resp);
-                std::string json_resp(serialized);
-                free(serialized);
-
-                std::copy(json_resp.begin(), json_resp.end(), m_data.begin());
-
-                std::cout << "Sent: " << json_resp << "\n" << std::flush;
-
-                asio::async_write(m_socket, asio::buffer(m_data, json_resp.size()),
-                                  [this, self, length](asio::error_code ec, size_t) {
-                                      if (ec)
-                                      {
-                                          std::cerr << "Failed to send the data: " << ec.message() << "\n";
-                                      }
-                                  });
-
-                // Volver a esperar otro intento
-                do_auth();
-                return;
-            }
+            close_connection("Max authentication attempts reached.");
+            return;
         }
 
-        server_auth_response resp = create_server_auth_response("success", "token", "Logged in successfully");
-        char* serialized = serialize_server_auth_response(&resp);
-        std::string json_resp(serialized);
-        free(serialized);
-
-        std::copy(json_resp.begin(), json_resp.end(), m_data.begin());
-
-        std::cout << "Sent: " << json_resp << "\n" << std::flush;
-
-        asio::async_write(m_socket, asio::buffer(m_data, json_resp.size()),
+        asio::async_write(m_socket, asio::buffer(m_data, json.size()),
                           [this, self, length](asio::error_code ec, size_t) {
                               if (ec)
                               {
@@ -89,8 +50,66 @@ void tcp_session::do_auth()
                               }
                           });
 
-        do_read();
+        m_auth_attempts++;
+
+        if (valid_credentials)
+        {
+            do_read();
+        }
+        else
+        {
+            do_auth();
+        }
     });
+}
+
+void tcp_session::handle_tcp_message(const std::string& message)
+{
+
+    char* type = get_type(message.c_str());
+    if (!type)
+    {
+        free(type);
+        return;
+    }
+
+    int type_code = get_message_code(type);
+    free(type);
+
+    switch (type_code)
+    {
+    case CLIENT_KEEPALIVE: {
+        // Handle keepalive message
+        break;
+    }
+    case CLIENT_INVENTORY_UPDATE:
+        // Handle inventory update message
+        break;
+    case CLIENT_ACKNOWLEDGMENT: {
+        client_acknowledgment acknowledgment = deserialize_client_acknowledgment(m_data.data());
+        // Process acknowledgment message
+        client_acknowledgment ack = deserialize_client_acknowledgment(m_data.data());
+        m_last_ongoing_message.waiting_ack = false;
+        m_last_ongoing_message.data.clear();
+        m_last_ongoing_message.ack_timer.cancel();
+        break;
+    }
+    case CLIENT_INFECTION_ALERT:
+        // Handle infection alert message
+        break;
+    case WAREHOUSE_SEND_STOCK_TO_HUB:
+        // Handle send stock to hub message
+        break;
+    case WAREHOUSE_REQUEST_STOCK:
+        // Handle request stock message
+        break;
+    case HUB_REQUEST_STOCK:
+        // Handle hub request stock message
+        break;
+    default:
+        std::cerr << "Unknown TCP message type: " << type_code << "\n";
+        break;
+    }
 }
 
 void tcp_session::do_read()
@@ -99,88 +118,15 @@ void tcp_session::do_read()
     m_socket.async_read_some(asio::buffer(m_data), [this, self](asio::error_code ec, size_t length) {
         if (!ec)
         {
-            std::cout << "Received: " << std::string(m_data.data(), length) << "\n" << std::flush;
-
-            char* type = get_type(m_data.data());
-            int type_code = get_message_code(type);
-
-            switch (type_code)
-            {
-            case CLIENT_KEEPALIVE: {
-                client_keepalive keepalive = deserialize_client_keepalive(m_data.data());
-                // Process keepalive message
-                server_emergency_alert alert = create_server_emergency_alert("infection_detected");
-                char* serialized_alert = serialize_server_emergency_alert(&alert);
-                std::string json_alert(serialized_alert);
-                free(serialized_alert);
-
-                do_write_ack(json_alert);
-
-                break;
-            }
-            case CLIENT_INVENTORY_UPDATE: {
-                client_inventory_update inventory_update = deserialize_client_inventory_update(m_data.data());
-                // Process inventory update message
-                break;
-            }
-            case CLIENT_ACKNOWLEDGMENT: {
-                client_acknowledgment acknowledgment = deserialize_client_acknowledgment(m_data.data());
-                // Process acknowledgment message
-                client_acknowledgment ack = deserialize_client_acknowledgment(m_data.data());
-                m_last_ongoing_message.waiting_ack = false;
-                m_last_ongoing_message.data.clear();
-                m_last_ongoing_message.ack_timer.cancel();
-                break;
-            }
-            case CLIENT_INFECTION_ALERT: {
-                client_infection_alert infection_alert = deserialize_client_infection_alert(m_data.data());
-                // Process infection alert message
-                break;
-            }
-            case WAREHOUSE_SEND_STOCK_TO_HUB: {
-                warehouse_send_stock_to_hub send_stock = deserialize_warehouse_send_stock_to_hub(m_data.data());
-                // Process send stock to hub message
-                break;
-            }
-            case WAREHOUSE_REQUEST_STOCK: {
-                warehouse_request_stock request_stock = deserialize_warehouse_request_stock(m_data.data());
-                // Process request stock message
-                break;
-            }
-            case HUB_REQUEST_STOCK: {
-                hub_request_stock hub_request = deserialize_hub_request_stock(m_data.data());
-                // Process hub request stock message
-                break;
-            }
-            default:
-                break;
-            }
+            std::string received_data_str(m_data.data(), length);
+            handle_tcp_message(received_data_str);
 
             do_read();
         }
     });
 }
 
-// void tcp_session::do_write(size_t length)
-// {
-//     auto self(shared_from_this());
-//     std::cout << "Sent: " << std::string(m_data.data(), length) << "\n" << std::flush;
-//     asio::async_write(m_socket, asio::buffer(m_data, length), [this, self, length](asio::error_code ec, size_t) {
-//         if (ec)
-//         {
-//             std::cerr << "Failed to send the data: " << ec.message() << "\n";
-//         }
-//         else
-//         {
-//             m_last_ongoing_message.data = std::string(m_data.data(), length);
-//             m_last_ongoing_message.waiting_ack = true;
-//             m_last_ongoing_message.timestamp = std::chrono::steady_clock::now();
-//             start_ack_timer();
-//         }
-//     });
-// }
-
-void tcp_session::do_write_ack(const std::string& message)
+void tcp_session::do_write(const std::string& message)
 {
     auto self(shared_from_this());
     std::cout << "Sent: " << message << "\n" << std::flush;
@@ -218,100 +164,88 @@ udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoi
     do_receive();
 }
 
+bool udp_server::handle_udp_message(const std::string& message, const asio::ip::udp::endpoint& sender_endpoint)
+{
+    char* type = get_type(message.c_str());
+    if (!type)
+    {
+        free(type);
+        return 1;
+    }
+    if (strcmp(type, "client_auth_request") == 0)
+    {
+        do_auth_udp(message, m_sender_endpoint);
+        free(type);
+        return 0;
+    }
+
+    int type_code = get_message_code(type);
+    free(type);
+    switch (type_code)
+    {
+    case CLIENT_KEEPALIVE: {
+        client_keepalive keepalive = deserialize_client_keepalive(message.c_str());
+
+        if (!check_auth(keepalive.payload.username))
+        {
+            return 1;
+        }
+        break;
+        //
+    }
+    case CLIENT_INVENTORY_UPDATE: {
+        client_inventory_update inventory = deserialize_client_inventory_update(message.c_str());
+        // Procesar update
+        break;
+    }
+    case CLIENT_ACKNOWLEDGMENT: {
+        client_acknowledgment ack = deserialize_client_acknowledgment(message.c_str());
+        auto iterator = m_client_map.find(ack.payload.username);
+        if (iterator == m_client_map.end())
+        {
+            return 1;
+        }
+        udp_client& client = *iterator->second;
+        client.udp_last_ongoing_message->waiting_ack = false;
+        client.udp_last_ongoing_message->data.clear();
+        client.udp_last_ongoing_message->ack_timer.cancel();
+        break;
+    }
+    case CLIENT_INFECTION_ALERT: {
+        client_infection_alert alert = deserialize_client_infection_alert(message.c_str());
+        // Procesar alerta
+        break;
+    }
+    case WAREHOUSE_SEND_STOCK_TO_HUB: {
+        warehouse_send_stock_to_hub msg = deserialize_warehouse_send_stock_to_hub(message.c_str());
+        // Procesar envío
+        break;
+    }
+    case WAREHOUSE_REQUEST_STOCK: {
+        warehouse_request_stock req = deserialize_warehouse_request_stock(message.c_str());
+        // Procesar request
+        break;
+    }
+    case HUB_REQUEST_STOCK: {
+        hub_request_stock hub_req = deserialize_hub_request_stock(message.c_str());
+        // Procesar hub request
+        break;
+    }
+    default:
+        std::cerr << "Mensaje desconocido recibido por UDP\n";
+        break;
+    }
+    return 0;
+}
+
 void udp_server::do_receive()
 {
-    std::cout << "Waiting for UDP messages...\n" << std::flush;
     m_socket.async_receive_from(asio::buffer(m_data), m_sender_endpoint, [this](asio::error_code ec, size_t length) {
         if (!ec)
         {
-
-            std::cout << "Received: " << std::string(m_data.data(), length) << "\n" << std::flush;
-
             std::string received_data_str(m_data.data(), length);
-            char* type = get_type(received_data_str.c_str()); // <- ¡No te olvides de hacer free!
 
-            // Si el mensaje es de autenticación, lo procesamos primero
-            if (type == nullptr)
-            {
-                do_receive();
-                return;
-            }
-            if (strcmp(type, "client_auth_request") == 0)
-            {
-                do_auth_udp(received_data_str, m_sender_endpoint);
-                free(type);
-                do_receive();
-                return;
-            }
-
-            int type_code = get_message_code(type);
-
-            switch (type_code)
-            {
-            case CLIENT_KEEPALIVE: {
-                client_keepalive keepalive = deserialize_client_keepalive(received_data_str.c_str());
-                // Procesar keepalive
-                if (!check_auth(keepalive.payload.username))
-                {
-                    free(type);
-                    do_receive();
-                    return;
-                }
-
-                server_emergency_alert alert = create_server_emergency_alert("infection_detected");
-                char* serialized_alert = serialize_server_emergency_alert(&alert);
-                std::string json_alert(serialized_alert);
-                free(serialized_alert);
-
-                do_send(json_alert, m_sender_endpoint, keepalive.payload.username);
-
-                break;
-            }
-            case CLIENT_INVENTORY_UPDATE: {
-                client_inventory_update inventory = deserialize_client_inventory_update(received_data_str.c_str());
-                // Procesar update
-                break;
-            }
-            case CLIENT_ACKNOWLEDGMENT: {
-                client_acknowledgment ack = deserialize_client_acknowledgment(received_data_str.c_str());
-                auto iterator = m_client_map.find(ack.payload.username);
-                if (iterator == m_client_map.end())
-                {
-                    return;
-                }
-                udp_client& client = *iterator->second;
-
-                client.udp_last_ongoing_message->waiting_ack = false;
-                client.udp_last_ongoing_message->data.clear();
-                client.udp_last_ongoing_message->ack_timer.cancel();
-                break;
-            }
-            case CLIENT_INFECTION_ALERT: {
-                client_infection_alert alert = deserialize_client_infection_alert(received_data_str.c_str());
-                // Procesar alerta
-                break;
-            }
-            case WAREHOUSE_SEND_STOCK_TO_HUB: {
-                warehouse_send_stock_to_hub msg = deserialize_warehouse_send_stock_to_hub(received_data_str.c_str());
-                // Procesar envío
-                break;
-            }
-            case WAREHOUSE_REQUEST_STOCK: {
-                warehouse_request_stock req = deserialize_warehouse_request_stock(received_data_str.c_str());
-                // Procesar request
-                break;
-            }
-            case HUB_REQUEST_STOCK: {
-                hub_request_stock hub_req = deserialize_hub_request_stock(received_data_str.c_str());
-                // Procesar hub request
-                break;
-            }
-            default:
-                std::cerr << "Mensaje desconocido recibido por UDP\n";
-                break;
-            }
-
-            free(type);
+            handle_udp_message(received_data_str, m_sender_endpoint);
         }
 
         do_receive();
@@ -345,22 +279,31 @@ void udp_server::do_send(const std::string& message, const asio::ip::udp::endpoi
                            });
 }
 
-// refactorizar esto para que no se repita el código de tcp
 void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sender_endpoint)
 {
-
     client_auth_request req = deserialize_client_auth_request(msg.c_str());
 
-    bool too_many_attempts = register_auth_attempt(req.payload.username);
-    if (too_many_attempts)
+    if (register_auth_attempt(req.payload.username))
     {
-        std::cerr << "Max auth attempts for: " << req.payload.username << "\n";
         return;
     }
 
-    bool valid_auth = m_database_manager.authenticate_client(req.payload.username, req.payload.password);
+    bool valid_credentials = m_database_manager.authenticate_client(req.payload.username, req.payload.password);
+    std::string json = build_auth_response_json(valid_credentials,
+                                                valid_credentials ? "Logged in successfully" : "Invalid credentials");
 
-    if (valid_auth)
+    auto send_buffer = std::make_shared<std::array<char, DATA_BUFFER_SIZE>>();
+    copy_response_to_buffer(json, *send_buffer);
+
+    m_socket.async_send_to(asio::buffer(*send_buffer, json.size()), sender_endpoint,
+                           [this](asio::error_code ec, size_t) {
+                               if (ec)
+                               {
+                                   std::cerr << "Failed to send the data: " << ec.message() << "\n";
+                               }
+                           });
+
+    if (valid_credentials)
     {
 
         m_auth_attempts_map.erase(req.payload.username);
@@ -369,51 +312,11 @@ void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sen
         client->username = req.payload.username;
         client->client_type = req.payload.type;
         client->endpoint = sender_endpoint;
-        // client.udp_last_ongoing_message = udp_last_ongoing_message(m_socket.get_executor());
         client->authenticated = true;
 
         m_client_map[req.payload.username] = std::move(client);
-
-        server_auth_response response = create_server_auth_response("success", "token", "Logged in successfully");
-        char* serialized = serialize_server_auth_response(&response);
-        std::string json_response(serialized);
-        free(serialized);
-
-        auto send_buffer = std::make_shared<std::array<char, BUFFER_SIZE>>();
-        std::copy(json_response.begin(), json_response.end(), send_buffer->begin());
-
-        std::cout << "Sent: " << json_response << "\n" << std::flush;
-
-        m_socket.async_send_to(asio::buffer(*send_buffer, json_response.size()), sender_endpoint,
-                               [this](asio::error_code ec, size_t) {
-                                   if (ec)
-                                   {
-                                       std::cerr << "Failed to send the data: " << ec.message() << "\n";
-                                   }
-                               });
-        return;
     }
-    else
-    {
-        server_auth_response response = create_server_auth_response("failure", "", "Invalid credentials");
-        char* serialized = serialize_server_auth_response(&response);
-        std::string json_response(serialized);
-        free(serialized);
 
-        auto send_buffer = std::make_shared<std::array<char, BUFFER_SIZE>>();
-        std::copy(json_response.begin(), json_response.end(), send_buffer->begin());
-
-        std::cout << "Sent: " << json_response << "\n" << std::flush;
-
-        m_socket.async_send_to(asio::buffer(*send_buffer, json_response.size()), sender_endpoint,
-                               [this](asio::error_code ec, size_t) {
-                                   if (ec)
-                                   {
-                                       std::cerr << "Failed to send the data: " << ec.message() << "\n";
-                                   }
-                               });
-        return;
-    }
     return;
 }
 
@@ -422,13 +325,11 @@ bool udp_server::check_auth(const std::string& username)
     auto iterator = m_client_map.find(username);
     if (iterator == m_client_map.end())
     {
-        std::cerr << "Client not authenticated: " << username << "\n";
         return false;
     }
     udp_client& client = *iterator->second;
     if (!client.authenticated)
     {
-        std::cerr << "Client not authenticated: " << username << "\n";
         return false;
     }
     return true;
@@ -493,29 +394,6 @@ void udp_server::start_udp_ack_timer(const std::string& username)
 }
 
 // Implementación de server
-// server::server(asio::io_context& io_context, config& config_params)
-//     : m_io_context(io_context),
-
-//       m_config_params(config_params),
-
-//       //   m_tcp4_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), 9999)),
-//       m_tcp4_acceptor(io_context,
-//                       asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port)),
-
-//       //  m_tcp6_acceptor(io_context, asio::ip::tcp::endpoint(asio::ip::tcp::v6(), 9999)),
-//       m_tcp6_acceptor(io_context,
-//                       asio::ip::tcp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port)),
-
-//       //   m_udp4_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v4(), 9999), m_database_manager),
-//       m_udp4_server(io_context,
-//                     asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v4), config_params.port),
-//                     m_database_manager, config_params),
-
-//       //  m_udp6_server(io_context, asio::ip::udp::endpoint(asio::ip::udp::v6(), 9999), m_database_manager)
-//       m_udp6_server(io_context,
-//                     asio::ip::udp::endpoint(asio::ip::make_address(config_params.ip_v6), config_params.port),
-//                     m_database_manager, config_params)
-
 server::server(asio::io_context& io_context, config& config_params)
     : m_io_context(io_context), m_config_params(config_params),
       // TCP IPv4
@@ -585,7 +463,7 @@ void tcp_session::start_ack_timer()
 
             if (elapsed.count() >= m_config_params.ack_timeout)
             {
-                do_write_ack(m_last_ongoing_message.data);
+                do_write(m_last_ongoing_message.data);
             }
         }
 

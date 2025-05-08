@@ -18,7 +18,7 @@ extern "C"
 #define SESSION_TOKEN_SIZE 37
 #define ITEM_TYPE 6
 
-// cambiar username por client_id
+    // cambiar username por client_id
     typedef struct
     {
         char host[BUFFER_SIZE];
@@ -98,7 +98,7 @@ extern "C"
 
     typedef struct
     {
-        //char client_id[MIN_SIZE];
+        // char client_id[MIN_SIZE];
         inventory_item items[ITEM_TYPE];
         char timestamp[TIMESTAMP_SIZE];
     } payload_server_w_stock_hub;
@@ -363,8 +363,8 @@ extern "C"
                                                                  const char* destination);
     server_client_alive create_server_client_alive(const char* username, const char* type, const char* status);
 
-#endif
-
 #ifdef __cplusplus
 }
+#endif
+
 #endif
