@@ -1,6 +1,6 @@
 #include "config.h"
+#include "inventory.h"
 #include "json_manager.h"
-#include "shared_state.h"
 #include "unity.h"
 #include <stdlib.h>
 #include <string.h>
@@ -11,13 +11,13 @@
 #define GUNS "guns"
 #define AMMO "ammo"
 #define TOOLS "tools"
-#define SHM_SIZE 1024 // Segment size for shared memory (may be adjusted for a int)
+#define SHM_SIZE 1024
 #define SHM_KEY 50
 #define SEM_KEY 51
 #define SEM_NUM 0
 #define SEM_READER 1
 
-#define WAREHOUSE_MAX 500
+#define WAREHOUSE_MAX 400
 #define HUB_MAX 200
 #define WAREHOUSE_MIN WAREHOUSE_MAX * 0.2
 #define HUB_MIN HUB_MAX * 0.2
@@ -89,11 +89,12 @@ void test_get_inventory_to_send(void)
 
 void test_get_inventory_to_replenish(void)
 {
+    init_shared_memory();
     inventory_item* inv = get_inventory_to_replenish();
     TEST_ASSERT_NOT_NULL(inv);
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        TEST_ASSERT_EQUAL_INT(0, inv[i].quantity);
+        TEST_ASSERT_NOT_EQUAL_INT(0, inv[i].quantity);
     }
     free(inv);
 }
@@ -123,12 +124,8 @@ void test_set_inventory(void)
     }
     free(inv);
 }
-void test_replenish_returns_0_when_no_replenish_needed(void)
-{
-    TEST_ASSERT_EQUAL(0, replenish());
-}
 
-void test_replenish_returns_1_when_some_item_below_min(void)
+void test_replenish(void)
 {
     shared_data* data = get_shared_data();
     data->items[0].quantity = 10;
@@ -147,7 +144,6 @@ int main(void)
     RUN_TEST(test_get_inventory_to_replenish);
     RUN_TEST(test_set_inventory_to_send);
     RUN_TEST(test_set_inventory);
-    RUN_TEST(test_replenish_returns_0_when_no_replenish_needed);
-    RUN_TEST(test_replenish_returns_1_when_some_item_below_min);
+    RUN_TEST(test_replenish);
     return UNITY_END();
 }

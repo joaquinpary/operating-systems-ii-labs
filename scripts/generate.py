@@ -3,8 +3,8 @@ import random
 import string
 
 CLIENTS = 2000
-NUM_WAREHOUSES = int(CLIENTS*0.20)
-NUM_HUBS = int(CLIENTS*0.80)
+NUM_WAREHOUSES = int(CLIENTS*0.5)
+NUM_HUBS = int(CLIENTS*0.5)
 FAKE_RATE = 0.05
 
 def deterministic_password(client_id):

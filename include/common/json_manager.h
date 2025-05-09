@@ -332,7 +332,8 @@ extern "C"
     char* serialize_server_transaction_history(const server_transaction_history* server_transaction_history,
                                                const int item_count);
     char* serialize_server_client_alive(const server_client_alive* server_client_alive);
-    client_auth_request create_client_auth_request(init_params_client params);
+    client_auth_request create_client_auth_request(const char* client_id, const char* client_type, const char* username,
+                                                   const char* password);
     server_auth_response create_server_auth_response(const char* status, const char* session_token,
                                                      const char* message);
     client_keepalive create_client_keepalive(const char* username, const char* session_token);

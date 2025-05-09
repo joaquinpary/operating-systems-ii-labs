@@ -41,10 +41,74 @@ void test_set_client_id_and_shm_path(void)
         fclose(f);
 }
 
+void test_set_client_type(void)
+{
+    const char* test_type = "warehouse";
+
+    set_client_type(test_type);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_type, id->client_type);
+}
+
+void test_set_protocol(void)
+{
+    const char* test_protocol = "tcp";
+
+    set_protocol(test_protocol);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_protocol, id->protocol);
+}
+
+void test_set_username(void)
+{
+    const char* test_username = "user";
+
+    set_username(test_username);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_username, id->username);
+}
+
+void test_set_password(void)
+{
+    const char* test_password = "pass";
+
+    set_password(test_password);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_password, id->password);
+}
+
+void test_set_params(void)
+{
+    init_params_client params = {
+        .client_id = "test_client",
+        .client_type = "warehouse",
+        .username = "user_test",
+        .password = "pass_test",
+        .connection_params = {.protocol = "tcp", .host = "localhost", .port = "8080"},
+    };
+
+    set_params(params);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(params.client_id, id->client_id);
+    TEST_ASSERT_EQUAL_STRING(params.client_type, id->client_type);
+    TEST_ASSERT_EQUAL_STRING(params.username, id->username);
+    TEST_ASSERT_EQUAL_STRING(params.password, id->password);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_set_session_token_and_get_identifiers);
     RUN_TEST(test_set_client_id_and_shm_path);
+    RUN_TEST(test_set_client_type);
+    RUN_TEST(test_set_protocol);
+    RUN_TEST(test_set_username);
+    RUN_TEST(test_set_password);
+    RUN_TEST(test_set_params);
     return UNITY_END();
 }

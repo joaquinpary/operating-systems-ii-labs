@@ -15,21 +15,21 @@
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int authenticate(init_params_client params, connection_context context);
+int authenticate(connection_context context);
 /* @brief
  * Function to send a keepalive message to the server.
  * @param params The parameters for the client initialization.
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_sender(init_params_client params, connection_context context, int time, int finish);
+int manager_sender(connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_receiver(init_params_client params, connection_context context, int finish);
+int manager_receiver(connection_context context, int finish);
 /* @brief
  * Function to send a message to the server.
  * @param context The connection context.
@@ -52,13 +52,13 @@ char* receiver(connection_context context, char* protocol);
  * @param type_message The type of message to send.
  * @return 0 on success, -1 on failure.
  */
-int message_sender(init_params_client params, connection_context context, int type_message);
+int message_sender(connection_context context, int type_message);
 /* @brief
  * Function to receive a message from the server.
  * @param response The response message buffer.
  * @return The received message buffer.
  */
-int* message_receiver(char* response, init_params_client params, connection_context context);
+int* message_receiver(char* response, connection_context context);
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -67,7 +67,7 @@ int* message_receiver(char* response, init_params_client params, connection_cont
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_sender(init_params_client params, connection_context context, int time, int finish);
+int warehouse_logic_sender(connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -76,7 +76,7 @@ int warehouse_logic_sender(init_params_client params, connection_context context
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_receiver(init_params_client params, connection_context context, int finish);
+int warehouse_logic_receiver(connection_context context, int finish);
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -85,7 +85,7 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_sender(init_params_client params, connection_context context, int time, int finish);
+int hub_logic_sender(connection_context context, int time, int finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -94,6 +94,6 @@ int hub_logic_sender(init_params_client params, connection_context context, int 
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_receiver(init_params_client params, connection_context context, int finish);
+int hub_logic_receiver(connection_context context, int finish);
 
 #endif

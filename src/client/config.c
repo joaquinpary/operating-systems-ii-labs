@@ -38,3 +38,30 @@ void set_client_type(const char* client_type)
     strncpy(ident.client_type, client_type, MIN_SIZE - 1);
     ident.client_type[MIN_SIZE - 1] = '\0';
 }
+
+void set_protocol(const char* protocol)
+{
+    strncpy(ident.protocol, protocol, MIN_SIZE - 1);
+    ident.protocol[MIN_SIZE - 1] = '\0';
+}
+
+void set_username(const char* username)
+{
+    strncpy(ident.username, username, MIN_SIZE - 1);
+    ident.username[MIN_SIZE - 1] = '\0';
+}
+
+void set_password(const char* password)
+{
+    strncpy(ident.password, password, MIN_SIZE - 1);
+    ident.password[MIN_SIZE - 1] = '\0';
+}
+
+void set_params(init_params_client params)
+{
+    set_client_id(params.client_id);
+    set_client_type(params.client_type);
+    set_protocol(params.connection_params.protocol);
+    set_username(params.username);
+    set_password(params.password);
+}

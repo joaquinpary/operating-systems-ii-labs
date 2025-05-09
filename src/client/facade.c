@@ -3,8 +3,8 @@
 #include "behavior_cli.h"
 #include "config.h"
 #include "connection.h"
+#include "inventory.h"
 #include "logger.h"
-#include "shared_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,7 +46,7 @@ int connection(init_params_client params)
         log_debug("Invalid protocol: %s", params.connection_params.protocol);
         return 1;
     }
-    authentication_status = authenticate(params, context);
+    authentication_status = authenticate(context);
     if (authentication_status != 0)
     {
         log_error("Authentication failed with ID: %s", get_identifiers()->client_id);
@@ -61,12 +61,12 @@ int connection(init_params_client params)
     }
     else if (pid == 0)
     {
-        if (manager_receiver(params, context, FINISH))
+        if (manager_receiver(context, FINISH))
             exit(EXIT_FAILURE);
     }
     else
     {
-        if (manager_sender(params, context, TIME, FINISH))
+        if (manager_sender(context, TIME, FINISH))
         {
             wait(NULL);
             close(context.sockfd);

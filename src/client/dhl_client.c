@@ -1,8 +1,8 @@
 #include "dhl_client.h"
 #include "config.h"
 #include "facade.h"
+#include "inventory.h"
 #include "logger.h"
-#include "shared_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,10 +22,7 @@
 int start_client(char* client)
 {
     init_params_client params = load_config_client(PATH_CONFIG, atoi(client));
-    set_client_id(params.client_id);
-    set_client_type(params.client_type);
-    printf("Client: %s\n", get_identifiers()->client_id);
-    printf("Client SHM path: %s\n", get_identifiers()->shm_path);
+    set_params(params);
     log_init(PATH_LOG, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     log_info("Client started with ID: %s", get_identifiers()->client_id);
@@ -56,16 +53,8 @@ int start_cli()
     strncpy(params.connection_params.ip_version, IP, MIN_SIZE - 1);
     params.connection_params.ip_version[MIN_SIZE - 1] = '\0';
 
-    printf("client_type: %s\n", params.client_type);
-    printf("client_id: %s\n", params.client_id);
-    printf("host: %s\n", params.connection_params.host);
-    printf("port: %s\n", params.connection_params.port);
-    printf("protocol: %s\n", params.connection_params.protocol);
-    printf("ip_version: %s\n", params.connection_params.ip_version);
-
     set_client_id(params.client_id);
     printf("Client: %s\n", get_identifiers()->client_id);
-    printf("Client SHM path: %s\n", get_identifiers()->shm_path);
     log_init(PATH_LOG, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     if (connection_cli(params))

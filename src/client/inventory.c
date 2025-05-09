@@ -1,4 +1,4 @@
-#include "shared_state.h"
+#include "inventory.h"
 #include "config.h"
 #include "json_manager.h"
 #include <math.h>
@@ -10,6 +10,10 @@
 #include <sys/shm.h>
 #include <sys/wait.h>
 #include <time.h>
+
+#ifndef M_PI
+#define M_PI 3.14
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14
@@ -51,18 +55,6 @@ void sem_signal()
     struct sembuf sb = {SEM_NUM, 1, 0};
     semop(semid, &sb, 1);
 }
-
-// void sem_wait_sender()
-// {
-//     struct sembuf sb = {SEM_SENDER, -1, 0};
-//     semop(semid, &sb, 1);
-// }
-
-// void sem_signal_sender()
-// {
-//     struct sembuf sb = {SEM_SENDER, 1, 0};
-//     semop(semid, &sb, 1);
-// }
 
 int init_shared_memory()
 {

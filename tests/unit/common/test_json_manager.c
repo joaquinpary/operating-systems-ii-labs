@@ -60,7 +60,8 @@ void test_validate_checksum_failure(void)
 
 void test_client_auth_request(void)
 {
-    client_auth_request request = create_client_auth_request(params_warehouse);
+    client_auth_request request = create_client_auth_request(params_warehouse.client_id, params_warehouse.client_type,
+                                                             params_warehouse.username, params_warehouse.password);
     char* string = serialize_client_auth_request(&request);
     TEST_ASSERT_NOT_NULL(string);
     client_auth_request deserialized_request = deserialize_client_auth_request(string);

@@ -1,9 +1,9 @@
 #include "behavior.h"
 #include "config.h"
 #include "connection.h"
+#include "inventory.h"
 #include "json_manager.h"
 #include "logger.h"
-#include "shared_state.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,24 +53,24 @@
 #define WAREHOUSE_LOAD_STOCK 12
 #define HUB_LOAD_STOCK 13
 
-int authenticate(init_params_client params, connection_context context)
+int authenticate(connection_context context)
 {
     int* next_action = NULL;
     char* response = NULL;
 
     for (int i = 0; i < 3; i++)
     {
-        if (message_sender(params, context, CLIENT_AUTH_REQUEST))
+        if (message_sender(context, CLIENT_AUTH_REQUEST))
             return 1;
 
-        response = receiver(context, params.connection_params.protocol);
+        response = receiver(context, get_identifiers()->protocol);
         if (response == NULL)
         {
             log_error("Error receiving response with ID: %s", get_identifiers()->client_id);
             return 1;
         }
 
-        next_action = message_receiver(response, params, context);
+        next_action = message_receiver(response, context);
         if (next_action == NULL)
         {
             log_error("Error processing response with ID: %s", get_identifiers()->client_id);
@@ -82,7 +82,6 @@ int authenticate(init_params_client params, connection_context context)
             free(next_action);
             return 0;
         }
-        // printf("Authentication failed, retrying...\n");
         free(next_action);
     }
     log_info("Authentication failed after 3 attempts with ID: %s", get_identifiers()->client_id);
@@ -90,16 +89,16 @@ int authenticate(init_params_client params, connection_context context)
     return 1;
 }
 
-int manager_sender(init_params_client params, connection_context context, int time, int finish)
+int manager_sender(connection_context context, int time, int finish)
 {
-    if (!strcmp(params.client_type, WAREHOUSE))
+    if (!strcmp(get_identifiers()->client_type, WAREHOUSE))
     {
-        if (warehouse_logic_sender(params, context, time, finish))
+        if (warehouse_logic_sender(context, time, finish))
             return 1;
     }
-    else if (!strcmp(params.client_type, HUB))
+    else if (!strcmp(get_identifiers()->client_type, HUB))
     {
-        if (hub_logic_sender(params, context, time, finish))
+        if (hub_logic_sender(context, time, finish))
             return 1;
     }
     else
@@ -110,16 +109,16 @@ int manager_sender(init_params_client params, connection_context context, int ti
     return 0;
 }
 
-int manager_receiver(init_params_client params, connection_context context, int finish)
+int manager_receiver(connection_context context, int finish)
 {
-    if (!strcmp(params.client_type, WAREHOUSE))
+    if (!strcmp(get_identifiers()->client_type, WAREHOUSE))
     {
-        if (warehouse_logic_receiver(params, context, finish))
+        if (warehouse_logic_receiver(context, finish))
             return 1;
     }
-    else if (!strcmp(params.client_type, HUB))
+    else if (!strcmp(get_identifiers()->client_type, HUB))
     {
-        if (hub_logic_receiver(params, context, finish))
+        if (hub_logic_receiver(context, finish))
             return 1;
     }
     else
@@ -176,20 +175,22 @@ char* receiver(connection_context context, char* protocol)
     return buffer;
 }
 
-int message_sender(init_params_client params, connection_context context, int type_message)
+int message_sender(connection_context context, int type_message)
 {
     char* buffer = NULL;
     switch (type_message)
     {
     case CLIENT_AUTH_REQUEST:
-        client_auth_request auth_req = create_client_auth_request(params);
+        client_auth_request auth_req =
+            create_client_auth_request(get_identifiers()->client_id, get_identifiers()->client_type,
+                                       get_identifiers()->username, get_identifiers()->password);
         buffer = serialize_client_auth_request(&auth_req);
         if (buffer == NULL)
         {
             log_error("Error serializing client_auth_request");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -197,14 +198,15 @@ int message_sender(init_params_client params, connection_context context, int ty
         free(buffer);
         break;
     case CLIENT_KEEP_ALIVE:
-        client_keepalive keep_alive = create_client_keepalive(params.username, get_identifiers()->session_token);
+        client_keepalive keep_alive =
+            create_client_keepalive(get_identifiers()->username, get_identifiers()->session_token);
         buffer = serialize_client_keepalive(&keep_alive);
         if (buffer == NULL)
         {
             log_error("Error serializing client_keepalive");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -213,14 +215,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case CLIENT_INVENTORY_UPDATE:
         client_inventory_update inv_upd = create_client_inventory_update(
-            params.username, get_identifiers()->session_token, get_inventory(), get_inventory_size());
+            get_identifiers()->username, get_identifiers()->session_token, get_inventory(), get_inventory_size());
         buffer = serialize_client_inventory_update(&inv_upd, get_inventory_size());
         if (buffer == NULL)
         {
             log_error("Error serializing client_inventory_update");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -229,14 +231,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case CLIENT_ACK_SUCCESS:
         client_acknowledgment ack =
-            create_client_acknowledgment(params.username, get_identifiers()->session_token, SUCCESS);
+            create_client_acknowledgment(get_identifiers()->username, get_identifiers()->session_token, SUCCESS);
         buffer = serialize_client_acknowledgment(&ack);
         if (buffer == NULL)
         {
             log_error("Error serializing client_acknowledgment");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -245,14 +247,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case CLIENT_ACK_FAILURE:
         client_acknowledgment ack_fail =
-            create_client_acknowledgment(params.username, get_identifiers()->session_token, FAILURE);
+            create_client_acknowledgment(get_identifiers()->username, get_identifiers()->session_token, FAILURE);
         buffer = serialize_client_acknowledgment(&ack_fail);
         if (buffer == NULL)
         {
             log_error("Error serializing client_acknowledgment");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -261,14 +263,14 @@ int message_sender(init_params_client params, connection_context context, int ty
         break;
     case CLIENT_INFECTION_ALERT:
         client_infection_alert infec_alert =
-            create_client_infection_alert(params.username, get_identifiers()->session_token);
+            create_client_infection_alert(get_identifiers()->username, get_identifiers()->session_token);
         buffer = serialize_client_infection_alert(&infec_alert);
         if (buffer == NULL)
         {
             log_error("Error serializing client_infection_alert");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -276,15 +278,16 @@ int message_sender(init_params_client params, connection_context context, int ty
         free(buffer);
         break;
     case WAREHOUSE_SEND_STOCK_TO_HUB:
-        warehouse_send_stock_to_hub send_stock_hub = create_warehouse_send_stock_to_hub(
-            params.username, get_identifiers()->session_token, get_inventory_to_send(), get_inventory_size());
+        warehouse_send_stock_to_hub send_stock_hub =
+            create_warehouse_send_stock_to_hub(get_identifiers()->username, get_identifiers()->session_token,
+                                               get_inventory_to_send(), get_inventory_size());
         buffer = serialize_warehouse_send_stock_to_hub(&send_stock_hub, get_inventory_size());
         if (buffer == NULL)
         {
             fprintf(stderr, "Error serializing warehouse_send_stock_to_hub\n");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -292,15 +295,16 @@ int message_sender(init_params_client params, connection_context context, int ty
         free(buffer);
         break;
     case WAREHOUSE_REQUEST_STOCK:
-        warehouse_request_stock restock_warehouse = create_warehouse_request_stock(
-            params.username, get_identifiers()->session_token, get_inventory_to_replenish(), get_inventory_size());
+        warehouse_request_stock restock_warehouse =
+            create_warehouse_request_stock(get_identifiers()->username, get_identifiers()->session_token,
+                                           get_inventory_to_replenish(), get_inventory_size());
         buffer = serialize_warehouse_request_stock(&restock_warehouse, get_inventory_size());
         if (buffer == NULL)
         {
             log_error("Error serializing warehouse_request_stock");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
@@ -308,21 +312,21 @@ int message_sender(init_params_client params, connection_context context, int ty
         free(buffer);
         break;
     case HUB_REQUEST_STOCK:
-        hub_request_stock restock_hub = create_hub_request_stock(params.username, get_identifiers()->session_token,
-                                                                 get_inventory_to_replenish(), get_inventory_size());
+        hub_request_stock restock_hub =
+            create_hub_request_stock(get_identifiers()->username, get_identifiers()->session_token,
+                                     get_inventory_to_replenish(), get_inventory_size());
         buffer = serialize_hub_request_stock(&restock_hub, get_inventory_size());
         if (buffer == NULL)
         {
             log_error("Error serializing warehouse_request_stock");
             return 1;
         }
-        if (sender(context, params.connection_params.protocol, buffer))
+        if (sender(context, get_identifiers()->protocol, buffer))
         {
             free(buffer);
             return 1;
         }
         free(buffer);
-        // Verificar
         break;
     default:
         log_error("Unknown message type to send with ID : %s", get_identifiers()->client_id);
@@ -332,7 +336,7 @@ int message_sender(init_params_client params, connection_context context, int ty
     return 0;
 }
 
-int* message_receiver(char* response, init_params_client params, connection_context context)
+int* message_receiver(char* response, connection_context context)
 {
     int* next_action = malloc(ACTIONS * sizeof(int));
     if (next_action == NULL)
@@ -352,7 +356,7 @@ int* message_receiver(char* response, init_params_client params, connection_cont
         if (validate_checksum(response))
         {
             log_error("Checksum error with ID: %s", get_identifiers()->client_id);
-            if (message_sender(params, context, CLIENT_ACK_FAILURE))
+            if (message_sender(context, CLIENT_ACK_FAILURE))
             {
                 log_error("Error sending acknowledgment\n");
                 free(type);
@@ -366,7 +370,7 @@ int* message_receiver(char* response, init_params_client params, connection_cont
         }
         else
         {
-            if (message_sender(params, context, CLIENT_ACK_SUCCESS))
+            if (message_sender(context, CLIENT_ACK_SUCCESS))
             {
                 log_error("Error sending acknowledgment\n");
                 free(type);
@@ -427,7 +431,6 @@ int* message_receiver(char* response, init_params_client params, connection_cont
         free(type);
         free(response);
         return next_action;
-        // REVISAR
     }
     else if (!strcmp(type, SERVER_W_STOCK_WAREHOUSE))
     {
@@ -439,17 +442,6 @@ int* message_receiver(char* response, init_params_client params, connection_cont
         free(type);
         free(response);
         return next_action;
-        // REVISAR
-    }
-    else if (!strcmp(type, SERVER_H_REQUEST_DELIVERY))
-    {
-        // server_w_stock_hub stock_hub = deserialize_server_w_stock_hub(response);
-        // set_inventory_to_send(stock_hub.payload.items);
-        // IMPLEMENTAR AL FINAL
-        // hacer nuevo tipo de struct
-        //  PARA EL HUB
-        //  Implementar la logica de delivery request
-        //  Pedido del server de entregar paquetes
     }
     else if (!strcmp(type, SERVER_H_SEND_STOCK))
     {
@@ -475,7 +467,7 @@ int* message_receiver(char* response, init_params_client params, connection_cont
     return NULL;
 }
 
-int warehouse_logic_sender(init_params_client params, connection_context context, int time, int finish)
+int warehouse_logic_sender(connection_context context, int time, int finish)
 {
     while (1)
     {
@@ -483,12 +475,12 @@ int warehouse_logic_sender(init_params_client params, connection_context context
         {
             log_info("Low inventory detected, sending request for supply to server with ID: %s",
                      get_identifiers()->client_id);
-            if (message_sender(params, context, WAREHOUSE_REQUEST_STOCK))
+            if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
                 return 1;
         }
-        if (message_sender(params, context, CLIENT_KEEP_ALIVE))
+        if (message_sender(context, CLIENT_KEEP_ALIVE))
             return 1;
-        if (message_sender(params, context, CLIENT_INVENTORY_UPDATE))
+        if (message_sender(context, CLIENT_INVENTORY_UPDATE))
             return 1;
         if (finish)
             break;
@@ -497,22 +489,22 @@ int warehouse_logic_sender(init_params_client params, connection_context context
     return 0;
 }
 
-int warehouse_logic_receiver(init_params_client params, connection_context context, int finish)
+int warehouse_logic_receiver(connection_context context, int finish)
 {
     char* recv = NULL;
     while (1)
     {
-        recv = receiver(context, params.connection_params.protocol);
+        recv = receiver(context, get_identifiers()->protocol);
         if (recv == NULL)
         {
             fprintf(stderr, "Error receiving response\n");
             return 1;
         }
-        int* next_action = message_receiver(recv, params, context);
+        int* next_action = message_receiver(recv, context);
         if (next_action[0] == REPLY)
         {
             next_action[0] = NOTHING;
-            if (message_sender(params, context, next_action[1]))
+            if (message_sender(context, next_action[1]))
                 return 1;
         }
         if (finish)
@@ -521,7 +513,7 @@ int warehouse_logic_receiver(init_params_client params, connection_context conte
     return 0;
 }
 
-int hub_logic_sender(init_params_client params, connection_context context, int time, int finish)
+int hub_logic_sender(connection_context context, int time, int finish)
 {
     int count = 60;
     int next_compsumption = get_uniform_random(7, 13);
@@ -541,12 +533,12 @@ int hub_logic_sender(init_params_client params, connection_context context, int 
             {
                 log_info("Low inventory detected, sending request for supply to server with ID: %s",
                          get_identifiers()->client_id);
-                if (message_sender(params, context, HUB_REQUEST_STOCK))
+                if (message_sender(context, HUB_REQUEST_STOCK))
                     return 1;
             }
-            if (message_sender(params, context, CLIENT_KEEP_ALIVE))
+            if (message_sender(context, CLIENT_KEEP_ALIVE))
                 return 1;
-            if (message_sender(params, context, CLIENT_INVENTORY_UPDATE))
+            if (message_sender(context, CLIENT_INVENTORY_UPDATE))
                 return 1;
             if (finish)
                 break;
@@ -557,22 +549,22 @@ int hub_logic_sender(init_params_client params, connection_context context, int 
     return 0;
 }
 
-int hub_logic_receiver(init_params_client params, connection_context context, int finish)
+int hub_logic_receiver(connection_context context, int finish)
 {
     char* recv = NULL;
     while (1)
     {
-        recv = receiver(context, params.connection_params.protocol);
+        recv = receiver(context, get_identifiers()->protocol);
         if (recv == NULL)
         {
             fprintf(stderr, "Error receiving response\n");
             return 1;
         }
-        int* next_action = message_receiver(recv, params, context);
+        int* next_action = message_receiver(recv, context);
         if (next_action[0] == REPLY)
         {
             next_action[0] = NOTHING;
-            if (message_sender(params, context, next_action[1]))
+            if (message_sender(context, next_action[1]))
                 return 1;
         }
         if (finish)

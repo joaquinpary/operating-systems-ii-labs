@@ -146,7 +146,8 @@ int cli_message_sender(init_params_client params, int sockfd, int type_message)
     switch (type_message)
     {
     case AUTH_REQUEST:
-        client_auth_request auth_req = create_client_auth_request(params);
+        client_auth_request auth_req =
+            create_client_auth_request(params.client_id, params.client_type, params.username, params.password);
         buffer = serialize_client_auth_request(&auth_req);
         if (buffer == NULL)
             return 1;

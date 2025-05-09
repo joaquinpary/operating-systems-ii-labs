@@ -2299,16 +2299,17 @@ char* serialize_server_client_alive(const server_client_alive* server_client_ali
     return json_string;
 }
 
-client_auth_request create_client_auth_request(const init_params_client params)
+client_auth_request create_client_auth_request(const char* client_id, const char* client_type, const char* username,
+                                               const char* password)
 {
     client_auth_request aut_req = {.type = "client_auth_request", .checksum = ""};
-    strncpy(aut_req.payload.client_id, params.client_id, MIN_SIZE - 1);
+    strncpy(aut_req.payload.client_id, client_id, MIN_SIZE - 1);
     aut_req.payload.client_id[MIN_SIZE - 1] = '\0';
-    strncpy(aut_req.payload.type, params.client_type, MIN_SIZE - 1);
+    strncpy(aut_req.payload.type, client_type, MIN_SIZE - 1);
     aut_req.payload.type[MIN_SIZE - 1] = '\0';
-    strncpy(aut_req.payload.username, params.username, USER_PASS_SIZE - 1);
+    strncpy(aut_req.payload.username, username, USER_PASS_SIZE - 1);
     aut_req.payload.username[USER_PASS_SIZE - 1] = '\0';
-    strncpy(aut_req.payload.password, params.password, USER_PASS_SIZE - 1);
+    strncpy(aut_req.payload.password, password, USER_PASS_SIZE - 1);
     char* timestamp = get_timestamp();
     if (!timestamp)
     {

@@ -4,8 +4,8 @@
 #include "config.h"
 #include "connection.h"
 #include "facade.h"
+#include "inventory.h"
 #include "logger.h"
-#include "shared_state.h"
 #include "test_server.h"
 #include "unity.h"
 #include <stdio.h>
