@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
+#include <time.h>
 
 #define WAREHOUSE "warehouse"
 #define HUB "hub"
@@ -413,14 +414,14 @@ client_acknowledgment deserialize_client_acknowledgment(const char* json_string)
     return client_acknowledgment;
 }
 
-client_infection_alert deserialize_client_infection_alert(const char* json_string)
+client_emergency_alert deserialize_client_infection_alert(const char* json_string)
 {
-    client_infection_alert client_infection_alert = {0};
+    client_emergency_alert client_emergency_alert = {0};
     cJSON* json = cJSON_Parse(json_string);
     if (!json)
     {
         fprintf(stderr, "Error parsing JSON: %s\n", cJSON_GetErrorPtr());
-        return client_infection_alert;
+        return client_emergency_alert;
     }
     cJSON* type = cJSON_GetObjectItemCaseSensitive(json, "type");
     cJSON* payload = cJSON_GetObjectItemCaseSensitive(json, "payload");
@@ -428,27 +429,29 @@ client_infection_alert deserialize_client_infection_alert(const char* json_strin
 
     if (cJSON_IsString(type) && cJSON_IsObject(payload) && cJSON_IsString(checksum))
     {
-        strncpy(client_infection_alert.type, type->valuestring, MIN_SIZE - 1);
-        strncpy(client_infection_alert.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
+        strncpy(client_emergency_alert.type, type->valuestring, MIN_SIZE - 1);
+        strncpy(client_emergency_alert.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
         cJSON* username = cJSON_GetObjectItemCaseSensitive(payload, "username");
         cJSON* session_token = cJSON_GetObjectItemCaseSensitive(payload, "session_token");
+        cJSON* emergency_type = cJSON_GetObjectItemCaseSensitive(payload, "emergency_type");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(timestamp))
+        if (cJSON_IsString(emergency_type) && cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(timestamp))
         {
-            strncpy(client_infection_alert.payload.username, username->valuestring, USER_PASS_SIZE - 1);
-            strncpy(client_infection_alert.payload.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
-            strncpy(client_infection_alert.payload.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
+            strncpy(client_emergency_alert.payload.username, username->valuestring, USER_PASS_SIZE - 1);
+            strncpy(client_emergency_alert.payload.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
+            strncpy(client_emergency_alert.payload.emergency_type, emergency_type->valuestring, MIN_SIZE - 1);
+            strncpy(client_emergency_alert.payload.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
         }
     }
     else
     {
         fprintf(stderr, "Invalid JSON format.\n");
-        return client_infection_alert;
+        return client_emergency_alert;
     }
     cJSON_Delete(json);
-    return client_infection_alert;
+    return client_emergency_alert;
 }
 
 server_w_stock_hub deserialize_server_w_stock_hub(const char* json_string)
@@ -1412,24 +1415,15 @@ char* serialize_client_acknowledgment(const client_acknowledgment* client_acknow
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
 
-char* serialize_client_infection_alert(const client_infection_alert* client_infection_alert)
+char* serialize_client_infection_alert(const client_emergency_alert* client_emergency_alert)
 {
-    if (!client_infection_alert)
+    if (!client_emergency_alert)
     {
-        fprintf(stderr, "Error: client_infection_alert is NULL\n");
+        fprintf(stderr, "Error: client_emergency_alert is NULL\n");
         return NULL;
     }
     cJSON* json = cJSON_CreateObject();
@@ -1439,7 +1433,7 @@ char* serialize_client_infection_alert(const client_infection_alert* client_infe
         return NULL;
     }
 
-    cJSON_AddStringToObject(json, "type", client_infection_alert->type);
+    cJSON_AddStringToObject(json, "type", client_emergency_alert->type);
 
     cJSON* payload = cJSON_CreateObject();
     if (!payload)
@@ -1449,9 +1443,10 @@ char* serialize_client_infection_alert(const client_infection_alert* client_infe
         return NULL;
     }
 
-    cJSON_AddStringToObject(payload, "username", client_infection_alert->payload.username);
-    cJSON_AddStringToObject(payload, "session_token", client_infection_alert->payload.session_token);
-    cJSON_AddStringToObject(payload, "timestamp", client_infection_alert->payload.timestamp);
+    cJSON_AddStringToObject(payload, "username", client_emergency_alert->payload.username);
+    cJSON_AddStringToObject(payload, "session_token", client_emergency_alert->payload.session_token);
+    cJSON_AddStringToObject(payload, "emergency_type", client_emergency_alert->payload.emergency_type);
+    cJSON_AddStringToObject(payload, "timestamp", client_emergency_alert->payload.timestamp);
     cJSON_AddItemToObject(json, "payload", payload);
     char* temp_json_str = cJSON_PrintUnformatted(json);
     if (!temp_json_str)
@@ -1478,15 +1473,6 @@ char* serialize_client_infection_alert(const client_infection_alert* client_infe
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1568,15 +1554,6 @@ char* serialize_server_w_stock_hub(const server_w_stock_hub* server_w_stock_hub,
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1661,15 +1638,6 @@ char* serialize_warehouse_send_stock_to_hub(const warehouse_send_stock_to_hub* w
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1753,15 +1721,6 @@ char* serialize_warehouse_request_stock(const warehouse_request_stock* warehouse
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1843,20 +1802,9 @@ char* serialize_server_w_stock_warehouse(const server_w_stock_warehouse* server_
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
-// to be implemented  char* serialize_server_h_request_delivery(const server_h_request_delivery*
-// server_h_request_delivery);
 
 char* serialize_hub_request_stock(const hub_request_stock* hub_request_stock, const int item_count)
 {
@@ -1937,15 +1885,6 @@ char* serialize_hub_request_stock(const hub_request_stock* hub_request_stock, co
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -2027,15 +1966,6 @@ char* serialize_server_h_send_stock(const server_h_send_stock* server_h_send_sto
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -2431,13 +2361,35 @@ client_acknowledgment create_client_acknowledgment(const char* username, const c
     return ack;
 }
 
-client_infection_alert create_client_infection_alert(const char* username, const char* session_token)
+client_emergency_alert create_client_infection_alert(const char* username, const char* session_token)
 {
-    client_infection_alert inf_alert = {.type = "client_infection_alert", .checksum = ""};
+    client_emergency_alert inf_alert = {.type = "client_emergency_alert", .checksum = ""};
     strncpy(inf_alert.payload.username, username, USER_PASS_SIZE - 1);
     inf_alert.payload.username[USER_PASS_SIZE - 1] = '\0';
     strncpy(inf_alert.payload.session_token, session_token, SESSION_TOKEN_SIZE - 1);
     inf_alert.payload.session_token[SESSION_TOKEN_SIZE - 1] = '\0';
+    srand(time(NULL));
+    int election = rand() % 3;
+    switch (election)
+    {
+        case 0:
+            strncpy(inf_alert.payload.emergency_type, "infection", MIN_SIZE - 1);
+            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+            break;
+        case 1:
+            strncpy(inf_alert.payload.emergency_type, "weather", MIN_SIZE - 1);
+            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+            break;
+        case 2:
+            strncpy(inf_alert.payload.emergency_type, "enemy thread", MIN_SIZE - 1);
+            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+            break;
+        default:
+            fprintf(stderr, "Error: invalid election value\n");
+            strncpy(inf_alert.payload.emergency_type, "unknown", MIN_SIZE - 1);
+            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+            break;
+    }
     char* timestamp = get_timestamp();
     if (!timestamp)
     {
@@ -2558,8 +2510,6 @@ server_w_stock_warehouse create_server_w_stock_warehouse(const inventory_item* i
     return stock_warehouse;
 }
 
-// To be implemented server_h_request_delivery()
-
 hub_request_stock create_hub_request_stock(const char* username, const char* session_tokken,
                                            const inventory_item* items, const int item_count)
 {
@@ -2609,6 +2559,27 @@ server_h_send_stock create_server_h_send_stock(const inventory_item* items, cons
     stock.payload.timestamp[TIMESTAMP_SIZE - 1] = '\0';
     free(timestamp);
     return stock;
+}
+
+client_acknowledgment create_hub_receive_stock(const char* username, const char* session_token, const char* status)
+{
+    client_acknowledgment hub_recv = {.type = "hub_receive_stock", .checksum = ""};
+    strncpy(hub_recv.payload.username, username, USER_PASS_SIZE - 1);
+    hub_recv.payload.username[USER_PASS_SIZE - 1] = '\0';
+    strncpy(hub_recv.payload.session_token, session_token, SESSION_TOKEN_SIZE - 1);
+    hub_recv.payload.session_token[SESSION_TOKEN_SIZE - 1] = '\0';
+    strncpy(hub_recv.payload.status, status, MIN_SIZE - 1);
+    hub_recv.payload.status[MIN_SIZE - 1] = '\0';
+    char* timestamp = get_timestamp();
+    if (!timestamp)
+    {
+        fprintf(stderr, "Error generating timestamp\n");
+        hub_recv.payload.timestamp[0] = '\0';
+    }
+    strncpy(hub_recv.payload.timestamp, timestamp, TIMESTAMP_SIZE - 1);
+    hub_recv.payload.timestamp[TIMESTAMP_SIZE - 1] = '\0';
+    free(timestamp);
+    return hub_recv;
 }
 
 cli_message create_cli_message(const char* username, const char* session_token, const int type_message)

@@ -149,10 +149,10 @@ void test_client_acknowledgment(void)
 
 void test_client_infection_alert(void)
 {
-    client_infection_alert alert = create_client_infection_alert(params_warehouse.username, "session_token");
+    client_emergency_alert alert = create_client_infection_alert(params_warehouse.username, "session_token");
     char* string = serialize_client_infection_alert(&alert);
     TEST_ASSERT_NOT_NULL(string);
-    client_infection_alert deserialized_alert = deserialize_client_infection_alert(string);
+    client_emergency_alert deserialized_alert = deserialize_client_infection_alert(string);
     TEST_ASSERT_EQUAL_STRING(alert.type, deserialized_alert.type);
     TEST_ASSERT_EQUAL_STRING(alert.payload.username, deserialized_alert.payload.username);
     TEST_ASSERT_EQUAL_STRING(alert.payload.session_token, deserialized_alert.payload.session_token);

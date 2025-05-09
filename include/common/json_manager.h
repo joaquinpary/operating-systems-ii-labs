@@ -93,8 +93,9 @@ extern "C"
     {
         char username[USER_PASS_SIZE];
         char session_token[SESSION_TOKEN_SIZE];
+        char emergency_type[MIN_SIZE];
         char timestamp[TIMESTAMP_SIZE];
-    } payload_client_infection_alert;
+    } payload_client_emergency_alert;
 
     typedef struct
     {
@@ -191,9 +192,9 @@ extern "C"
     typedef struct
     {
         char type[MIN_SIZE];
-        payload_client_infection_alert payload;
+        payload_client_emergency_alert payload;
         char checksum[BUFFER_SIZE];
-    } client_infection_alert;
+    } client_emergency_alert;
 
     typedef struct
     {
@@ -294,7 +295,7 @@ extern "C"
     client_inventory_update deserialize_client_inventory_update(const char* json_string);
     server_emergency_alert deserialize_server_emergency_alert(const char* json_string);
     client_acknowledgment deserialize_client_acknowledgment(const char* json_string);
-    client_infection_alert deserialize_client_infection_alert(const char* json_string);
+    client_emergency_alert deserialize_client_infection_alert(const char* json_string);
     server_w_stock_hub deserialize_server_w_stock_hub(const char* json_string);
     warehouse_send_stock_to_hub deserialize_warehouse_send_stock_to_hub(const char* json_string);
     warehouse_request_stock deserialize_warehouse_request_stock(const char* json_string);
@@ -316,7 +317,7 @@ extern "C"
                                             const int item_count);
     char* serialize_server_emergency_alert(const server_emergency_alert* server_emergency_alert);
     char* serialize_client_acknowledgment(const client_acknowledgment* client_acknowledgment);
-    char* serialize_client_infection_alert(const client_infection_alert* client_infection_alert);
+    char* serialize_client_infection_alert(const client_emergency_alert* client_emergency_alert);
     char* serialize_server_w_stock_hub(const server_w_stock_hub* server_w_stock_hub, const int item_count);
     char* serialize_warehouse_send_stock_to_hub(const warehouse_send_stock_to_hub* warehouse_send_stock_to_hub,
                                                 const int item_count);
@@ -324,7 +325,6 @@ extern "C"
                                             const int item_count);
     char* serialize_server_w_stock_warehouse(const server_w_stock_warehouse* server_w_stock_warehouse,
                                              const int item_count);
-    char* serialize_server_h_request_delivery(const server_h_request_delivery* server_h_request_delivery);
     char* serialize_hub_request_stock(const hub_request_stock* hub_request_stock, const int item_count);
     char* serialize_server_h_send_stock(const server_h_send_stock* server_h_send_stock, const int item_count);
     char* serialize_cli_message(const cli_message* cli_message);
@@ -342,18 +342,17 @@ extern "C"
     server_emergency_alert create_server_emergency_alert(const char* alert_type);
     client_acknowledgment create_client_acknowledgment(const char* username, const char* session_token,
                                                        const char* status);
-    client_infection_alert create_client_infection_alert(const char* username, const char* session_token);
+    client_emergency_alert create_client_infection_alert(const char* username, const char* session_token);
     server_w_stock_hub create_server_w_stock_hub(const inventory_item* items, const int item_count);
     warehouse_send_stock_to_hub create_warehouse_send_stock_to_hub(const char* username, const char* session_token,
                                                                    const inventory_item* items, const int item_count);
     warehouse_request_stock create_warehouse_request_stock(const char* username, const char* session_token,
                                                            const inventory_item* items, const int item_count);
     server_w_stock_warehouse create_server_w_stock_warehouse(const inventory_item* items, const int item_count);
-    // server_h_request_delivery create_server_h_request_delivery(const inventory_item* items, const int item_count); //
-    // To be implemented
     hub_request_stock create_hub_request_stock(const char* username, const char* session_token,
                                                const inventory_item* items, const int item_count);
     server_h_send_stock create_server_h_send_stock(const inventory_item* items, const int item_count);
+    client_acknowledgment create_hub_receive_stock(const char* username, const char* session_token, const char* status);
     cli_message create_cli_message(const char* username, const char* session_token, const int type_message);
     end_of_message create_end_of_message();
     server_transaction_history create_server_transaction_history(const int id, const int hub_id, const int warehouse_id,

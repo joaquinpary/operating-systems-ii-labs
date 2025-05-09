@@ -47,7 +47,8 @@
 #define HUB_REQUEST_STOCK 10
 #define HUB_CANCELATION_ORDER 11 // to be implemented
 #define SERVER_H_SEND_STOCK "server_h_send_stock"
-#define HUB_DELIVERY 99
+#define HUB_RECEIVE_STOCK 12 
+
 
 // INTERNAL ACTIONS
 #define WAREHOUSE_LOAD_STOCK 12
@@ -262,12 +263,12 @@ int message_sender(connection_context context, int type_message)
         free(buffer);
         break;
     case CLIENT_INFECTION_ALERT:
-        client_infection_alert infec_alert =
+        client_emergency_alert infec_alert =
             create_client_infection_alert(get_identifiers()->username, get_identifiers()->session_token);
         buffer = serialize_client_infection_alert(&infec_alert);
         if (buffer == NULL)
         {
-            log_error("Error serializing client_infection_alert");
+            log_error("Error serializing client_emergency_alert");
             return 1;
         }
         if (sender(context, get_identifiers()->protocol, buffer))
@@ -319,6 +320,22 @@ int message_sender(connection_context context, int type_message)
         if (buffer == NULL)
         {
             log_error("Error serializing warehouse_request_stock");
+            return 1;
+        }
+        if (sender(context, get_identifiers()->protocol, buffer))
+        {
+            free(buffer);
+            return 1;
+        }
+        free(buffer);
+        break;
+    case HUB_RECEIVE_STOCK:
+        client_acknowledgment hub_receive = create_hub_receive_stock(
+            get_identifiers()->username, get_identifiers()->session_token, SUCCESS);
+        buffer = serialize_client_acknowledgment(&hub_receive);
+        if (buffer == NULL)
+        {
+            log_error("Error serializing client_acknowledgment");
             return 1;
         }
         if (sender(context, get_identifiers()->protocol, buffer))
@@ -448,6 +465,13 @@ int* message_receiver(char* response, connection_context context)
         server_h_send_stock stock_hub = deserialize_server_h_send_stock(response);
         set_inventory(stock_hub.payload.items);
         log_info("HUB stock updated with ID: %s", get_identifiers()->client_id);
+        if(message_sender(context, HUB_RECEIVE_STOCK))
+        {
+            log_error("Error sending acknowledgment\n");
+            free(type);
+            free(response);
+            return NULL;
+        }
         next_action[0] = NOTHING;
         next_action[1] = HUB_LOAD_STOCK;
         free(type);
@@ -469,8 +493,15 @@ int* message_receiver(char* response, connection_context context)
 
 int warehouse_logic_sender(connection_context context, int time, int finish)
 {
+    int infection;
     while (1)
     {
+        if (get_uniform_random(0, 100) < 1)
+        {
+            if (message_sender(context, CLIENT_INFECTION_ALERT))
+                return 1;
+            log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
+        }
         if (replenish())
         {
             log_info("Low inventory detected, sending request for supply to server with ID: %s",
@@ -517,6 +548,7 @@ int hub_logic_sender(connection_context context, int time, int finish)
 {
     int count = 60;
     int next_compsumption = get_uniform_random(7, 13);
+    int emergency;
     while (1)
     {
         if (--next_compsumption <= 0)
@@ -529,6 +561,12 @@ int hub_logic_sender(connection_context context, int time, int finish)
         if (count >= time)
         {
             count = 0;
+            if (get_uniform_random(0, 100) < 1)
+            {
+                if (message_sender(context, CLIENT_INFECTION_ALERT))
+                    return 1;
+                log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
+            }
             if (replenish())
             {
                 log_info("Low inventory detected, sending request for supply to server with ID: %s",
