@@ -11,6 +11,7 @@ typedef enum
     LOG_LEVEL_DEBUG
 } log_level;
 
+static void rotate_logs();
 void set_log_file(const char* filename);
 void set_log_level(log_level level);
 void set_log_component(const char* component);

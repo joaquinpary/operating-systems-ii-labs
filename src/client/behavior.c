@@ -10,13 +10,13 @@
 #include <sys/shm.h>
 #include <unistd.h>
 
+#define LOWER_TIME 5
+#define UPPER_TIME 15
+#define EMERGENCY_PROBABILITY 2
 #define ACTIONS 2
 
 #define SUCCESS "success"
 #define FAILURE "failure"
-
-#define ADD 1
-#define SUBTRACT 0
 
 // BOTH
 
@@ -47,8 +47,7 @@
 #define HUB_REQUEST_STOCK 10
 #define HUB_CANCELATION_ORDER 11 // to be implemented
 #define SERVER_H_SEND_STOCK "server_h_send_stock"
-#define HUB_RECEIVE_STOCK 12 
-
+#define HUB_RECEIVE_STOCK 12
 
 // INTERNAL ACTIONS
 #define WAREHOUSE_LOAD_STOCK 12
@@ -330,8 +329,8 @@ int message_sender(connection_context context, int type_message)
         free(buffer);
         break;
     case HUB_RECEIVE_STOCK:
-        client_acknowledgment hub_receive = create_hub_receive_stock(
-            get_identifiers()->username, get_identifiers()->session_token, SUCCESS);
+        client_acknowledgment hub_receive =
+            create_hub_receive_stock(get_identifiers()->username, get_identifiers()->session_token, SUCCESS);
         buffer = serialize_client_acknowledgment(&hub_receive);
         if (buffer == NULL)
         {
@@ -466,7 +465,7 @@ int* message_receiver(char* response, connection_context context)
         server_h_send_stock stock_hub = deserialize_server_h_send_stock(response);
         set_inventory(stock_hub.payload.items);
         log_info("HUB stock updated with ID: %s", get_identifiers()->client_id);
-        if(message_sender(context, HUB_RECEIVE_STOCK))
+        if (message_sender(context, HUB_RECEIVE_STOCK))
         {
             log_error("Error sending acknowledgment\n");
             free(type);
@@ -497,21 +496,12 @@ int warehouse_logic_sender(connection_context context, int time, int finish)
     int infection;
     while (1)
     {
-
-        if (get_uniform_random(0, 100) < 1)
+        if (get_uniform_random(0, 100) < EMERGENCY_PROBABILITY)
         {
             if (message_sender(context, CLIENT_INFECTION_ALERT))
                 return 1;
             log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
         }
-        if (replenish())
-        {
-            log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                     get_identifiers()->client_id);
-            if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
-                return 1;
-        }
-
         if (message_sender(context, CLIENT_KEEP_ALIVE))
             return 1;
         if (message_sender(context, CLIENT_INVENTORY_UPDATE))
@@ -519,13 +509,6 @@ int warehouse_logic_sender(connection_context context, int time, int finish)
         if (finish)
             break;
         sleep(60);
-        if (replenish())
-        {
-            log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                     get_identifiers()->client_id);
-            if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
-                return 1;
-        }
     }
     return 0;
 }
@@ -545,8 +528,23 @@ int warehouse_logic_receiver(connection_context context, int finish)
         if (next_action[0] == REPLY)
         {
             next_action[0] = NOTHING;
-            if (message_sender(context, next_action[1]))
-                return 1;
+            if (next_action[1] == WAREHOUSE_SEND_STOCK_TO_HUB)
+            {
+                if (message_sender(context, WAREHOUSE_SEND_STOCK_TO_HUB))
+                    return 1;
+                if (replenish())
+                {
+                    log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                             get_identifiers()->client_id);
+                    if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
+                        return 1;
+                }
+            }
+            else
+            {
+                if (message_sender(context, next_action[1]))
+                    return 1;
+            }
         }
         if (finish)
             break;
@@ -557,7 +555,7 @@ int warehouse_logic_receiver(connection_context context, int finish)
 int hub_logic_sender(connection_context context, int time, int finish)
 {
     int count = 60;
-    int next_compsumption = get_uniform_random(7, 13);
+    int next_compsumption = get_uniform_random(LOWER_TIME, UPPER_TIME);
     int emergency;
     while (1)
     {
@@ -565,24 +563,24 @@ int hub_logic_sender(connection_context context, int time, int finish)
         {
             if (inventory_compsumption())
                 return 1;
-            next_compsumption = (int)get_uniform_random(7, 13);
+            next_compsumption = (int)get_uniform_random(LOWER_TIME, UPPER_TIME);
             log_info("Inventory consumption with ID: %s", get_identifiers()->client_id);
-        }
-        if (count >= time)
-        {
-            count = 0;
-            if (get_uniform_random(0, 100) < 1)
-            {
-                if (message_sender(context, CLIENT_INFECTION_ALERT))
-                    return 1;
-                log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
-            }
             if (replenish())
             {
                 log_info("Low inventory detected, sending request for supply to server with ID: %s",
                          get_identifiers()->client_id);
                 if (message_sender(context, HUB_REQUEST_STOCK))
                     return 1;
+            }
+        }
+        if (count >= time)
+        {
+            count = 0;
+            if (get_uniform_random(0, 100) < EMERGENCY_PROBABILITY)
+            {
+                if (message_sender(context, CLIENT_INFECTION_ALERT))
+                    return 1;
+                log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
             }
             if (message_sender(context, CLIENT_KEEP_ALIVE))
                 return 1;

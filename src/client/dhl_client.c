@@ -8,12 +8,13 @@
 #include <string.h>
 
 #ifdef TESTING
-#define PATH_LOG "logs/client.log"
 #define PATH_CONFIG "config/clients_credentials.json"
+#define LOG_BASE_PATH "logs/clients.log"
 #else
-#define PATH_LOG "/var/log/dhl_client/client.log"
 #define PATH_CONFIG "/etc/dhl_client/clients_credentials.json"
+#define LOG_BASE_PATH "/var/log/dhl_client/client"
 #endif
+
 #define CLIENT "CLIENT"
 #define ADMIN "admin"
 #define IP "ipv4"
@@ -21,9 +22,11 @@
 
 int start_client(char* client)
 {
+    char log_path[256];
     init_params_client params = load_config_client(PATH_CONFIG, atoi(client));
     set_params(params);
-    log_init(PATH_LOG, CLIENT);
+    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.client_id);
+    log_init(log_path, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     log_info("Client started with ID: %s", get_identifiers()->client_id);
     init_shared_memory();
@@ -36,6 +39,7 @@ int start_cli()
 {
     init_params_client params = {0};
     char command[BUFFER_SIZE];
+    char log_path[256];
     printf("Welcome to the CLI!\n");
     printf("Please enter: \n\t -host: \n\t -port:\n");
     printf("host: ");
@@ -52,10 +56,9 @@ int start_cli()
     params.connection_params.protocol[MIN_SIZE - 1] = '\0';
     strncpy(params.connection_params.ip_version, IP, MIN_SIZE - 1);
     params.connection_params.ip_version[MIN_SIZE - 1] = '\0';
-
     set_client_id(params.client_id);
-    printf("Client: %s\n", get_identifiers()->client_id);
-    log_init(PATH_LOG, CLIENT);
+    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.client_id);
+    log_init(log_path, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     if (connection_cli(params))
         return 1;

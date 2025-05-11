@@ -339,7 +339,7 @@ bool udp_server::handle_udp_message(const std::string& message, const asio::ip::
         break;
     }
     case CLIENT_INFECTION_ALERT: {
-        client_infection_alert alert = deserialize_client_infection_alert(message.c_str());
+        client_emergency_alert alert = deserialize_client_infection_alert(message.c_str());
         // Procesar alerta
 
         break;

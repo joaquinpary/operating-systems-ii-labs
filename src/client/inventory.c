@@ -35,12 +35,7 @@
 #define HUB_MAX 100
 #define WAREHOUSE_MIN WAREHOUSE_MAX * 0.2
 #define HUB_MIN HUB_MAX * 0.2
-#define RELATION 5 // Relation between warehouse and hub quantities
-#define T_CONST 60
-#define REPLENISH_TIME 1
-#define DEMAND_HUB 80 / T_CONST
 
-static calculation calc = {0};
 static shared_data* shm_ptr = NULL;
 static int semid = -1;
 
@@ -93,14 +88,6 @@ int init_shared_memory()
     memset(shm_ptr, 0, sizeof(shared_data));
     init_inventory();
     sem_signal();
-    if (!strcmp(get_identifiers()->client_type, "warehouse"))
-    {
-        calculate_parameters((double)RELATION, (double)DEMAND_HUB, (double)T_CONST, (double)REPLENISH_TIME);
-    }
-    else if (!strcmp(get_identifiers()->client_type, "hub"))
-    {
-        calculate_parameters(1, (double)DEMAND_HUB, (double)T_CONST, (double)REPLENISH_TIME);
-    }
 
     return 0;
 }
@@ -183,10 +170,24 @@ inventory_item* get_inventory_to_replenish()
         for (int i = 0; i < get_inventory_size(); ++i)
         {
             strcpy(inventory_to_replenish[i].item, shm_ptr->items[i].item);
-            missing = calc.objective_s - shm_ptr->items[i].quantity;
-            if (missing > 0)
+            if (shm_ptr->items[i].quantity <= WAREHOUSE_MIN)
             {
-                inventory_to_replenish[i].quantity = (int)missing;
+                inventory_to_replenish[i].quantity = WAREHOUSE_MAX - shm_ptr->items[i].quantity;
+            }
+            else
+            {
+                inventory_to_replenish[i].quantity = 0;
+            }
+        }
+    }
+    else if (strcmp(get_identifiers()->client_type, "hub") == 0)
+    {
+        for (int i = 0; i < get_inventory_size(); ++i)
+        {
+            strcpy(inventory_to_replenish[i].item, shm_ptr->items[i].item);
+            if (shm_ptr->items[i].quantity <= HUB_MIN)
+            {
+                inventory_to_replenish[i].quantity = HUB_MAX - shm_ptr->items[i].quantity;
             }
             else
             {
@@ -225,27 +226,22 @@ void init_inventory()
     shm_ptr->items_to_send[4].item[MIN_SIZE - 1] = '\0';
     strncpy(shm_ptr->items_to_send[5].item, TOOLS, MIN_SIZE - 1);
     shm_ptr->items_to_send[5].item[MIN_SIZE - 1] = '\0';
-    for (int i = 0; i < get_inventory_size(); i++)
+    if (!strcmp(get_identifiers()->client_type, "warehouse"))
     {
-        if (!strcmp(get_identifiers()->client_type, "warehouse"))
+        for (int i = 0; i < get_inventory_size(); i++)
         {
-
             shm_ptr->items[i].quantity = WAREHOUSE_MAX;
             shm_ptr->items_to_send[i].quantity = 0;
         }
-        else if (!strcmp(get_identifiers()->client_type, "hub"))
+    }
+    else if (!strcmp(get_identifiers()->client_type, "hub"))
+    {
+        for (int i = 0; i < get_inventory_size(); i++)
         {
             shm_ptr->items[i].quantity = HUB_MAX;
             shm_ptr->items_to_send[i].quantity = 0;
         }
     }
-}
-
-void calculate_parameters(double actors, double demand, double T, double rep_time)
-{
-    calc.demand_u = actors * demand * (T + rep_time);
-    calc.sec_stock = 0.2 * calc.demand_u;
-    calc.objective_s = calc.demand_u + calc.sec_stock;
 }
 
 void set_inventory_to_send(inventory_item* items_to_send)
@@ -291,10 +287,19 @@ int replenish()
     sem_signal();
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        missing = calc.objective_s - items[i].quantity;
-        if (missing > 0)
+        if (!strcmp(get_identifiers()->client_type, "warehouse"))
         {
-            return 1;
+            if (items[i].quantity <= WAREHOUSE_MIN)
+            {
+                return 1;
+            }
+        }
+        else if (!strcmp(get_identifiers()->client_type, "hub"))
+        {
+            if (items[i].quantity <= HUB_MIN)
+            {
+                return 1;
+            }
         }
     }
     return 0;
@@ -311,7 +316,7 @@ int inventory_compsumption()
     int unit = 0;
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        unit = (int)get_uniform_random((DEMAND_HUB * 10) - 4, (DEMAND_HUB * 10) + 4);
+        unit = (int)get_uniform_random(1, HUB_MIN);
         sem_wait();
         if (shm_ptr->items[i].quantity < unit)
             return 1;

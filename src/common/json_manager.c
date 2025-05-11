@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
 #include <time.h>
+#include <zlib.h>
 
 #define WAREHOUSE "warehouse"
 #define HUB "hub"
@@ -437,7 +437,8 @@ client_emergency_alert deserialize_client_infection_alert(const char* json_strin
         cJSON* emergency_type = cJSON_GetObjectItemCaseSensitive(payload, "emergency_type");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsString(emergency_type) && cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(timestamp))
+        if (cJSON_IsString(emergency_type) && cJSON_IsString(username) && cJSON_IsString(session_token) &&
+            cJSON_IsString(timestamp))
         {
             strncpy(client_emergency_alert.payload.username, username->valuestring, USER_PASS_SIZE - 1);
             strncpy(client_emergency_alert.payload.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
@@ -2377,23 +2378,23 @@ client_emergency_alert create_client_infection_alert(const char* username, const
     int election = rand() % 3;
     switch (election)
     {
-        case 0:
-            strncpy(inf_alert.payload.emergency_type, "infection", MIN_SIZE - 1);
-            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
-            break;
-        case 1:
-            strncpy(inf_alert.payload.emergency_type, "weather", MIN_SIZE - 1);
-            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
-            break;
-        case 2:
-            strncpy(inf_alert.payload.emergency_type, "enemy thread", MIN_SIZE - 1);
-            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
-            break;
-        default:
-            fprintf(stderr, "Error: invalid election value\n");
-            strncpy(inf_alert.payload.emergency_type, "unknown", MIN_SIZE - 1);
-            inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
-            break;
+    case 0:
+        strncpy(inf_alert.payload.emergency_type, "infection", MIN_SIZE - 1);
+        inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+        break;
+    case 1:
+        strncpy(inf_alert.payload.emergency_type, "weather", MIN_SIZE - 1);
+        inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+        break;
+    case 2:
+        strncpy(inf_alert.payload.emergency_type, "enemy thread", MIN_SIZE - 1);
+        inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+        break;
+    default:
+        fprintf(stderr, "Error: invalid election value\n");
+        strncpy(inf_alert.payload.emergency_type, "unknown", MIN_SIZE - 1);
+        inf_alert.payload.emergency_type[MIN_SIZE - 1] = '\0';
+        break;
     }
     char* timestamp = get_timestamp();
     if (!timestamp)

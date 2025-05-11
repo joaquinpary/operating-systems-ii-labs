@@ -3,16 +3,7 @@
 
 #include "json_manager.h"
 
-#define ITEMS 6
-#define ACTIONS 2
-
-typedef struct
-{
-    double demand_u;
-    double objective_s;
-    double sec_stock;
-
-} calculation;
+#define ITEMS 6 
 
 union semun {
     int val;
@@ -29,8 +20,6 @@ typedef struct
 
 void sem_wait();
 void sem_signal();
-// void sem_wait_sender();
-// void sem_signal_sender();
 int init_shared_memory();
 void cleanup_shared_memory();
 shared_data* get_shared_data();
