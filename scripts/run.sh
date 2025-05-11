@@ -6,8 +6,11 @@ case "$1" in
         # done
 
         ./build/dhl_client 0 &
+        sleep 1
         ./build/dhl_client 1 &
+        sleep 1
         ./build/dhl_client 5 &
+        sleep 1
         ./build/dhl_client 7 &
 
         # ./build/dhl_client 0

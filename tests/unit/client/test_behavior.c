@@ -484,7 +484,7 @@ void test_message_receiver_server_warehouse_stock_hub()
         .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     inventory_item items[6] = {{"water", 10}, {"food", 5}, {"medicine", 7}, {"guns", 1}, {"ammo", 3}, {"tools", 2}};
-    server_w_stock_hub send_stock = create_server_w_stock_hub(items, 6);
+    server_w_stock_hub send_stock = create_server_w_stock_hub("hub0001", items, 6);
     char* serialized_response = serialize_server_w_stock_hub(&send_stock, 6);
     if (serialized_response == NULL)
     {

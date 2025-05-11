@@ -280,7 +280,7 @@ int message_sender(connection_context context, int type_message)
         break;
     case WAREHOUSE_SEND_STOCK_TO_HUB:
         warehouse_send_stock_to_hub send_stock_hub =
-            create_warehouse_send_stock_to_hub(get_identifiers()->username, get_identifiers()->session_token,
+            create_warehouse_send_stock_to_hub(get_identifiers()->username, get_identifiers()->session_token, get_hub_username(),
                                                get_inventory_to_send(), get_inventory_size());
         buffer = serialize_warehouse_send_stock_to_hub(&send_stock_hub, get_inventory_size());
         if (buffer == NULL)
@@ -443,6 +443,7 @@ int* message_receiver(char* response, connection_context context)
     {
         server_w_stock_hub stock_hub = deserialize_server_w_stock_hub(response);
         set_inventory_to_send(stock_hub.payload.items);
+        set_hub_username(stock_hub.payload.hub_username);
         next_action[0] = REPLY;
         next_action[1] = WAREHOUSE_SEND_STOCK_TO_HUB;
         free(type);
@@ -496,6 +497,7 @@ int warehouse_logic_sender(connection_context context, int time, int finish)
     int infection;
     while (1)
     {
+
         if (get_uniform_random(0, 100) < 1)
         {
             if (message_sender(context, CLIENT_INFECTION_ALERT))
@@ -509,6 +511,7 @@ int warehouse_logic_sender(connection_context context, int time, int finish)
             if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
                 return 1;
         }
+
         if (message_sender(context, CLIENT_KEEP_ALIVE))
             return 1;
         if (message_sender(context, CLIENT_INVENTORY_UPDATE))
@@ -516,6 +519,13 @@ int warehouse_logic_sender(connection_context context, int time, int finish)
         if (finish)
             break;
         sleep(60);
+        if (replenish())
+        {
+            log_info("Low inventory detected, sending request for supply to server with ID: %s",
+                     get_identifiers()->client_id);
+            if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
+                return 1;
+        }
     }
     return 0;
 }

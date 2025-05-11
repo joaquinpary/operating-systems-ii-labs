@@ -162,7 +162,7 @@ void test_client_infection_alert(void)
 
 void test_server_w_stock_hub(void)
 {
-    server_w_stock_hub stock = create_server_w_stock_hub(items, ITEM_TYPE);
+    server_w_stock_hub stock = create_server_w_stock_hub("hub0001", items, ITEM_TYPE);
     char* string = serialize_server_w_stock_hub(&stock, ITEM_TYPE);
     TEST_ASSERT_NOT_NULL(string);
     server_w_stock_hub deserialized_stock = deserialize_server_w_stock_hub(string);
@@ -178,7 +178,7 @@ void test_server_w_stock_hub(void)
 void test_warehouse_send_stock_to_hub(void)
 {
     warehouse_send_stock_to_hub stock =
-        create_warehouse_send_stock_to_hub(params_warehouse.username, "session_token", items, ITEM_TYPE);
+        create_warehouse_send_stock_to_hub(params_warehouse.username, "session_token", "hub0001", items, ITEM_TYPE);
     char* string = serialize_warehouse_send_stock_to_hub(&stock, ITEM_TYPE);
     TEST_ASSERT_NOT_NULL(string);
     warehouse_send_stock_to_hub deserialized_stock = deserialize_warehouse_send_stock_to_hub(string);

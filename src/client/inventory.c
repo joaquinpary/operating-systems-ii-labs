@@ -320,3 +320,26 @@ int inventory_compsumption()
     }
     return 0;
 }
+
+void set_hub_username(const char* username)
+{
+    sem_wait();
+    strncpy(shm_ptr->hub_username, username, USER_PASS_SIZE - 1);
+    shm_ptr->hub_username[USER_PASS_SIZE - 1] = '\0';
+    sem_signal();
+}
+
+char* get_hub_username()
+{
+    char* username = malloc(USER_PASS_SIZE);
+    if (username == NULL)
+    {
+        perror("Error allocating memory for username");
+        return NULL;
+    }
+    sem_wait();
+    strncpy(username, shm_ptr->hub_username, USER_PASS_SIZE - 1);
+    username[USER_PASS_SIZE - 1] = '\0';
+    sem_signal();
+    return username;
+}

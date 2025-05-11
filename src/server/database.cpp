@@ -7,8 +7,6 @@
 #include <stdexcept>
 #include <thread>
 
-#define PATH_CREDENTIALS "/etc/dhl_server/server_credentials.json"
-
 database_manager::database_manager()
 {
     try
@@ -82,32 +80,35 @@ void database_manager::initialize_database()
 
     txn.exec("CREATE TABLE IF NOT EXISTS clients ("
              "id SERIAL PRIMARY KEY,"
-             "client_id TEXT UNIQUE NOT NULL,"
+             "client_type TEXT UNIQUE NOT NULL,"
              "username TEXT UNIQUE NOT NULL,"
              "password TEXT NOT NULL,"
              "session_token TEXT)");
 
     txn.exec("CREATE TABLE IF NOT EXISTS inventory ("
              "id INTEGER PRIMARY KEY REFERENCES clients(id),"
-             "weapons INTEGER DEFAULT 0,"
-             "medicine INTEGER DEFAULT 0,"
-             "tools INTEGER DEFAULT 0,"
+             "water INTEGER DEFAULT 0,"
              "food INTEGER DEFAULT 0,"
-             "water INTEGER DEFAULT 0)");
+             "medicine INTEGER DEFAULT 0,"
+             "guns INTEGER DEFAULT 0,"
+             "ammo INTEGER DEFAULT 0,"
+             "tools INTEGER DEFAULT 0,"
+             "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
 
     txn.exec("CREATE TABLE IF NOT EXISTS transaction_history ("
-             "id SERIAL PRIMARY KEY REFERENCES clients(id), "
-             "hub_id TEXT REFERENCES clients(client_id), "
-             "warehouse_id TEXT REFERENCES clients(client_id), "
+             "id SERIAL PRIMARY KEY,"
+             "sender_id INTEGER REFERENCES clients(id), "
+             "receiver_id INTEGER REFERENCES clients(id), "
              "timestamp_requested TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
              "timestamp_dispatched TIMESTAMP, "
              "timestamp_received TIMESTAMP, "
              "description TEXT, "
-             "delta_weapons INTEGER DEFAULT 0, "
-             "delta_medicine INTEGER DEFAULT 0, "
-             "delta_tools INTEGER DEFAULT 0, "
-             "delta_food INTEGER DEFAULT 0, "
              "delta_water INTEGER DEFAULT 0, "
+             "delta_food INTEGER DEFAULT 0, "
+             "delta_medicine INTEGER DEFAULT 0, "
+             "delta_guns INTEGER DEFAULT 0, "
+             "delta_ammo INTEGER DEFAULT 0, "
+             "delta_tools INTEGER DEFAULT 0, "
              "status TEXT CHECK (status IN ('requested', 'dispatched', 'received')) NOT NULL DEFAULT 'requested'"
              ");");
 
@@ -128,8 +129,9 @@ bool database_manager::authenticate_client(const std::string& username, const st
     {
         pqxx::work txn(*database_conn_handle);
 
-        pqxx::result result = txn.exec_params("SELECT 1 FROM clients WHERE username = $1 AND password = $2 LIMIT 1",
-                                              std::string_view(username), std::string_view(password));
+        pqxx::result result =
+            txn.exec(pqxx::zview("SELECT 1 FROM clients WHERE username = $1 AND password = $2 LIMIT 1"),
+                     pqxx::params{username, password});
 
         return !result.empty(); // Si el resultado no está vacío, hay una coincidencia
     }
@@ -189,19 +191,218 @@ void database_manager::load_clients_from_json(const std::string& filepath)
 
         // Verificar si ya existe
         pqxx::result r =
-            txn.exec_params("SELECT 1 FROM clients WHERE username = $1 OR client_id::text = $2 LIMIT 1",
-                            std::string_view(username->valuestring), std::string_view(client_id->valuestring));
+            txn.exec(pqxx::zview("SELECT 1 FROM clients WHERE username = $1 OR client_id::text = $2 LIMIT 1"),
+                     pqxx::params(username->valuestring, client_id->valuestring));
         if (!r.empty())
         {
             continue;
         }
 
         // Insertar nuevo cliente
-        txn.exec_params("INSERT INTO clients (username, password, client_id) VALUES ($1, $2, $3)",
-                        std::string_view(username->valuestring), std::string_view(password->valuestring),
-                        std::string_view(client_id->valuestring));
+        txn.exec(pqxx::zview("INSERT INTO clients (username, password, client_id) VALUES ($1, $2, $3)"),
+                 pqxx::params(username->valuestring, password->valuestring, client_id->valuestring));
     }
 
     txn.commit();
     cJSON_Delete(root);
+}
+
+bool database_manager::update_client_inventory(const std::string& username, int water, int food, int medicine, int guns,
+                                               int ammo, int tools)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+        std::cout << "Actualizando inventario de cliente: " << username << "\n" << std::flush;
+        pqxx::result r =
+            txn.exec(pqxx::zview("INSERT INTO inventory (id, water, food, medicine, guns, ammo, tools) "
+                                 "VALUES ((SELECT id FROM clients WHERE username = $1), $2, $3, $4, $5, $6, $7) "
+                                 "ON CONFLICT (id) DO UPDATE SET "
+                                 "water = EXCLUDED.water, food = EXCLUDED.food, medicine = EXCLUDED.medicine, guns = "
+                                 "EXCLUDED.guns, ammo = EXCLUDED.ammo, tools = EXCLUDED.tools "
+
+                                 ),
+                     pqxx::params(username, guns, ammo, medicine, tools, food, water));
+
+        if (r.affected_rows() == 0)
+        {
+            std::cerr << "Client not found. Did not update inventory." << username << "\n" << std::flush;
+            return true;
+        }
+        std::cout << "Inventario actualizado correctamente.\n";
+        txn.commit();
+        return false;
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        std::cerr << "Error SQL en actualización de inventario: " << e.what() << "\nConsulta: " << e.query() << "\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error general en actualización de inventario: " << e.what() << "\n";
+    }
+
+    return true;
+}
+
+bool database_manager::register_hub_order(const std::string& warehouse_username, const std::string& hub_username,
+                                          int water, int food, int medicine, int guns, int ammo, int tools,
+                                          const std::string& timestamp)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+
+        pqxx::result r = txn.exec(
+            pqxx::zview("INSERT INTO transaction_history (sender_id, receiver_id, "
+                        "delta_water, delta_food, delta_medicine, delta_guns, delta_ammo, "
+                        "delta_tools, timestamp_requested) "
+                        "VALUES ((SELECT id FROM clients WHERE username = $1), "
+                        "(SELECT id FROM clients WHERE username = $2), $3, $4, $5, $6, $7, $8, $9) "),
+            pqxx::params(hub_username, warehouse_username, water, food, medicine, guns, ammo, tools, timestamp));
+
+        if (r.empty())
+        {
+            std::cerr << "Error al registrar la transacción.\n";
+            return true;
+        }
+
+        txn.commit();
+        return false;
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        std::cerr << "Error SQL en registro de transacción: " << e.what() << "\nConsulta: " << e.query() << "\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error general en registro de transacción: " << e.what() << "\n";
+    }
+    return true;
+}
+
+bool database_manager::register_warehouse_shipment(const std::string& warehouse_username,
+                                                   const std::string& hub_username, int water, int food, int medicine,
+                                                   int guns, int ammo, int tools,
+                                                   const std::string& timestamp_dispatched)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+
+        pqxx::result r = txn.exec(pqxx::zview("UPDATE transaction_history "
+                                              "SET timestamp_dispatched = $1 "
+                                              "WHERE sender_id = (SELECT id FROM clients WHERE username = $2) "
+                                              "AND receiver_id = (SELECT id FROM clients WHERE username = $3) "
+                                              "AND delta_water = $4 AND delta_food = $5 AND delta_medicine = $6 "
+                                              "AND delta_guns = $7 AND delta_ammo = $8 AND delta_tools = $9 "
+                                              "AND timestamp_dispatched IS NULL "
+                                              "RETURNING sender_id"),
+                                  pqxx::params(timestamp_dispatched, warehouse_username, hub_username, water, food,
+                                               medicine, guns, ammo, tools));
+
+        if (r.empty())
+        {
+            std::cerr << "No se encontró una transacción coincidente para actualizar.\n";
+            return false;
+        }
+
+        int warehouse_id = r[0][0].as<int>();
+
+        // Actualizar el inventario del warehouse
+        txn.exec(pqxx::zview("UPDATE inventory "
+                             "SET water = water - $1, food = food - $2, medicine = medicine - $3, "
+                             "guns = guns - $4, ammo = ammo - $5, tools = tools - $6 "
+                             "WHERE client_id = $7"),
+                 pqxx::params(water, food, medicine, guns, ammo, tools, warehouse_id));
+
+        txn.commit();
+        return true;
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        std::cerr << "Error SQL en actualización de envío del warehouse: " << e.what() << "\nConsulta: " << e.query()
+                  << "\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error general en actualización de envío del warehouse: " << e.what() << "\n";
+    }
+    return false;
+}
+
+bool database_manager::register_warehouse_stock_request(const std::string& warehouse_username, int water, int food,
+                                                        int medicine, int guns, int ammo, int tools,
+                                                        const std::string& timestamp)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+
+        pqxx::result r = txn.exec(
+            pqxx::zview(
+                "INSERT INTO transaction_history (sender_id, receiver_id, "
+                "delta_water, delta_food, delta_medicine, delta_guns, delta_ammo, delta_tools, timestamp_requested) "
+                "VALUES ((SELECT id FROM clients WHERE username = $1), "
+                "(SELECT id FROM clients WHERE username = $2), $3, $4, $5, $6, $7, $8, $9)"),
+            pqxx::params(9999, warehouse_username, water, food, medicine, guns, ammo, tools, timestamp));
+
+        if (r.empty())
+        {
+            std::cerr << "Error al registrar la solicitud de stock del warehouse.\n";
+            return false;
+        }
+
+        txn.commit();
+        return true;
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        std::cerr << "Error SQL en registro de solicitud de stock del warehouse: " << e.what()
+                  << "\nConsulta: " << e.query() << "\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error general en registro de solicitud de stock del warehouse: " << e.what() << "\n";
+    }
+    return false;
+}
+
+std::string database_manager::get_designated_warehouse(int water, int food, int medicine, int guns, int ammo, int tools)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+
+        pqxx::result r = txn.exec(pqxx::zview("SELECT c.username "
+                                              "FROM clients c "
+                                              "JOIN inventory i ON c.id = i.client_id "
+                                              "WHERE c.role = 'warehouse' "
+                                              "AND i.water >= $1 "
+                                              "AND i.food >= $2 "
+                                              "AND i.medicine >= $3 "
+                                              "AND i.guns >= $4 "
+                                              "AND i.ammo >= $5 "
+                                              "AND i.tools >= $6 "
+                                              "ORDER BY RANDOM() "
+                                              "LIMIT 1"),
+                                  pqxx::params(water, food, medicine, guns, ammo, tools));
+
+        txn.commit();
+
+        if (!r.empty())
+        {
+            return r[0][0].as<std::string>();
+        }
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        std::cerr << "SQL error: " << e.what() << "\nQuery: " << e.query() << "\n";
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "Error: " << e.what() << "\n";
+    }
+
+    return {};
 }

@@ -14,7 +14,12 @@ runs:
 
         # Run Coverage with gcovr
 
-        gcovr -r "$PROJECT_PATH" --exclude 'external/*' > "$PROJECT_PATH/coverage.txt"
+        gcovr -r "$PROJECT_PATH" \
+          --exclude 'external/*' \
+          --exclude 'tests/*' \
+          --exclude 'local/*' \
+          --exclude 'include/*' \
+          > "$PROJECT_PATH/coverage.txt"
 
         echo "Runnig: gcovr -r $PROJECT_PATH ."
 

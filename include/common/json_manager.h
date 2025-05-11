@@ -18,7 +18,6 @@ extern "C"
 #define SESSION_TOKEN_SIZE 37
 #define ITEM_TYPE 6
 
-    // cambiar username por client_id
     typedef struct
     {
         char host[BUFFER_SIZE];
@@ -99,7 +98,7 @@ extern "C"
 
     typedef struct
     {
-        // char client_id[MIN_SIZE];
+        char hub_username[USER_PASS_SIZE];
         inventory_item items[ITEM_TYPE];
         char timestamp[TIMESTAMP_SIZE];
     } payload_server_w_stock_hub;
@@ -107,6 +106,7 @@ extern "C"
     typedef struct
     {
         char username[USER_PASS_SIZE];
+        char hub_username[USER_PASS_SIZE];
         char session_token[SESSION_TOKEN_SIZE];
         inventory_item items[ITEM_TYPE];
         char timestamp[TIMESTAMP_SIZE];
@@ -227,13 +227,6 @@ extern "C"
     typedef struct
     {
         char type[MIN_SIZE];
-        payload_server_h_request_delivery payload;
-        char checksum[BUFFER_SIZE];
-    } server_h_request_delivery;
-
-    typedef struct
-    {
-        char type[MIN_SIZE];
         payload_hub_request_stock payload;
         char checksum[BUFFER_SIZE];
     } hub_request_stock;
@@ -300,7 +293,6 @@ extern "C"
     warehouse_send_stock_to_hub deserialize_warehouse_send_stock_to_hub(const char* json_string);
     warehouse_request_stock deserialize_warehouse_request_stock(const char* json_string);
     server_w_stock_warehouse deserialize_server_w_stock_warehouse(const char* json_string);
-    server_h_request_delivery deserialize_sever_h_request_delivery(const char* json_string);
     hub_request_stock deserialize_hub_request_stock(const char* json_string);
     server_h_send_stock deserialize_server_h_send_stock(const char* json_string);
     cli_message deserialize_cli_message(const char* json_string);
@@ -342,9 +334,9 @@ extern "C"
     server_emergency_alert create_server_emergency_alert(const char* alert_type);
     client_acknowledgment create_client_acknowledgment(const char* username, const char* session_token,
                                                        const char* status);
-    client_emergency_alert create_client_infection_alert(const char* username, const char* session_token);
-    server_w_stock_hub create_server_w_stock_hub(const inventory_item* items, const int item_count);
-    warehouse_send_stock_to_hub create_warehouse_send_stock_to_hub(const char* username, const char* session_token,
+    client_infection_alert create_client_infection_alert(const char* username, const char* session_token);
+    server_w_stock_hub create_server_w_stock_hub(const char* hub_username, const inventory_item* items, const int item_count);
+    warehouse_send_stock_to_hub create_warehouse_send_stock_to_hub(const char* username, const char* session_token, const char* hub_username,
                                                                    const inventory_item* items, const int item_count);
     warehouse_request_stock create_warehouse_request_stock(const char* username, const char* session_token,
                                                            const inventory_item* items, const int item_count);

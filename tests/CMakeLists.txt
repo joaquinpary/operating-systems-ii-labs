@@ -53,43 +53,54 @@ if(RUN_COVERAGE)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov --coverage")
 endif()
 
-option(TEST_TARGET "Test target: server, client or common")
+# option(TEST_TARGET "Test target: server, client or common")
 
-if(TEST_TARGET STREQUAL "client")
-    message(STATUS "Setting up multiple client test executables...")
+# if(TEST_TARGET STREQUAL "client")
+message(STATUS "Setting up multiple client test executables...")
 
-    set(test_server_file ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/test_server.c)
+set(test_server_file ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/test_server.c)
 
-    foreach(test_file ${CLIENT_TEST})
-        get_filename_component(test_name ${test_file} NAME_WE)
+foreach(test_file ${CLIENT_TEST})
+    get_filename_component(test_name ${test_file} NAME_WE)
+    set(exec_name test_client_${test_name})
+    add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${test_server_file})
+    target_link_libraries(${exec_name} PRIVATE unity pthread ZLIB::ZLIB)
+    target_compile_definitions(${exec_name} PRIVATE TESTING)
+    add_test(NAME ${exec_name} COMMAND ${exec_name})
+endforeach()
 
-        set(exec_name test_client_${test_name})
+message(STATUS "Setting up multiple common test executables...")
 
-        add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${test_server_file})
-        target_link_libraries(${exec_name} PRIVATE unity pthread ZLIB::ZLIB)
-        target_compile_definitions(${exec_name} PRIVATE TESTING)
-        add_test(NAME ${exec_name} COMMAND ${exec_name})
-    endforeach()
+foreach(test_file ${COMMON_TEST})
+    get_filename_component(test_name ${test_file} NAME_WE)
+    set(exec_name test_common_${test_name})
+    add_executable(${exec_name} ${test_file} ${COMMON_SRC})
+    target_link_libraries(${exec_name} PRIVATE unity ZLIB::ZLIB)
+    target_compile_definitions(${exec_name} PRIVATE TESTING)
+    add_test(NAME ${exec_name} COMMAND ${exec_name})
+endforeach()
 
-    message(STATUS "Setting up multiple common test executables...")
+message(STATUS "Setting up server test executables...")
 
-    foreach(test_file ${COMMON_TEST})
-        get_filename_component(test_name ${test_file} NAME_WE)
+foreach(test_file ${SERVER_TEST})
+    get_filename_component(test_name ${test_file} NAME_WE)
+    set(exec_name test_server_${test_name})
+    add_executable(${exec_name} ${test_file} ${SERVER_SRC} ${COMMON_SRC})
+    target_include_directories(${exec_name} PRIVATE
+        ${PROJECT_SOURCE_DIR}/include/server
+        ${PROJECT_SOURCE_DIR}/include/common
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include
+        ${LIBPQXX_INCLUDE_DIRS}
+    )
+    target_link_libraries(${exec_name} PRIVATE
+        gtest
+        gtest_main
+        pthread
+        ZLIB::ZLIB
+        ${LIBPQXX_LIBRARIES}
+        pq
+    )
+    target_compile_definitions(${exec_name} PRIVATE TESTING)
 
-        set(exec_name test_common_${test_name})
-
-        add_executable(${exec_name} ${test_file} ${COMMON_SRC})
-        target_link_libraries(${exec_name} PRIVATE unity ZLIB::ZLIB)
-        target_compile_definitions(${exec_name} PRIVATE TESTING)
-        add_test(NAME ${exec_name} COMMAND ${exec_name})
-    endforeach()
-
-elseif(TEST_TARGET STREQUAL "server")
-    set(TARGET_EXEC test_server)
-    add_executable(${TARGET_EXEC} ${SERVER_TEST} ${SERVER_SRC} ${COMMON_SRC})
-    target_link_libraries(${TARGET_EXEC} gtest gtest_main pthread ZLIB::ZLIB)
-    add_test(NAME ${TARGET_EXEC} COMMAND ${TARGET_EXEC})
-
-else()
-    message(FATAL_ERROR "Invalid test target specified. Use 'client' or 'server'.")
-endif()
+    add_test(NAME ${exec_name} COMMAND ${exec_name})
+endforeach()

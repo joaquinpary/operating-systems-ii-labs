@@ -28,7 +28,7 @@ runs:
       
         mkdir -p build && cd build
         cmake .. -DBUILD_TARGET=client && make
-        cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=client && make
+        # cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=client && make
 
         cmake .. -DBUILD_TARGET=server -DCMAKE_PREFIX_PATH=$LOCAL_INSTALL && make
-        # cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=server && make
+        cmake .. -DRUN_COVERAGE=1 && make
