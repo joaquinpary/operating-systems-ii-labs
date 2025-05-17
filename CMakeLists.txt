@@ -92,6 +92,7 @@ elseif(BUILD_TARGET STREQUAL "client")
     file(GLOB SOURCES
         src/client/*.c
         src/common/*.c
+        include/common/*.h
         include/client/*.h
     )
     set(TARGET_EXEC dhl_client)

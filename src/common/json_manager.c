@@ -112,30 +112,13 @@ init_params_client load_config_client(const char* filename, const int index)
         return params;
     }
 
-    cJSON* client_id = cJSON_GetObjectItemCaseSensitive(client, "client_id");
+    cJSON* client_type = cJSON_GetObjectItemCaseSensitive(client, "client_type");
     cJSON* username = cJSON_GetObjectItemCaseSensitive(client, "username");
     cJSON* password = cJSON_GetObjectItemCaseSensitive(client, "password");
     cJSON* connect = cJSON_GetObjectItemCaseSensitive(client, "connect");
 
-    if (cJSON_IsString(client_id))
-    {
-        if (strncmp(cJSON_GetStringValue(client_id), WAREHOUSE, 9) == 0)
-        {
-            strncpy(params.client_type, WAREHOUSE, MIN_SIZE - 1);
-        }
-        else if (strncmp(cJSON_GetStringValue(client_id), HUB, 3) == 0)
-        {
-            strncpy(params.client_type, HUB, MIN_SIZE - 1);
-        }
-        else
-        {
-            fprintf(stderr, "Invalid client type: %s\n", cJSON_GetStringValue(client_id));
-            cJSON_Delete(root);
-            free(data);
-            return params;
-        }
-        strncpy(params.client_id, client_id->valuestring, MIN_SIZE - 1);
-    }
+    if (cJSON_IsString(client_type))
+        strncpy(params.client_type, client_type->valuestring, MIN_SIZE - 1);
     if (cJSON_IsString(username))
         strncpy(params.username, username->valuestring, USER_PASS_SIZE - 1);
     if (cJSON_IsString(password))
@@ -180,16 +163,14 @@ client_auth_request deserialize_client_auth_request(const char* json_string)
         strncpy(client_auth_request.type, type->valuestring, MIN_SIZE - 1);
         strncpy(client_auth_request.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
-        cJSON* client_id = cJSON_GetObjectItemCaseSensitive(payload, "client_id");
         cJSON* payload_type = cJSON_GetObjectItemCaseSensitive(payload, "type");
         cJSON* username = cJSON_GetObjectItemCaseSensitive(payload, "username");
         cJSON* password = cJSON_GetObjectItemCaseSensitive(payload, "password");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsString(client_id) && cJSON_IsString(payload_type) && cJSON_IsString(username) &&
-            cJSON_IsString(password) && cJSON_IsString(timestamp))
+        if (cJSON_IsString(payload_type) && cJSON_IsString(username) && cJSON_IsString(password) &&
+            cJSON_IsString(timestamp))
         {
-            strncpy(client_auth_request.payload.client_id, client_id->valuestring, MIN_SIZE - 1);
             strncpy(client_auth_request.payload.type, payload_type->valuestring, MIN_SIZE - 1);
             strncpy(client_auth_request.payload.username, username->valuestring, USER_PASS_SIZE - 1);
             strncpy(client_auth_request.payload.password, password->valuestring, USER_PASS_SIZE - 1);
@@ -414,7 +395,7 @@ client_acknowledgment deserialize_client_acknowledgment(const char* json_string)
     return client_acknowledgment;
 }
 
-client_emergency_alert deserialize_client_infection_alert(const char* json_string)
+client_emergency_alert deserialize_client_emergency_alert(const char* json_string)
 {
     client_emergency_alert client_emergency_alert = {0};
     cJSON* json = cJSON_Parse(json_string);
@@ -532,8 +513,8 @@ warehouse_send_stock_to_hub deserialize_warehouse_send_stock_to_hub(const char* 
         cJSON* items = cJSON_GetObjectItemCaseSensitive(payload, "items");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsString(hub_username) && cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsArray(items) &&
-            cJSON_IsString(timestamp))
+        if (cJSON_IsString(hub_username) && cJSON_IsString(username) && cJSON_IsString(session_token) &&
+            cJSON_IsArray(items) && cJSON_IsString(timestamp))
         {
             strncpy(warehouse_send_stock_to_hub.payload.username, username->valuestring, USER_PASS_SIZE - 1);
             strncpy(warehouse_send_stock_to_hub.payload.session_token, session_token->valuestring,
@@ -751,11 +732,14 @@ server_h_send_stock deserialize_server_h_send_stock(const char* json_string)
         strncpy(server_h_send_stock.type, type->valuestring, MIN_SIZE - 1);
         strncpy(server_h_send_stock.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
 
+        cJSON* warehouse_username = cJSON_GetObjectItemCaseSensitive(payload, "warehouse_username");
         cJSON* items = cJSON_GetObjectItemCaseSensitive(payload, "items");
         cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
 
-        if (cJSON_IsArray(items) && cJSON_IsString(timestamp))
+        if (cJSON_IsString(warehouse_username) && cJSON_IsArray(items) && cJSON_IsString(timestamp))
         {
+            strncpy(server_h_send_stock.payload.warehouse_username, warehouse_username->valuestring,
+                    USER_PASS_SIZE - 1);
             strncpy(server_h_send_stock.payload.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
 
             int item_count = cJSON_GetArraySize(items);
@@ -782,6 +766,64 @@ server_h_send_stock deserialize_server_h_send_stock(const char* json_string)
     }
     cJSON_Delete(json);
     return server_h_send_stock;
+}
+
+hub_confirm_stock deserialize_hub_confirm_stock(const char* json_string)
+{
+    hub_confirm_stock hub_confirm_stock = {0};
+    cJSON* json = cJSON_Parse(json_string);
+    if (!json)
+    {
+        fprintf(stderr, "Error parsing JSON: %s\n", cJSON_GetErrorPtr());
+        return hub_confirm_stock;
+    }
+    cJSON* type = cJSON_GetObjectItemCaseSensitive(json, "type");
+    cJSON* payload = cJSON_GetObjectItemCaseSensitive(json, "payload");
+    cJSON* checksum = cJSON_GetObjectItemCaseSensitive(json, "checksum");
+
+    if (cJSON_IsString(type) && cJSON_IsObject(payload) && cJSON_IsString(checksum))
+    {
+        strncpy(hub_confirm_stock.type, type->valuestring, MIN_SIZE - 1);
+        strncpy(hub_confirm_stock.checksum, checksum->valuestring, CHECKSUM_SIZE - 1);
+
+        cJSON* username = cJSON_GetObjectItemCaseSensitive(payload, "username");
+        cJSON* session_token = cJSON_GetObjectItemCaseSensitive(payload, "session_token");
+        cJSON* warehouse_username = cJSON_GetObjectItemCaseSensitive(payload, "warehouse_username");
+        cJSON* items = cJSON_GetObjectItemCaseSensitive(payload, "items");
+        cJSON* timestamp = cJSON_GetObjectItemCaseSensitive(payload, "timestamp");
+
+        if (cJSON_IsString(username) && cJSON_IsString(session_token) && cJSON_IsString(warehouse_username) &&
+            cJSON_IsArray(items) && cJSON_IsString(timestamp))
+        {
+            strncpy(hub_confirm_stock.payload.username, username->valuestring, USER_PASS_SIZE - 1);
+            strncpy(hub_confirm_stock.payload.session_token, session_token->valuestring, SESSION_TOKEN_SIZE - 1);
+            strncpy(hub_confirm_stock.payload.warehouse_username, warehouse_username->valuestring, USER_PASS_SIZE - 1);
+            strncpy(hub_confirm_stock.payload.timestamp, timestamp->valuestring, TIMESTAMP_SIZE - 1);
+
+            int item_count = cJSON_GetArraySize(items);
+            for (int i = 0; i < item_count; i++)
+            {
+                cJSON* item = cJSON_GetArrayItem(items, i);
+                if (cJSON_IsObject(item))
+                {
+                    cJSON* item_name = cJSON_GetObjectItemCaseSensitive(item, "item");
+                    cJSON* quantity = cJSON_GetObjectItemCaseSensitive(item, "quantity");
+                    if (cJSON_IsString(item_name) && cJSON_IsNumber(quantity))
+                    {
+                        strncpy(hub_confirm_stock.payload.items[i].item, item_name->valuestring, MIN_SIZE - 1);
+                        hub_confirm_stock.payload.items[i].quantity = quantity->valueint;
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        fprintf(stderr, "Invalid JSON format.\n");
+        return hub_confirm_stock;
+    }
+    cJSON_Delete(json);
+    return hub_confirm_stock;
 }
 
 cli_message deserialize_cli_message(const char* json_string)
@@ -1030,7 +1072,6 @@ char* serialize_client_auth_request(const client_auth_request* client_auth_reque
         return NULL;
     }
 
-    cJSON_AddStringToObject(payload, "client_id", client_auth_request->payload.client_id);
     cJSON_AddStringToObject(payload, "type", client_auth_request->payload.type);
     cJSON_AddStringToObject(payload, "username", client_auth_request->payload.username);
     cJSON_AddStringToObject(payload, "password", client_auth_request->payload.password);
@@ -1061,15 +1102,6 @@ char* serialize_client_auth_request(const client_auth_request* client_auth_reque
         cJSON_Delete(json);
         return NULL;
     }
-    // char* debug_json = cJSON_Print(json);
-    // if (!debug_json)
-    // {
-    //     fprintf(stderr, "Error printing debug JSON object\n");
-    //     cJSON_Delete(json);
-    //     return NULL;
-    // }
-    // printf("Debug JSON: %s\n", debug_json);
-    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1286,15 +1318,15 @@ char* serialize_client_inventory_update(const client_inventory_update* client_in
         cJSON_Delete(json);
         return NULL;
     }
-    char* debug_json = cJSON_Print(json);
-    if (!debug_json)
-    {
-        fprintf(stderr, "Error printing debug JSON object\n");
-        cJSON_Delete(json);
-        return NULL;
-    }
-    printf("Debug JSON: %s\n", debug_json);
-    free(debug_json);
+    // char* debug_json = cJSON_Print(json);
+    // if (!debug_json)
+    // {
+    //     fprintf(stderr, "Error printing debug JSON object\n");
+    //     cJSON_Delete(json);
+    //     return NULL;
+    // }
+    // printf("Debug JSON: %s\n", debug_json);
+    // free(debug_json);
     cJSON_Delete(json);
     return json_string;
 }
@@ -1424,7 +1456,7 @@ char* serialize_client_acknowledgment(const client_acknowledgment* client_acknow
     return json_string;
 }
 
-char* serialize_client_infection_alert(const client_emergency_alert* client_emergency_alert)
+char* serialize_client_emergency_alert(const client_emergency_alert* client_emergency_alert)
 {
     if (!client_emergency_alert)
     {
@@ -1809,6 +1841,7 @@ char* serialize_server_w_stock_warehouse(const server_w_stock_warehouse* server_
         return NULL;
     }
     cJSON_Delete(json);
+    printf("Serialized server_w_stock_warehouse: %s\n", json_string);
     return json_string;
 }
 
@@ -1944,8 +1977,93 @@ char* serialize_server_h_send_stock(const server_h_send_stock* server_h_send_sto
         }
     }
 
+    cJSON_AddStringToObject(payload, "warehouse_username", server_h_send_stock->payload.warehouse_username);
     cJSON_AddItemToObject(payload, "items", items);
     cJSON_AddStringToObject(payload, "timestamp", server_h_send_stock->payload.timestamp);
+    cJSON_AddItemToObject(json, "payload", payload);
+    char* temp_json_str = cJSON_PrintUnformatted(json);
+    if (!temp_json_str)
+    {
+        fprintf(stderr, "Error printing JSON object\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+    uLong crc = crc32(0L, Z_NULL, 0);
+    crc = crc32(crc, (const Bytef*)temp_json_str, strlen(temp_json_str));
+    free(temp_json_str);
+    char checksum[CHECKSUM_SIZE];
+    int checksum_length = snprintf(checksum, CHECKSUM_SIZE, "%08lX", crc);
+    if (checksum_length >= CHECKSUM_SIZE)
+    {
+        fprintf(stderr, "Error: checksum buffer overflow\n");
+        return NULL;
+    }
+    cJSON_AddStringToObject(json, "checksum", checksum);
+    char* json_string = cJSON_PrintUnformatted(json);
+    if (!json_string)
+    {
+        fprintf(stderr, "Error printing final JSON object\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+    cJSON_Delete(json);
+    return json_string;
+}
+
+char* serialize_hub_confirm_stock(const hub_confirm_stock* hub_confirm_stock, const int item_count)
+{
+    if (!hub_confirm_stock)
+    {
+        fprintf(stderr, "Error: hub_confirm_stock is NULL\n");
+        return NULL;
+    }
+    cJSON* json = cJSON_CreateObject();
+    if (!json)
+    {
+        fprintf(stderr, "Error creating JSON object\n");
+        return NULL;
+    }
+
+    cJSON_AddStringToObject(json, "type", hub_confirm_stock->type);
+
+    cJSON* payload = cJSON_CreateObject();
+    if (!payload)
+    {
+        fprintf(stderr, "Error creating payload JSON object\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+
+    cJSON* items = cJSON_CreateArray();
+    if (!items)
+    {
+        fprintf(stderr, "Error creating items JSON array\n");
+        cJSON_Delete(json);
+        return NULL;
+    }
+
+    for (int i = 0; i < item_count; i++)
+    {
+        if (strlen(hub_confirm_stock->payload.items[i].item) > 0)
+        {
+            cJSON* item = cJSON_CreateObject();
+            if (!item)
+            {
+                fprintf(stderr, "Error creating item JSON object\n");
+                cJSON_Delete(json);
+                return NULL;
+            }
+            cJSON_AddStringToObject(item, "item", hub_confirm_stock->payload.items[i].item);
+            cJSON_AddNumberToObject(item, "quantity", hub_confirm_stock->payload.items[i].quantity);
+            cJSON_AddItemToArray(items, item);
+        }
+    }
+
+    cJSON_AddStringToObject(payload, "username", hub_confirm_stock->payload.username);
+    cJSON_AddStringToObject(payload, "session_token", hub_confirm_stock->payload.session_token);
+    cJSON_AddStringToObject(payload, "warehouse_username", hub_confirm_stock->payload.warehouse_username);
+    cJSON_AddItemToObject(payload, "items", items);
+    cJSON_AddStringToObject(payload, "timestamp", hub_confirm_stock->payload.timestamp);
     cJSON_AddItemToObject(json, "payload", payload);
     char* temp_json_str = cJSON_PrintUnformatted(json);
     if (!temp_json_str)
@@ -2235,12 +2353,9 @@ char* serialize_server_client_alive(const server_client_alive* server_client_ali
     return json_string;
 }
 
-client_auth_request create_client_auth_request(const char* client_id, const char* client_type, const char* username,
-                                               const char* password)
+client_auth_request create_client_auth_request(const char* client_type, const char* username, const char* password)
 {
     client_auth_request aut_req = {.type = "client_auth_request", .checksum = ""};
-    strncpy(aut_req.payload.client_id, client_id, MIN_SIZE - 1);
-    aut_req.payload.client_id[MIN_SIZE - 1] = '\0';
     strncpy(aut_req.payload.type, client_type, MIN_SIZE - 1);
     aut_req.payload.type[MIN_SIZE - 1] = '\0';
     strncpy(aut_req.payload.username, username, USER_PASS_SIZE - 1);
@@ -2367,7 +2482,7 @@ client_acknowledgment create_client_acknowledgment(const char* username, const c
     return ack;
 }
 
-client_emergency_alert create_client_infection_alert(const char* username, const char* session_token)
+client_emergency_alert create_client_emergency_alert(const char* username, const char* session_token)
 {
     client_emergency_alert inf_alert = {.type = "client_emergency_alert", .checksum = ""};
     strncpy(inf_alert.payload.username, username, USER_PASS_SIZE - 1);
@@ -2408,7 +2523,8 @@ client_emergency_alert create_client_infection_alert(const char* username, const
     return inf_alert;
 }
 
-server_w_stock_hub create_server_w_stock_hub(const char* hub_username, const inventory_item* items, const int item_count)
+server_w_stock_hub create_server_w_stock_hub(const char* hub_username, const inventory_item* items,
+                                             const int item_count)
 {
     server_w_stock_hub stock_hub = {
         .type = "server_w_stock_hub", .payload = {.items = {{0}}, .timestamp = ""}, .checksum = ""};
@@ -2434,8 +2550,9 @@ server_w_stock_hub create_server_w_stock_hub(const char* hub_username, const inv
     return stock_hub;
 }
 
-warehouse_send_stock_to_hub create_warehouse_send_stock_to_hub(const char* username, const char* session_token, const char* hub_username,
-                                                               const inventory_item* items, const int item_count)
+warehouse_send_stock_to_hub create_warehouse_send_stock_to_hub(const char* username, const char* session_token,
+                                                               const char* hub_username, const inventory_item* items,
+                                                               const int item_count)
 {
     warehouse_send_stock_to_hub stock_hub = {.type = "warehouse_send_stock_to_hub", .checksum = ""};
     strncpy(stock_hub.payload.username, username, USER_PASS_SIZE - 1);
@@ -2502,12 +2619,6 @@ server_w_stock_warehouse create_server_w_stock_warehouse(const inventory_item* i
         stock_warehouse.payload.items[i].quantity = items[i].quantity;
     }
 
-    for (int i = item_count; i < MIN_SIZE; ++i)
-    {
-        stock_warehouse.payload.items[i].item[0] = '\0';
-        stock_warehouse.payload.items[i].quantity = 0;
-    }
-
     char* timestamp = get_timestamp();
     if (!timestamp)
     {
@@ -2517,6 +2628,8 @@ server_w_stock_warehouse create_server_w_stock_warehouse(const inventory_item* i
     strncpy(stock_warehouse.payload.timestamp, timestamp, TIMESTAMP_SIZE - 1);
     stock_warehouse.payload.timestamp[TIMESTAMP_SIZE - 1] = '\0';
     free(timestamp);
+
+    fprintf(stderr, "Finished creating server_w_stock_warehouse\n");
     return stock_warehouse;
 }
 
@@ -2547,11 +2660,14 @@ hub_request_stock create_hub_request_stock(const char* username, const char* ses
     return stock;
 }
 
-server_h_send_stock create_server_h_send_stock(const inventory_item* items, const int item_count)
+server_h_send_stock create_server_h_send_stock(const char* warehouse_username, const inventory_item* items,
+                                               const int item_count)
 {
     server_h_send_stock stock = {
         .type = "server_h_send_stock", .payload = {.items = {{0}}, .timestamp = ""}, .checksum = ""};
 
+    strncpy(stock.payload.warehouse_username, warehouse_username, USER_PASS_SIZE - 1);
+    stock.payload.warehouse_username[USER_PASS_SIZE - 1] = '\0';
     for (int i = 0; i < item_count; ++i)
     {
         strncpy(stock.payload.items[i].item, items[i].item, MIN_SIZE - 1);
@@ -2571,25 +2687,32 @@ server_h_send_stock create_server_h_send_stock(const inventory_item* items, cons
     return stock;
 }
 
-client_acknowledgment create_hub_receive_stock(const char* username, const char* session_token, const char* status)
+hub_confirm_stock create_hub_confirm_stock(const char* username, const char* warehouse_username,
+                                           const char* session_token, const inventory_item* items, const int item_count)
 {
-    client_acknowledgment hub_recv = {.type = "hub_receive_stock", .checksum = ""};
-    strncpy(hub_recv.payload.username, username, USER_PASS_SIZE - 1);
-    hub_recv.payload.username[USER_PASS_SIZE - 1] = '\0';
-    strncpy(hub_recv.payload.session_token, session_token, SESSION_TOKEN_SIZE - 1);
-    hub_recv.payload.session_token[SESSION_TOKEN_SIZE - 1] = '\0';
-    strncpy(hub_recv.payload.status, status, MIN_SIZE - 1);
-    hub_recv.payload.status[MIN_SIZE - 1] = '\0';
+    hub_confirm_stock stock = {.type = "hub_confirm_stock", .checksum = ""};
+    strncpy(stock.payload.username, username, USER_PASS_SIZE - 1);
+    stock.payload.username[USER_PASS_SIZE - 1] = '\0';
+    strncpy(stock.payload.session_token, session_token, SESSION_TOKEN_SIZE - 1);
+    stock.payload.session_token[SESSION_TOKEN_SIZE - 1] = '\0';
+    strncpy(stock.payload.warehouse_username, warehouse_username, USER_PASS_SIZE - 1);
+    stock.payload.warehouse_username[USER_PASS_SIZE - 1] = '\0';
+    for (int i = 0; i < item_count; ++i)
+    {
+        strncpy(stock.payload.items[i].item, items[i].item, MIN_SIZE - 1);
+        stock.payload.items[i].item[MIN_SIZE - 1] = '\0';
+        stock.payload.items[i].quantity = items[i].quantity;
+    }
     char* timestamp = get_timestamp();
     if (!timestamp)
     {
         fprintf(stderr, "Error generating timestamp\n");
-        hub_recv.payload.timestamp[0] = '\0';
+        stock.payload.timestamp[0] = '\0';
     }
-    strncpy(hub_recv.payload.timestamp, timestamp, TIMESTAMP_SIZE - 1);
-    hub_recv.payload.timestamp[TIMESTAMP_SIZE - 1] = '\0';
+    strncpy(stock.payload.timestamp, timestamp, TIMESTAMP_SIZE - 1);
+    stock.payload.timestamp[TIMESTAMP_SIZE - 1] = '\0';
     free(timestamp);
-    return hub_recv;
+    return stock;
 }
 
 cli_message create_cli_message(const char* username, const char* session_token, const int type_message)

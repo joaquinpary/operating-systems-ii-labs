@@ -10,14 +10,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#ifndef TESTING
-#define PATH_CONFIG "/etc/dhl_server/server_parameters.json"
-#else
-#define PATH_CONFIG "config/server_parameters.json"
-#endif
-
-const size_t BUFFER_SIZE = 1024;
-const int KEEPALIVE_TIMEOUT = 60; // seconds
+const size_t SERVER_BUFFER_SIZE = 1024;
+const int KEEPALIVE_TIMEOUT = 65; // seconds
 
 class tcp_session;
 class udp_server;
@@ -35,6 +29,7 @@ class server
     void unregister_tcp_client(const std::string& username);
     void register_udp_client(const std::string& username, const asio::ip::udp::endpoint& endpoint);
     void unregister_udp_client(const std::string& username);
+    void shutdown();
 
     bool is_client_active_tcp(const std::string& username);
     bool is_client_active_udp(const std::string& username);
@@ -52,7 +47,7 @@ class server
     asio::ip::tcp::acceptor m_tcp6_acceptor;
     std::unique_ptr<udp_server> m_udp4_server;
     std::unique_ptr<udp_server> m_udp6_server;
-        
+
     std::unordered_map<std::string, std::shared_ptr<tcp_session>> m_active_tcp_clients;
     std::unordered_map<std::string, asio::ip::udp::endpoint> m_active_udp_clients;
 
@@ -79,11 +74,10 @@ struct udp_client
     asio::ip::udp::endpoint endpoint;
     std::unique_ptr<last_ongoing_message> udp_last_ongoing_message;
     asio::steady_timer keepalive_timer;
-    const::std::chrono::seconds keepalive_timeout = std::chrono::seconds(KEEPALIVE_TIMEOUT);
+    const ::std::chrono::seconds keepalive_timeout = std::chrono::seconds(KEEPALIVE_TIMEOUT);
 
     udp_client(asio::io_context& io_context)
-        : keepalive_timer(io_context),
-          udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context))
+        : keepalive_timer(io_context), udp_last_ongoing_message(std::make_unique<last_ongoing_message>(io_context))
     {
     }
 };
@@ -94,6 +88,7 @@ class udp_server
     explicit udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
                         database_manager& db_manager, server& m_main_server, config& config_params);
     void send_msg(const std::string& message, const asio::ip::udp::endpoint& endpoint, const std::string& username);
+    asio::ip::udp::socket m_socket; // Socket UDP
 
   private:
     void do_receive(); // Recepción asíncrona
@@ -110,13 +105,12 @@ class udp_server
 
     config m_config_params;
 
-    asio::ip::udp::socket m_socket;            // Socket UDP
-    asio::ip::udp::endpoint m_sender_endpoint; // Dirección del cliente
-    std::array<char, BUFFER_SIZE> m_data;      // Buffer de datos
+    asio::ip::udp::endpoint m_sender_endpoint;   // Dirección del cliente
+    std::array<char, SERVER_BUFFER_SIZE> m_data; // Buffer de datos
 
     std::unordered_map<std::string, std::unique_ptr<udp_client>> m_client_map; // (username, client)
-    std::unordered_map<std::string, int> m_auth_attempts_map; // (username, attempts)
-    std::queue<std::string> m_auth_attempts_fifo; // FIFO queue for auth attempts
+    std::unordered_map<std::string, int> m_auth_attempts_map;                  // (username, attempts)
+    std::queue<std::string> m_auth_attempts_fifo;                              // FIFO queue for auth attempts
 
     database_manager& m_database_manager; // Referencia a la base de datos
 };
@@ -124,28 +118,30 @@ class udp_server
 class tcp_session : public std::enable_shared_from_this<tcp_session>
 {
   public:
-    explicit tcp_session(asio::ip::tcp::socket socket, database_manager& db_manager, server& main_server, config& config_params);
+    explicit tcp_session(asio::ip::tcp::socket socket, database_manager& db_manager, server& main_server,
+                         config& config_params);
     void start();
     std::string get_username();
     std::string get_client_type();
     void send_msg(const std::string& message);
+    void close_connection(const std::string& reason);
 
   private:
     void do_auth();
     void do_read();
     void do_write(const std::string& message);
-    void close_connection(const std::string& reason);
     void start_ack_timer();
     void handle_tcp_message(const std::string& msg);
     void start_keepalive_timer();
     void reset_keepalive_timer();
-    
+
     server& m_server;
 
     config m_config_params;
 
     asio::ip::tcp::socket m_socket;
-    std::array<char, BUFFER_SIZE> m_data;
+    std::array<char, SERVER_BUFFER_SIZE> m_data;
+    std::string m_tcp_buffer;
     int m_auth_attempts = 0;
 
     std::string m_username;

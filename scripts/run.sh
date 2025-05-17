@@ -5,15 +5,16 @@ case "$1" in
         #     ./build/dhl_client "$i" &
         # done
 
-        ./build/dhl_client 0 &
+        ./build/dhl_client 2 &
         sleep 1
-        ./build/dhl_client 1 &
+        ./build/dhl_client 1397 &
         sleep 1
-        ./build/dhl_client 5 &
-        sleep 1
-        ./build/dhl_client 7 &
+        # ./build/dhl_client 5 &
+        # sleep 1
+        # ./build/dhl_client 7 &
 
         # ./build/dhl_client 0
+        # sleep 500
         wait
         ;;
     server)

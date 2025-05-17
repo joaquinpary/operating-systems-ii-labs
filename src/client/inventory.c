@@ -11,14 +11,6 @@
 #include <sys/wait.h>
 #include <time.h>
 
-#ifndef M_PI
-#define M_PI 3.14
-#endif
-
-#ifndef M_PI
-#define M_PI 3.14
-#endif
-
 #define WATER "water"
 #define FOOD "food"
 #define MEDICINE "medicine"
@@ -155,6 +147,24 @@ inventory_item* get_inventory_to_send()
     return inventory_to_send;
 }
 
+inventory_item* get_inventory_received()
+{
+    inventory_item* inventory_received = malloc(sizeof(inventory_item) * get_inventory_size());
+    if (inventory_received == NULL)
+    {
+        perror("Error allocating memory for inventory");
+        return NULL;
+    }
+    sem_wait();
+    for (int i = 0; i < get_inventory_size(); ++i)
+    {
+        strcpy(inventory_received[i].item, shm_ptr->items_received[i].item);
+        inventory_received[i].quantity = shm_ptr->items_received[i].quantity;
+    }
+    sem_signal();
+    return inventory_received;
+}
+
 inventory_item* get_inventory_to_replenish()
 {
     double missing;
@@ -201,7 +211,6 @@ inventory_item* get_inventory_to_replenish()
 
 void init_inventory()
 {
-    srand(time(NULL));
     strncpy(shm_ptr->items[0].item, WATER, MIN_SIZE - 1);
     shm_ptr->items[0].item[MIN_SIZE - 1] = '\0';
     strncpy(shm_ptr->items[1].item, FOOD, MIN_SIZE - 1);
@@ -226,21 +235,10 @@ void init_inventory()
     shm_ptr->items_to_send[4].item[MIN_SIZE - 1] = '\0';
     strncpy(shm_ptr->items_to_send[5].item, TOOLS, MIN_SIZE - 1);
     shm_ptr->items_to_send[5].item[MIN_SIZE - 1] = '\0';
-    if (!strcmp(get_identifiers()->client_type, "warehouse"))
+    for (int i = 0; i < get_inventory_size(); i++)
     {
-        for (int i = 0; i < get_inventory_size(); i++)
-        {
-            shm_ptr->items[i].quantity = WAREHOUSE_MAX;
-            shm_ptr->items_to_send[i].quantity = 0;
-        }
-    }
-    else if (!strcmp(get_identifiers()->client_type, "hub"))
-    {
-        for (int i = 0; i < get_inventory_size(); i++)
-        {
-            shm_ptr->items[i].quantity = HUB_MAX;
-            shm_ptr->items_to_send[i].quantity = 0;
-        }
+        shm_ptr->items[i].quantity = 0;
+        shm_ptr->items_to_send[i].quantity = 0;
     }
 }
 
@@ -258,17 +256,38 @@ void set_inventory_to_send(inventory_item* items_to_send)
 void set_inventory(inventory_item* items)
 {
     sem_wait();
+    if (strcmp(get_identifiers()->client_type, "warehouse") == 0)
+    {
+        for (int i = 0; i < get_inventory_size(); ++i)
+        {
+            shm_ptr->items[i].quantity += items[i].quantity;
+            if (shm_ptr->items[i].quantity > WAREHOUSE_MAX)
+            {
+                shm_ptr->items[i].quantity = WAREHOUSE_MAX;
+            }
+        }
+    }
+    else if (strcmp(get_identifiers()->client_type, "hub") == 0)
+    {
+        for (int i = 0; i < get_inventory_size(); ++i)
+        {
+            shm_ptr->items[i].quantity += items[i].quantity;
+            if (shm_ptr->items[i].quantity > HUB_MAX)
+            {
+                shm_ptr->items[i].quantity = HUB_MAX;
+            }
+        }
+    }
+    sem_signal();
+}
+
+void set_inventory_received(inventory_item* items)
+{
+    sem_wait();
     for (int i = 0; i < get_inventory_size(); ++i)
     {
-        shm_ptr->items[i].quantity += items[i].quantity;
-        if (shm_ptr->items[i].quantity > WAREHOUSE_MAX)
-        {
-            shm_ptr->items[i].quantity = WAREHOUSE_MAX;
-        }
-        else if (shm_ptr->items[i].quantity > HUB_MAX)
-        {
-            shm_ptr->items[i].quantity = HUB_MAX;
-        }
+        shm_ptr->items_received[i].quantity = items[i].quantity;
+        strcpy(shm_ptr->items_received[i].item, items[i].item);
     }
     sem_signal();
 }
@@ -318,8 +337,12 @@ int inventory_compsumption()
     {
         unit = (int)get_uniform_random(1, HUB_MIN);
         sem_wait();
-        if (shm_ptr->items[i].quantity < unit)
+        if (shm_ptr->items[i].quantity < HUB_MIN)
+        {
+            sem_signal();
             return 1;
+        }
+
         shm_ptr->items[i].quantity -= unit;
         sem_signal();
     }
@@ -334,6 +357,14 @@ void set_hub_username(const char* username)
     sem_signal();
 }
 
+void set_warehouse_username(const char* username)
+{
+    sem_wait();
+    strncpy(shm_ptr->warehouse_username, username, USER_PASS_SIZE - 1);
+    shm_ptr->warehouse_username[USER_PASS_SIZE - 1] = '\0';
+    sem_signal();
+}
+
 char* get_hub_username()
 {
     char* username = malloc(USER_PASS_SIZE);
@@ -344,6 +375,21 @@ char* get_hub_username()
     }
     sem_wait();
     strncpy(username, shm_ptr->hub_username, USER_PASS_SIZE - 1);
+    username[USER_PASS_SIZE - 1] = '\0';
+    sem_signal();
+    return username;
+}
+
+char* get_warehouse_username()
+{
+    char* username = malloc(USER_PASS_SIZE);
+    if (username == NULL)
+    {
+        perror("Error allocating memory for username");
+        return NULL;
+    }
+    sem_wait();
+    strncpy(username, shm_ptr->warehouse_username, USER_PASS_SIZE - 1);
     username[USER_PASS_SIZE - 1] = '\0';
     sem_signal();
     return username;

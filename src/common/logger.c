@@ -12,7 +12,6 @@
 #define MAX_LOG_SIZE (1024 * 1024) // 1 MB
 #define MAX_LOG_FILES 5
 
-
 static FILE* log_file = NULL;
 static log_level current_level = LOG_LEVEL_INFO;
 static char component[TAG_SIZE] = "UNKNOWN";

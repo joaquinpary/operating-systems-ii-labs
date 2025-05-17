@@ -7,8 +7,8 @@ NUM_WAREHOUSES = int(CLIENTS*0.5)
 NUM_HUBS = int(CLIENTS*0.5)
 FAKE_RATE = 0.05
 
-def deterministic_password(client_id):
-    random.seed(client_id)
+def deterministic_password(username):
+    random.seed(username)
     return ''.join(random.choices(string.ascii_letters + string.digits, k=10))
 
 def get_port(protocol, version):
@@ -31,14 +31,14 @@ clients = []
 server_credentials = []
 
 for i in range(1, NUM_WAREHOUSES + 1):
-    client_id = f"warehouse{i:04d}"
+    client_type = "warehouse"
     username = f"user{i:04d}"
-    password = deterministic_password(client_id)
+    password = deterministic_password(username)
     protocol = random.choice(PROTOCOLS)
     version = random.choice(VERSIONS)
     port = get_port(protocol, version)
     entry = {
-        "client_id": client_id,
+        "client_type": client_type,
         "username": username,
         "password": password,
         "connect": {
@@ -51,14 +51,15 @@ for i in range(1, NUM_WAREHOUSES + 1):
     clients.append(entry)
 
 for i in range(1, NUM_HUBS + 1):
-    client_id = f"hub{i:04d}"
+    client_type = "hub"
     idx = i + NUM_WAREHOUSES
     username = f"user{idx:04d}"
-    password = deterministic_password(client_id)
+    password = deterministic_password(username)
     protocol = random.choice(PROTOCOLS)
     version = random.choice(VERSIONS)
+    port = get_port(protocol, version)
     entry = {
-        "client_id": client_id,
+        "client_type": client_type,
         "username": username,
         "password": password,
         "connect": {
@@ -70,19 +71,19 @@ for i in range(1, NUM_HUBS + 1):
     }
     clients.append(entry)
 
+for client in clients:
+    server_entry = {
+        "client_type": client["client_type"],
+        "username": client["username"],
+        "password": client["password"]
+    }
+    server_credentials.append(server_entry)
+
 num_fakes = int(len(clients) * FAKE_RATE)
 fake_indices = random.sample(range(len(clients)), num_fakes)
 
 for idx in fake_indices:
     clients[idx]["password"] = "wrongpass123"
-
-for client in clients:
-    server_entry = {
-        "client_id": client["client_id"],
-        "username": client["username"],
-        "password": client["password"]
-    }
-    server_credentials.append(server_entry)
 
 with open("../config/clients_credentials.json", "w") as f:
     json.dump({"clients": clients}, f, indent=4)

@@ -9,7 +9,7 @@
 
 #ifdef TESTING
 #define PATH_CONFIG "config/clients_credentials.json"
-#define LOG_BASE_PATH "logs/clients.log"
+#define LOG_BASE_PATH "logs/clients"
 #else
 #define PATH_CONFIG "/etc/dhl_client/clients_credentials.json"
 #define LOG_BASE_PATH "/var/log/dhl_client/client"
@@ -25,10 +25,10 @@ int start_client(char* client)
     char log_path[256];
     init_params_client params = load_config_client(PATH_CONFIG, atoi(client));
     set_params(params);
-    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.client_id);
+    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.username);
     log_init(log_path, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
-    log_info("Client started with ID: %s", get_identifiers()->client_id);
+    log_info("Client started with ID: %s", get_identifiers()->username);
     init_shared_memory();
     if (connection(params))
         return 1;
@@ -48,16 +48,13 @@ int start_cli()
     printf("port: ");
     fgets(command, sizeof(command), stdin);
     sscanf(command, "%s", params.connection_params.port);
-    strncpy(params.client_id, ADMIN, MIN_SIZE - 1);
-    params.client_id[MIN_SIZE - 1] = '\0';
     strncpy(params.client_type, ADMIN, MIN_SIZE - 1);
     params.client_type[MIN_SIZE - 1] = '\0';
     strncpy(params.connection_params.protocol, PROTOCOL, MIN_SIZE - 1);
     params.connection_params.protocol[MIN_SIZE - 1] = '\0';
     strncpy(params.connection_params.ip_version, IP, MIN_SIZE - 1);
     params.connection_params.ip_version[MIN_SIZE - 1] = '\0';
-    set_client_id(params.client_id);
-    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.client_id);
+    snprintf(log_path, sizeof(log_path), "%s_%s.log", LOG_BASE_PATH, params.username);
     log_init(log_path, CLIENT);
     set_log_level(LOG_LEVEL_DEBUG);
     if (connection_cli(params))

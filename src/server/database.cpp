@@ -1,5 +1,6 @@
 #include "database.hpp"
 #include "cJSON.h"
+#include "logger.h"
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -22,13 +23,10 @@ database_manager::database_manager()
             "dbname=" + db_name + " user=" + db_user + " password=" + db_pass + " host=" + db_host + " port=5432";
 
         // database_conn_handle = std::make_unique<pqxx::connection>(database_conn_handle_str);
-        printf("Intentando conectar a la db.\n");
-        fflush(stdout);
         for (int i = 0; i < 10; ++i)
         {
             try
             {
-                std::cout << "Intento nro: " << i + 1 << "\n" << std::flush;
                 database_conn_handle = std::make_unique<pqxx::connection>(database_conn_handle_str);
                 if (database_conn_handle->is_open())
                     break;
@@ -41,7 +39,7 @@ database_manager::database_manager()
 
         if (database_conn_handle->is_open())
         {
-            std::cout << "Conexión exitosa a PostgreSQL\n" << std::flush;
+            log_info("Successfully connected to PostgreSQL");
             initialize_database();
         }
         else
@@ -51,7 +49,7 @@ database_manager::database_manager()
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error de inicialización de DB: " << e.what() << "\n";
+        log_error("Error de inicialización de DB: %s", e.what());
         throw;
     }
 }
@@ -80,9 +78,10 @@ void database_manager::initialize_database()
 
     txn.exec("CREATE TABLE IF NOT EXISTS clients ("
              "id SERIAL PRIMARY KEY,"
-             "client_type TEXT UNIQUE NOT NULL,"
+             "client_type TEXT NOT NULL,"
              "username TEXT UNIQUE NOT NULL,"
              "password TEXT NOT NULL,"
+             "is_active BOOLEAN DEFAULT FALSE,"
              "session_token TEXT)");
 
     txn.exec("CREATE TABLE IF NOT EXISTS inventory ("
@@ -132,16 +131,21 @@ bool database_manager::authenticate_client(const std::string& username, const st
         pqxx::result result =
             txn.exec(pqxx::zview("SELECT 1 FROM clients WHERE username = $1 AND password = $2 LIMIT 1"),
                      pqxx::params{username, password});
-
-        return !result.empty(); // Si el resultado no está vacío, hay una coincidencia
+        if (result.empty())
+        {
+            // log_error("Client authentication failed. Username: %s, Password: %s", username.c_str(), password.c_str());
+            log_error("Client authentication failed");
+            return false;
+        }
+        return true; // If the result is not empty, there is a match
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "Error SQL en autenticación: " << e.what() << "\nConsulta: " << e.query() << "\n";
+        log_error("SQL authentication error: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error general en autenticación: " << e.what() << "\n";
+        log_error("General authentication error: %s", e.what());
     }
 
     return false;
@@ -152,7 +156,7 @@ void database_manager::load_clients_from_json(const std::string& filepath)
     std::ifstream file(filepath);
     if (!file.is_open())
     {
-        std::cerr << "Error opening the credentials file: " << filepath << "\n";
+        log_error("Error opening the credentials file: %s", filepath.c_str());
         return;
     }
 
@@ -164,14 +168,14 @@ void database_manager::load_clients_from_json(const std::string& filepath)
     cJSON* root = cJSON_Parse(json_content.c_str());
     if (!root)
     {
-        std::cerr << "Error parsing JSON: " << cJSON_GetErrorPtr() << "\n";
+        log_error("Error parsing JSON: %s", cJSON_GetErrorPtr());
         return;
     }
 
     cJSON* clients = cJSON_GetObjectItemCaseSensitive(root, "clients");
     if (!cJSON_IsArray(clients))
     {
-        std::cerr << "Clients is not a valid array.\n";
+        log_error("Clients is not a valid array");
         cJSON_Delete(root);
         return;
     }
@@ -179,28 +183,27 @@ void database_manager::load_clients_from_json(const std::string& filepath)
     pqxx::work txn(*database_conn_handle);
     for (cJSON* client = clients->child; client != nullptr; client = client->next)
     {
-        cJSON* client_id = cJSON_GetObjectItemCaseSensitive(client, "client_id");
+        cJSON* client_type = cJSON_GetObjectItemCaseSensitive(client, "client_type");
         cJSON* username = cJSON_GetObjectItemCaseSensitive(client, "username");
         cJSON* password = cJSON_GetObjectItemCaseSensitive(client, "password");
 
-        if (!cJSON_IsString(client_id) || !cJSON_IsString(username) || !cJSON_IsString(password))
+        if (!cJSON_IsString(client_type) || !cJSON_IsString(username) || !cJSON_IsString(password))
         {
-            std::cerr << "Invalid format. Skipping credentials.\n";
+            log_error("Invalid format. Skipping credentials");
             continue;
         }
 
         // Verificar si ya existe
-        pqxx::result r =
-            txn.exec(pqxx::zview("SELECT 1 FROM clients WHERE username = $1 OR client_id::text = $2 LIMIT 1"),
-                     pqxx::params(username->valuestring, client_id->valuestring));
+        pqxx::result r = txn.exec(pqxx::zview("SELECT 1 FROM clients WHERE username = $1 LIMIT 1"),
+                                  pqxx::params(username->valuestring));
         if (!r.empty())
         {
             continue;
         }
 
         // Insertar nuevo cliente
-        txn.exec(pqxx::zview("INSERT INTO clients (username, password, client_id) VALUES ($1, $2, $3)"),
-                 pqxx::params(username->valuestring, password->valuestring, client_id->valuestring));
+        txn.exec(pqxx::zview("INSERT INTO clients (username, password, client_type) VALUES ($1, $2, $3)"),
+                 pqxx::params(username->valuestring, password->valuestring, client_type->valuestring));
     }
 
     txn.commit();
@@ -213,33 +216,30 @@ bool database_manager::update_client_inventory(const std::string& username, int 
     try
     {
         pqxx::work txn(*database_conn_handle);
-        std::cout << "Actualizando inventario de cliente: " << username << "\n" << std::flush;
         pqxx::result r =
             txn.exec(pqxx::zview("INSERT INTO inventory (id, water, food, medicine, guns, ammo, tools) "
                                  "VALUES ((SELECT id FROM clients WHERE username = $1), $2, $3, $4, $5, $6, $7) "
                                  "ON CONFLICT (id) DO UPDATE SET "
                                  "water = EXCLUDED.water, food = EXCLUDED.food, medicine = EXCLUDED.medicine, guns = "
-                                 "EXCLUDED.guns, ammo = EXCLUDED.ammo, tools = EXCLUDED.tools "
-
-                                 ),
-                     pqxx::params(username, guns, ammo, medicine, tools, food, water));
+                                 "EXCLUDED.guns, ammo = EXCLUDED.ammo, tools = EXCLUDED.tools "),
+                     pqxx::params(username, water, food, medicine, guns, ammo, tools));
 
         if (r.affected_rows() == 0)
         {
-            std::cerr << "Client not found. Did not update inventory." << username << "\n" << std::flush;
+            log_error("Client not found. Did not update inventory: %s", username.c_str());
             return true;
         }
-        std::cout << "Inventario actualizado correctamente.\n";
+        log_info("Inventory updated correctly");
         txn.commit();
         return false;
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "Error SQL en actualización de inventario: " << e.what() << "\nConsulta: " << e.query() << "\n";
+        log_error("Error SQL in inventory update: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error general en actualización de inventario: " << e.what() << "\n";
+        log_error("General error in inventory update: %s (Type: %s)", e.what(), typeid(e).name());
     }
 
     return true;
@@ -261,9 +261,9 @@ bool database_manager::register_hub_order(const std::string& warehouse_username,
                         "(SELECT id FROM clients WHERE username = $2), $3, $4, $5, $6, $7, $8, $9) "),
             pqxx::params(hub_username, warehouse_username, water, food, medicine, guns, ammo, tools, timestamp));
 
-        if (r.empty())
+        if (r.affected_rows() == 0)
         {
-            std::cerr << "Error al registrar la transacción.\n";
+            log_error("Error registering hub order");
             return true;
         }
 
@@ -272,18 +272,18 @@ bool database_manager::register_hub_order(const std::string& warehouse_username,
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "Error SQL en registro de transacción: " << e.what() << "\nConsulta: " << e.query() << "\n";
+        log_error("Error SQL in hub order registration: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error general en registro de transacción: " << e.what() << "\n";
+        log_error("General error in hub order registration: %s", e.what());
     }
     return true;
 }
 
-bool database_manager::register_warehouse_shipment(const std::string& warehouse_username,
-                                                   const std::string& hub_username, int water, int food, int medicine,
-                                                   int guns, int ammo, int tools,
+bool database_manager::register_warehouse_shipment(const std::string& sender_username,
+                                                   const std::string& receiver_username, int water, int food,
+                                                   int medicine, int guns, int ammo, int tools,
                                                    const std::string& timestamp_dispatched)
 {
     try
@@ -296,37 +296,26 @@ bool database_manager::register_warehouse_shipment(const std::string& warehouse_
                                               "AND receiver_id = (SELECT id FROM clients WHERE username = $3) "
                                               "AND delta_water = $4 AND delta_food = $5 AND delta_medicine = $6 "
                                               "AND delta_guns = $7 AND delta_ammo = $8 AND delta_tools = $9 "
-                                              "AND timestamp_dispatched IS NULL "
-                                              "RETURNING sender_id"),
-                                  pqxx::params(timestamp_dispatched, warehouse_username, hub_username, water, food,
+                                              "AND timestamp_dispatched IS NULL "),
+                                  pqxx::params(timestamp_dispatched, sender_username, receiver_username, water, food,
                                                medicine, guns, ammo, tools));
 
-        if (r.empty())
+        if (r.affected_rows() == 0)
         {
-            std::cerr << "No se encontró una transacción coincidente para actualizar.\n";
+            log_error("Did not find a matching transaction to update");
             return false;
         }
-
-        int warehouse_id = r[0][0].as<int>();
-
-        // Actualizar el inventario del warehouse
-        txn.exec(pqxx::zview("UPDATE inventory "
-                             "SET water = water - $1, food = food - $2, medicine = medicine - $3, "
-                             "guns = guns - $4, ammo = ammo - $5, tools = tools - $6 "
-                             "WHERE client_id = $7"),
-                 pqxx::params(water, food, medicine, guns, ammo, tools, warehouse_id));
-
+        log_info("Warehouse shipment updated correctly");
         txn.commit();
         return true;
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "Error SQL en actualización de envío del warehouse: " << e.what() << "\nConsulta: " << e.query()
-                  << "\n";
+        log_error("Error SQL in warehouse shipment update: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error general en actualización de envío del warehouse: " << e.what() << "\n";
+        log_error("General error in warehouse shipment update: %s (Type: %s)", e.what(), typeid(e).name());
     }
     return false;
 }
@@ -345,11 +334,11 @@ bool database_manager::register_warehouse_stock_request(const std::string& wareh
                 "delta_water, delta_food, delta_medicine, delta_guns, delta_ammo, delta_tools, timestamp_requested) "
                 "VALUES ((SELECT id FROM clients WHERE username = $1), "
                 "(SELECT id FROM clients WHERE username = $2), $3, $4, $5, $6, $7, $8, $9)"),
-            pqxx::params(9999, warehouse_username, water, food, medicine, guns, ammo, tools, timestamp));
+            pqxx::params(warehouse_username, warehouse_username, water, food, medicine, guns, ammo, tools, timestamp));
 
-        if (r.empty())
+        if (r.affected_rows() == 0)
         {
-            std::cerr << "Error al registrar la solicitud de stock del warehouse.\n";
+            log_error("Error registering warehouse stock request");
             return false;
         }
 
@@ -358,12 +347,11 @@ bool database_manager::register_warehouse_stock_request(const std::string& wareh
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "Error SQL en registro de solicitud de stock del warehouse: " << e.what()
-                  << "\nConsulta: " << e.query() << "\n";
+        log_error("Error SQL in warehouse stock request registration: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error general en registro de solicitud de stock del warehouse: " << e.what() << "\n";
+        log_error("General error in warehouse stock request registration: %s", e.what());
     }
     return false;
 }
@@ -376,8 +364,9 @@ std::string database_manager::get_designated_warehouse(int water, int food, int 
 
         pqxx::result r = txn.exec(pqxx::zview("SELECT c.username "
                                               "FROM clients c "
-                                              "JOIN inventory i ON c.id = i.client_id "
-                                              "WHERE c.role = 'warehouse' "
+                                              "JOIN inventory i ON c.id = i.id "
+                                              "WHERE c.client_type = 'warehouse' "
+                                              "AND c.is_active = TRUE "
                                               "AND i.water >= $1 "
                                               "AND i.food >= $2 "
                                               "AND i.medicine >= $3 "
@@ -394,15 +383,117 @@ std::string database_manager::get_designated_warehouse(int water, int food, int 
         {
             return r[0][0].as<std::string>();
         }
+        else
+        {
+            log_error("No warehouse found to fulfill the request");
+            return {};
+        }
     }
     catch (const pqxx::sql_error& e)
     {
-        std::cerr << "SQL error: " << e.what() << "\nQuery: " << e.query() << "\n";
+        log_error("SQL error in warehouse selection: %s\nQuery: %s", e.what(), e.query().c_str());
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Error: " << e.what() << "\n";
+        log_error("Error in warehouse selection: %s", e.what());
     }
 
     return {};
+}
+
+bool database_manager::retrieve_client_inventory(const std::string& username, inventory_item items[ITEM_TYPE])
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+
+        pqxx::result r = txn.exec(pqxx::zview("SELECT i.water, i.food, i.medicine, i.guns, i.ammo, i.tools "
+                                              "FROM inventory i "
+                                              "JOIN clients c ON c.id = i.id "
+                                              "WHERE c.username = $1"),
+                                  pqxx::params(username));
+
+        if (r.empty())
+        {
+            log_info("No inventory found for client: %s. Initializing with 100 units.", username.c_str());
+            // Inicializar con 100 unidades de cada item
+            for (int i = 0; i < ITEM_TYPE; i++)
+            {
+                items[i].quantity = 100;
+            }
+            return true;
+        }
+
+        items[0].quantity = r[0][0].as<int>();
+        items[1].quantity = r[0][1].as<int>();
+        items[2].quantity = r[0][2].as<int>();
+        items[3].quantity = r[0][3].as<int>();
+        items[4].quantity = r[0][4].as<int>();
+        items[5].quantity = r[0][5].as<int>();
+
+        txn.commit();
+        return true;
+    }
+    catch (const pqxx::sql_error& e)
+    {
+        log_error("Error SQL in inventory retrieval: %s\nQuery: %s", e.what(), e.query().c_str());
+    }
+    catch (const std::exception& e)
+    {
+        log_error("General error in inventory retrieval: %s", e.what());
+    }
+    return false;
+}
+
+bool database_manager::register_hub_stock_confirm(const std::string& sender_username,
+                                                  const std::string& receiver_username, int water, int food,
+                                                  int medicine, int guns, int ammo, int tools,
+                                                  const std::string& timestamp)
+{
+    try
+    {
+        pqxx::work txn(*database_conn_handle);
+        // Actualizar el inventario del hub
+        pqxx::result r = txn.exec(
+            pqxx::zview("UPDATE transaction_history "
+                        "SET timestamp_received = $1 "
+                        "WHERE sender_id = (SELECT id FROM clients WHERE username = $2) "
+                        "AND receiver_id = (SELECT id FROM clients WHERE username = $3) "
+                        "AND delta_water = $4 AND delta_food = $5 AND delta_medicine = $6 "
+                        "AND delta_guns = $7 AND delta_ammo = $8 AND delta_tools = $9 "
+                        "AND timestamp_received IS NULL "),
+            pqxx::params(timestamp, sender_username, receiver_username, water, food, medicine, guns, ammo, tools));
+
+        if (r.affected_rows() == 0)
+        {
+            log_error("Did not find a matching transaction to update");
+            return false;
+        }
+
+        txn.commit();
+        log_info("Hub stock confirmed");
+
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        log_error("Error in hub stock confirmation: %s", e.what());
+        return false;
+    }
+}
+
+bool database_manager::set_client_active(const std::string& username)
+{
+    pqxx::work txn(*database_conn_handle);
+    txn.exec(pqxx::zview("UPDATE clients SET is_active = TRUE WHERE username = $1"), pqxx::params{username});
+    txn.commit();
+    return true;
+}
+
+bool database_manager::set_client_inactive(const std::string& username)
+{
+    pqxx::work txn(*database_conn_handle);
+    txn.exec(pqxx::zview("UPDATE clients SET is_active = FALSE WHERE username = $1"), pqxx::params{username});
+    txn.commit();
+    return true;
 }

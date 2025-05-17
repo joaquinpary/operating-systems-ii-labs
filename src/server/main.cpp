@@ -1,30 +1,44 @@
 #include "config.hpp"
 #include "database.hpp"
 #include "dhl_server.hpp"
+#include "logger.h"
 #include <asio.hpp>
+#include <atomic>
 #include <csignal>
+#include <future>
 #include <iostream>
 #include <thread>
+
+#ifdef TESTING
+#define SERVER_PATH_LOG "logs/server.log"
+#define SERVER_PATH_CONFIG "config/server_parameters.json"
+#else
+#define SERVER_PATH_LOG "/var/log/dhl_server/server.log"
+#define SERVER_PATH_CONFIG "/etc/dhl_server/server_parameters.json"
+#endif
 
 int main()
 {
     try
     {
-        const auto processor_count = std::thread::hardware_concurrency();
-
         asio::io_context io_context;
-        asio::thread_pool cpu_pool(processor_count);
 
-        asio::signal_set signals(io_context, SIGINT);
-        signals.async_wait([&](auto, auto) { io_context.stop(); });
+        config server_config_params = config::load_config_from_file(SERVER_PATH_CONFIG);
+        log_init(SERVER_PATH_LOG, "SERVER");
+        set_log_level(LOG_LEVEL_DEBUG);
 
-        config server_config_params = config::load_config_from_file(PATH_CONFIG);
+        server s(io_context, server_config_params); // Crear la instancia del servidor
 
-        server s(io_context, server_config_params); // Create the server instance, initializing all 4 sockets
+        // Configurar el manejo de señales usando asio
+        asio::signal_set signals(io_context, SIGTERM, SIGINT);
+        signals.async_wait([&](auto, auto) {
+            std::cout << "Shutting down server gracefully...\n" << std::flush;
+            s.shutdown(); // Cerrar todas las conexiones de manera ordenada
+            io_context.stop();
+        });
 
-        asio::post(cpu_pool, [&] { io_context.run(); });
-
-        cpu_pool.join();
+        // Ejecutar el io_context en el hilo principal
+        io_context.run();
 
         std::cout << "Server stopped.\n";
     }

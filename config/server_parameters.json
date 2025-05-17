@@ -5,7 +5,7 @@
     "port_tcp_v6" : 9998,
     "port_udp_v4" : 9997,
     "port_udp_v6" : 9996,
-    "ack_timeout" : 5,
+    "ack_timeout" : 10,
     "max_auth_attempts" : 3,
     "max_auth_attempts_map_size" : 10000
 }

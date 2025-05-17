@@ -25,7 +25,7 @@ runs:
     - name: Compile
       shell: bash
       run: |
-      
+        mkdir -p logs
         mkdir -p build && cd build
         cmake .. -DBUILD_TARGET=client && make
         # cmake .. -DRUN_COVERAGE=1 -DTEST_TARGET=client && make

@@ -66,6 +66,17 @@ void tcp_session::do_auth()
             m_server.register_tcp_client(m_username, shared_from_this());
             start_keepalive_timer();
 
+            m_database_manager.set_client_active(req.payload.username);
+
+            // Send inventory update to client
+            static inventory_item items[ITEM_TYPE] = {{"water", 0}, {"food", 0}, {"medicine", 0},
+                                                      {"guns", 0},  {"ammo", 0}, {"tools", 0}};
+            m_database_manager.retrieve_client_inventory(req.payload.username, items);
+            client_inventory_update inventory_update =
+                create_client_inventory_update(req.payload.username, "token", items, ITEM_TYPE);
+            std::string inventory_json = serialize_client_inventory_update(&inventory_update, ITEM_TYPE);
+            do_write(inventory_json);
+
             do_read();
         }
         else
@@ -116,7 +127,6 @@ void tcp_session::handle_tcp_message(const std::string& message)
         m_last_ongoing_message.data.clear();
         m_last_ongoing_message.ack_timer.cancel();
         break;
-
     }
     case CLIENT_INFECTION_ALERT:
         // Handle infection alert message
@@ -164,14 +174,12 @@ void tcp_session::handle_tcp_message(const std::string& message)
             std::string stock_warehouse = build_stock_warehouse_json(warehouse_stock_request);
             sender->send(stock_warehouse);
         }
-
         // register the transaction in the database
         m_database_manager.register_warehouse_stock_request(
             warehouse_stock_request.payload.username, warehouse_stock_request.payload.items[0].quantity,
             warehouse_stock_request.payload.items[1].quantity, warehouse_stock_request.payload.items[2].quantity,
             warehouse_stock_request.payload.items[3].quantity, warehouse_stock_request.payload.items[4].quantity,
             warehouse_stock_request.payload.items[5].quantity, warehouse_stock_request.payload.timestamp);
-
         break;
     }
     case HUB_REQUEST_STOCK: {
@@ -213,7 +221,21 @@ void tcp_session::handle_tcp_message(const std::string& message)
             hub_stock_request.payload.items[5].quantity, hub_stock_request.payload.timestamp);
         break;
     }
-
+    case HUB_CONFIRM_STOCK: {
+        // Handle hub confirm stock message
+        // a hub confirms the stock received from a warehouse
+        // server should register the transaction in the database and update hub inventory
+        hub_confirm_stock hub_stock_confirm = deserialize_hub_confirm_stock(message.c_str());
+        std::cout << "Received stock confirmation from hub\n" << std::flush;
+        // register the transaction in the database
+        m_database_manager.register_hub_stock_confirm(
+            hub_stock_confirm.payload.warehouse_username, hub_stock_confirm.payload.username,
+            hub_stock_confirm.payload.items[0].quantity, hub_stock_confirm.payload.items[1].quantity,
+            hub_stock_confirm.payload.items[2].quantity, hub_stock_confirm.payload.items[3].quantity,
+            hub_stock_confirm.payload.items[4].quantity, hub_stock_confirm.payload.items[5].quantity,
+            hub_stock_confirm.payload.timestamp);
+        break;
+    }
     default:
         std::cerr << "Unknown TCP message type: " << type_code << "\n";
         break;
@@ -226,9 +248,19 @@ void tcp_session::do_read()
     m_socket.async_read_some(asio::buffer(m_data), [this, self](asio::error_code ec, size_t length) {
         if (!ec)
         {
-            std::string received_data_str(m_data.data(), length);
-            // std::cout << "Received: " << received_data_str << "\n" << std::flush;
-            handle_tcp_message(received_data_str);
+            // Acumula los datos recibidos en el buffer
+            m_tcp_buffer.append(m_data.data(), length);
+
+            size_t pos;
+            // Procesa todos los mensajes completos (delimitados por '\n')
+            while ((pos = m_tcp_buffer.find('\n')) != std::string::npos)
+            {
+                std::string message = m_tcp_buffer.substr(0, pos);
+                m_tcp_buffer.erase(0, pos + 1); // Elimina el mensaje procesado y el delimitador
+
+                std::cout << "Raw received TCP message: " << message << "\n" << std::flush;
+                handle_tcp_message(message);
+            }
 
             do_read();
         }
@@ -339,15 +371,15 @@ bool udp_server::handle_udp_message(const std::string& message, const asio::ip::
         break;
     }
     case CLIENT_INFECTION_ALERT: {
-        client_emergency_alert alert = deserialize_client_infection_alert(message.c_str());
+        // client_emergency_alert alert = deserialize_server_emergency_alert(message.c_str());
         // Procesar alerta
 
         break;
     }
     case WAREHOUSE_SEND_STOCK_TO_HUB: {
-        warehouse_send_stock_to_hub msg = deserialize_warehouse_send_stock_to_hub(message.c_str());
+        warehouse_send_stock_to_hub stock_shipment = deserialize_warehouse_send_stock_to_hub(message.c_str());
         // Procesar envío
-        if (!m_server.is_client_active_udp(msg.payload.username))
+        if (!m_server.is_client_active_udp(stock_shipment.payload.username))
         {
             // no se tiene en cuenta porque no registro su keepalive a tiempo
             return 1;
@@ -355,22 +387,23 @@ bool udp_server::handle_udp_message(const std::string& message, const asio::ip::
         std::cout << "Received stock shipment from warehouse to hub\n" << std::flush;
 
         // Notify the hub
-        std::shared_ptr<client_sender> hub_sender = get_client_sender(msg.payload.hub_username, m_server);
+        std::shared_ptr<client_sender> hub_sender = get_client_sender(stock_shipment.payload.hub_username, m_server);
         if (hub_sender)
         {
-            std::string stock_shipment_notification = build_stock_shipment_notify_json(msg);
+            std::string stock_shipment_notification = build_stock_shipment_notify_json(stock_shipment);
             hub_sender->send(stock_shipment_notification);
         }
         else
         {
-            std::cerr << "Hub not found: " << msg.payload.hub_username << "\n";
+            std::cerr << "Hub not found: " << stock_shipment.payload.hub_username << "\n";
         }
-
         // Register the transaction in the database
-        m_database_manager.register_hub_order(
-            msg.payload.username, msg.payload.hub_username, msg.payload.items[0].quantity,
-            msg.payload.items[1].quantity, msg.payload.items[2].quantity, msg.payload.items[3].quantity,
-            msg.payload.items[4].quantity, msg.payload.items[5].quantity, msg.payload.timestamp);
+        m_database_manager.register_warehouse_shipment(
+            stock_shipment.payload.username, stock_shipment.payload.hub_username,
+            stock_shipment.payload.items[0].quantity, stock_shipment.payload.items[1].quantity,
+            stock_shipment.payload.items[2].quantity, stock_shipment.payload.items[3].quantity,
+            stock_shipment.payload.items[4].quantity, stock_shipment.payload.items[5].quantity,
+            stock_shipment.payload.timestamp);
 
         break;
     }
@@ -384,6 +417,7 @@ bool udp_server::handle_udp_message(const std::string& message, const asio::ip::
         if (sender)
         {
             std::string stock_warehouse = build_stock_warehouse_json(warehouse_stock_request);
+            std::cout << "Sending stock warehouse json to: " << warehouse_stock_request.payload.username << std::endl;
             sender->send(stock_warehouse);
         }
 
@@ -441,6 +475,21 @@ bool udp_server::handle_udp_message(const std::string& message, const asio::ip::
             hub_stock_request.payload.items[5].quantity, hub_stock_request.payload.timestamp);
         break;
     }
+    case HUB_CONFIRM_STOCK: {
+        // Handle hub confirm stock message
+        // a hub confirms the stock received from a warehouse
+        // server should register the transaction in the database and update hub inventory
+        hub_confirm_stock hub_stock_confirm = deserialize_hub_confirm_stock(message.c_str());
+        std::cout << "Received stock confirmation from hub\n" << std::flush;
+        // register the transaction in the database
+        m_database_manager.register_hub_stock_confirm(
+            hub_stock_confirm.payload.warehouse_username, hub_stock_confirm.payload.username,
+            hub_stock_confirm.payload.items[0].quantity, hub_stock_confirm.payload.items[1].quantity,
+            hub_stock_confirm.payload.items[2].quantity, hub_stock_confirm.payload.items[3].quantity,
+            hub_stock_confirm.payload.items[4].quantity, hub_stock_confirm.payload.items[5].quantity,
+            hub_stock_confirm.payload.timestamp);
+        break;
+    }
 
     default:
         std::cerr << "Mensaje desconocido recibido por UDP\n";
@@ -455,7 +504,7 @@ void udp_server::do_receive()
         if (!ec)
         {
             std::string received_data_str(m_data.data(), length);
-            // std::cout << "Received: " << received_data_str << "\n" << std::flush;
+            std::cout << "Raw received UDP message: " << received_data_str << "\n" << std::flush;
 
             handle_udp_message(received_data_str, m_sender_endpoint);
         }
@@ -467,7 +516,7 @@ void udp_server::do_receive()
 void udp_server::do_send(const std::string& message, const asio::ip::udp::endpoint& endpoint,
                          const std::string& username)
 {
-    auto send_buffer = std::make_shared<std::array<char, BUFFER_SIZE>>();
+    auto send_buffer = std::make_shared<std::array<char, SERVER_BUFFER_SIZE>>();
     std::copy(message.begin(), message.end(), send_buffer->begin());
 
     m_socket.async_send_to(asio::buffer(*send_buffer, message.size()), endpoint,
@@ -494,6 +543,7 @@ void udp_server::do_send(const std::string& message, const asio::ip::udp::endpoi
 void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sender_endpoint)
 {
     client_auth_request req = deserialize_client_auth_request(msg.c_str());
+    std::cout << "Received auth request from: " << req.payload.username << std::endl;
     if (m_server.is_client_active_udp(req.payload.username)) // si ya esta activo, no lo vuelvo a registrar
     {
         std::cerr << "Client already logged in.\n";
@@ -504,9 +554,13 @@ void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sen
         return;
     }
 
+    std::cout << "Authenticating client: " << req.payload.username << std::endl;
     bool valid_credentials = m_database_manager.authenticate_client(req.payload.username, req.payload.password);
+    std::cout << "Authentication result: " << valid_credentials << std::endl;
     std::string json = build_auth_response_json(valid_credentials,
                                                 valid_credentials ? "Logged in successfully" : "Invalid credentials");
+
+    std::cout << "Sending auth response to: " << req.payload.username << std::endl;
 
     auto send_buffer = std::make_shared<std::array<char, DATA_BUFFER_SIZE>>();
     copy_response_to_buffer(json, *send_buffer);
@@ -519,9 +573,10 @@ void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sen
                                }
                            });
 
+    std::cout << "Valid credentials: " << valid_credentials << std::endl;
     if (valid_credentials)
     {
-
+        std::cout << "Erasing auth attempts for: " << req.payload.username << std::endl;
         m_auth_attempts_map.erase(req.payload.username);
 
         auto client = std::make_unique<udp_client>(static_cast<asio::io_context&>(m_socket.get_executor().context()));
@@ -530,10 +585,23 @@ void udp_server::do_auth_udp(const std::string& msg, asio::ip::udp::endpoint sen
         client->endpoint = sender_endpoint;
         client->authenticated = true;
 
+        std::cout << "Registering UDP client: " << req.payload.username << std::endl;
+
         m_client_map[req.payload.username] = std::move(client);
         m_server.register_udp_client(req.payload.username, sender_endpoint);
 
         start_keepalive_timer(req.payload.username);
+
+        m_database_manager.set_client_active(req.payload.username);
+
+        // Send inventory update to client
+        static inventory_item items[ITEM_TYPE] = {{"water", 0}, {"food", 0}, {"medicine", 0},
+                                                      {"guns", 0},  {"ammo", 0}, {"tools", 0}};
+        m_database_manager.retrieve_client_inventory(req.payload.username, items);
+        client_inventory_update inventory_update =
+            create_client_inventory_update(req.payload.username, "token", items, ITEM_TYPE);
+        std::string inventory_json = serialize_client_inventory_update(&inventory_update, ITEM_TYPE);
+        do_send(inventory_json, sender_endpoint, req.payload.username);
     }
 
     return;
@@ -669,20 +737,24 @@ void server::do_accept()
 void server::register_tcp_client(const std::string& username, std::shared_ptr<tcp_session> client)
 {
     m_active_tcp_clients[username] = client;
+    m_database_manager.set_client_active(username);
 }
 
 void server::unregister_tcp_client(const std::string& username)
 {
     m_active_tcp_clients.erase(username);
+    m_database_manager.set_client_inactive(username);
 }
 void server::register_udp_client(const std::string& username, const asio::ip::udp::endpoint& endpoint)
 {
     m_active_udp_clients[username] = endpoint;
+    m_database_manager.set_client_active(username);
 }
 
 void server::unregister_udp_client(const std::string& username)
 {
     m_active_udp_clients.erase(username);
+    m_database_manager.set_client_inactive(username);
 }
 
 bool server::is_client_active_udp(const std::string& username)
@@ -811,7 +883,6 @@ udp_server* server::get_udp_server(asio::ip::udp::endpoint endpoint)
     return nullptr;
 }
 
-
 void udp_server::send_msg(const std::string& message, const asio::ip::udp::endpoint& endpoint,
                           const std::string& username)
 {
@@ -821,4 +892,35 @@ void udp_server::send_msg(const std::string& message, const asio::ip::udp::endpo
 void tcp_session::send_msg(const std::string& message)
 {
     do_write(message);
+}
+
+void server::shutdown()
+{
+    // Cerrar todas las conexiones TCP activas
+    for (auto& [username, session] : m_active_tcp_clients)
+    {
+        if (session)
+        {
+            session->close_connection("Server shutting down");
+            session.reset(); // Liberar la sesión
+        }
+    }
+    m_active_tcp_clients.clear();
+
+    // Cerrar los aceptadores TCP
+    m_tcp4_acceptor.close();
+    m_tcp6_acceptor.close();
+
+    // Cerrar los servidores UDP
+    if (m_udp4_server)
+    {
+        m_udp4_server->m_socket.close();
+        m_udp4_server.reset(); // Liberar el servidor UDP
+    }
+    if (m_udp6_server)
+    {
+        m_udp6_server->m_socket.close();
+        m_udp6_server.reset(); // Liberar el servidor UDP
+    }
+    m_active_udp_clients.clear();
 }

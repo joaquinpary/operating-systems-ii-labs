@@ -17,8 +17,10 @@ udp_client_sender::udp_client_sender(asio::ip::udp::endpoint endpoint, std::stri
 // TCP sender
 void tcp_client_sender::send(const std::string& msg)
 {
+    std::cout << "Sending message in sender tcp: " << msg << "\n" << std::flush;
     if (m_tcp_session)
     {
+        std::cout << "Sending message to TCP session: " << m_tcp_session->get_username() << "\n" << std::flush;
         m_tcp_session->send_msg(msg); // Debe ser un método tuyo que envía texto
     }
     else
@@ -30,8 +32,12 @@ void tcp_client_sender::send(const std::string& msg)
 // UDP sender
 void udp_client_sender::send(const std::string& msg)
 {
+    std::cout << "Sending message in sender udp: " << msg << "\n" << std::flush;
     if (m_udp_endpoint != asio::ip::udp::endpoint() && m_udp_server)
     {
+        std::cout << "Sending message to UDP endpoint: " << m_udp_endpoint.address().to_string() << ":"
+                  << m_udp_endpoint.port() << "\n"
+                  << std::flush;
         m_udp_server->send_msg(msg, m_udp_endpoint, m_username);
     }
     else

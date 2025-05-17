@@ -6,6 +6,7 @@ services:
       args:
         TARGET: server
     container_name: dhl_server
+    restart: always
     depends_on:
       - db
     environment:

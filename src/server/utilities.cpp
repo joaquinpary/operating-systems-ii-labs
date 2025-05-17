@@ -1,4 +1,5 @@
 #include "utilities.hpp"
+#include <iostream>
 
 #define ITEM_COUNT 6
 
@@ -18,11 +19,14 @@ int get_message_code(const std::string& type_str)
         return WAREHOUSE_REQUEST_STOCK;
     if (type_str == "hub_request_stock")
         return HUB_REQUEST_STOCK;
+    if (type_str == "hub_confirm_stock")
+        return HUB_CONFIRM_STOCK;
     return -1;
 }
 
 std::string build_auth_response_json(bool success, const std::string& message)
 {
+    std::cout << "Building auth response json for: " << (success ? "success" : "failure") << std::endl;
     server_auth_response resp =
         create_server_auth_response(success ? "success" : "failure", success ? "token" : "", message.c_str());
     char* serialized = serialize_server_auth_response(&resp);
@@ -34,7 +38,7 @@ std::string build_auth_response_json(bool success, const std::string& message)
 std::string build_stock_shipment_notify_json(warehouse_send_stock_to_hub stock_shipment_msg)
 {
     server_h_send_stock stock_shipment_notification =
-        create_server_h_send_stock(stock_shipment_msg.payload.items, ITEM_COUNT);
+        create_server_h_send_stock(stock_shipment_msg.payload.username, stock_shipment_msg.payload.items, ITEM_COUNT);
     char* serialized = serialize_server_h_send_stock(&stock_shipment_notification, ITEM_COUNT);
     std::string json(serialized);
     free(serialized);
@@ -55,9 +59,19 @@ std::string build_stock_warehouse_json(warehouse_request_stock warehouse_stock_r
 {
     server_w_stock_warehouse stock_warehouse =
         create_server_w_stock_warehouse(warehouse_stock_request.payload.items, ITEM_COUNT);
+
+    std::cout << "Created stock warehouse object" << std::endl;
+
     char* serialized = serialize_server_w_stock_warehouse(&stock_warehouse, ITEM_COUNT);
+    if (!serialized)
+    {
+        std::cerr << "Error: Failed to serialize stock warehouse" << std::endl;
+        return "";
+    }
+
     std::string json(serialized);
     free(serialized);
+    std::cout << "Stock warehouse: " << json << "\n" << std::flush;
     return json;
 }
 

@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     libcjson-dev \
     lsof \
     net-tools \
+    valgrind \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone https://github.com/jtv/libpqxx.git /tmp/libpqxx && \

@@ -44,14 +44,14 @@ int cli_authenticate(init_params_client params, int sockfd)
     }
     if (validate_checksum(response))
     {
-        log_error("Checksum error with ID: %s", get_identifiers()->client_id);
+        log_error("Checksum error with ID: %s", get_identifiers()->username);
         free(response);
         return 1;
     }
     server_auth_response auth_res = deserialize_server_auth_response(response);
     if (!strcmp(auth_res.payload.status, SUCCESS))
     {
-        log_info("Authentication successful with ID: %s", get_identifiers()->client_id);
+        log_info("Authentication successful with ID: %s", get_identifiers()->username);
         printf("Authentication successful.\n");
         set_session_token(auth_res.payload.session_token);
         free(response);
@@ -84,7 +84,7 @@ int decode_transaction_history(init_params_client params, int sockfd)
         }
         if (validate_checksum(buffer))
         {
-            log_error("Checksum error with ID: %s", get_identifiers()->client_id);
+            log_error("Checksum error with ID: %s", get_identifiers()->username);
             free(buffer);
             return 1;
         }
@@ -122,7 +122,7 @@ int decode_client_lives(init_params_client params, int sockfd)
         }
         if (validate_checksum(buffer))
         {
-            log_error("Checksum error with ID: %s", get_identifiers()->client_id);
+            log_error("Checksum error with ID: %s", get_identifiers()->username);
             free(buffer);
             return 1;
         }
@@ -146,8 +146,7 @@ int cli_message_sender(init_params_client params, int sockfd, int type_message)
     switch (type_message)
     {
     case AUTH_REQUEST:
-        client_auth_request auth_req =
-            create_client_auth_request(params.client_id, params.client_type, params.username, params.password);
+        client_auth_request auth_req = create_client_auth_request(params.client_type, params.username, params.password);
         buffer = serialize_client_auth_request(&auth_req);
         if (buffer == NULL)
             return 1;

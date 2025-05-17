@@ -53,6 +53,7 @@ int sender_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, soc
         close(sockfd);
         return 1;
     }
+    printf("Sent: %s\n", buffer); // Later, comment this line
     return 0;
 }
 
@@ -67,7 +68,7 @@ int receiver_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, s
         close(sockfd);
         return 1;
     }
-    // printf("Response: %s\n", buffer); // Later, comment this line
+    printf("Response: %s\n", buffer); // Later, comment this line
     return 0;
 }
 
@@ -108,14 +109,24 @@ int setup_socket_tpc(const char* ip_version, const char* ip_address, const char*
 
 int sender_tpc(int sockfd, char* buffer)
 {
+    char* buffer_send = malloc(SOCKET_SIZE);
+    if (buffer_send == NULL)
+    {
+        fprintf(stderr, "malloc failed\n");
+        return 1;
+    }
     int bytes_send_tcp;
-    bytes_send_tcp = write(sockfd, buffer, strlen(buffer));
+    strcpy(buffer_send, buffer);
+    strcat(buffer_send, "\n");
+    bytes_send_tcp = write(sockfd, buffer_send, strlen(buffer_send));
+    free(buffer_send);
     if (bytes_send_tcp < 0)
     {
         perror("Error write");
         close(sockfd);
         return 1;
     }
+    printf("Sent: %s\n", buffer); // Later, comment this line
     return 0;
 }
 
@@ -130,7 +141,7 @@ int receiver_tcp(int sockfd, char* buffer)
         return 1;
     }
     buffer[bytes_recv_tcp] = '\0';
-    // printf("Response: %s\n", buffer);
+    printf("Response: %s\n", buffer);
     return 0;
 }
 
@@ -161,4 +172,20 @@ int init_connection_tcp(init_params_client params)
         return -1;
     }
     return sockfd;
+}
+
+int udp_check_connection(const char* ip_version, const char* ip_address, const char* port)
+{
+    struct addrinfo hints, *res;
+    int status;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = (strcmp(ip_version, IPV6) == 0) ? AF_INET6 : AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    if ((status = getaddrinfo(ip_address, port, &hints, &res)) != 0)
+    {
+        return 1;
+    }
+    return 0;
 }

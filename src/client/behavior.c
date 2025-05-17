@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/shm.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define LOWER_TIME 5
@@ -23,6 +24,8 @@
 #define NOTHING 0
 #define REPLY 1
 
+#define CLIENT_LOAD_INVENTORY "client_inventory_update"
+
 #define SERVER_AUTH_RESPONSE "server_auth_response"
 #define SERVER_EMERGENCY_ALERT "server_emergency_alert"
 #define INFECTION_ALERT "infection_alert"
@@ -35,7 +38,7 @@
 #define CLIENT_INVENTORY_UPDATE 3
 #define CLIENT_ACK_SUCCESS 4
 #define CLIENT_ACK_FAILURE 5
-#define CLIENT_INFECTION_ALERT 6
+#define CLIENT_EMERGENCY_ALERT 6
 // WAREHOUSE
 #define SERVER_W_STOCK_HUB "server_w_stock_hub"
 #define WAREHOUSE_SEND_STOCK_TO_HUB 7
@@ -47,7 +50,7 @@
 #define HUB_REQUEST_STOCK 10
 #define HUB_CANCELATION_ORDER 11 // to be implemented
 #define SERVER_H_SEND_STOCK "server_h_send_stock"
-#define HUB_RECEIVE_STOCK 12
+#define HUB_CONFIRM_STOCK 12
 
 // INTERNAL ACTIONS
 #define WAREHOUSE_LOAD_STOCK 12
@@ -66,14 +69,14 @@ int authenticate(connection_context context)
         response = receiver(context, get_identifiers()->protocol);
         if (response == NULL)
         {
-            log_error("Error receiving response with ID: %s", get_identifiers()->client_id);
+            log_error("Error receiving response");
             return 1;
         }
 
         next_action = message_receiver(response, context);
         if (next_action == NULL)
         {
-            log_error("Error processing response with ID: %s", get_identifiers()->client_id);
+            log_error("Error processing response with ID: %s", get_identifiers()->username);
             return 1;
         }
 
@@ -84,12 +87,12 @@ int authenticate(connection_context context)
         }
         free(next_action);
     }
-    log_info("Authentication failed after 3 attempts with ID: %s", get_identifiers()->client_id);
+    log_info("Authentication failed after 3 attempts with ID: %s", get_identifiers()->username);
 
     return 1;
 }
 
-int manager_sender(connection_context context, int time, int finish)
+int manager_sender(connection_context context, int time, volatile sig_atomic_t* finish)
 {
     if (!strcmp(get_identifiers()->client_type, WAREHOUSE))
     {
@@ -103,14 +106,15 @@ int manager_sender(connection_context context, int time, int finish)
     }
     else
     {
-        log_error("Invalid client type with ID: %s", get_identifiers()->client_id);
+        log_error("Invalid client type with ID: %s", get_identifiers()->username);
         return 1;
     }
     return 0;
 }
 
-int manager_receiver(connection_context context, int finish)
+int manager_receiver(connection_context context, volatile sig_atomic_t* finish)
 {
+    log_error("Finish in child signal received with ID: %s", get_identifiers()->username);
     if (!strcmp(get_identifiers()->client_type, WAREHOUSE))
     {
         if (warehouse_logic_receiver(context, finish))
@@ -181,9 +185,8 @@ int message_sender(connection_context context, int type_message)
     switch (type_message)
     {
     case CLIENT_AUTH_REQUEST:
-        client_auth_request auth_req =
-            create_client_auth_request(get_identifiers()->client_id, get_identifiers()->client_type,
-                                       get_identifiers()->username, get_identifiers()->password);
+        client_auth_request auth_req = create_client_auth_request(
+            get_identifiers()->client_type, get_identifiers()->username, get_identifiers()->password);
         buffer = serialize_client_auth_request(&auth_req);
         if (buffer == NULL)
         {
@@ -261,10 +264,10 @@ int message_sender(connection_context context, int type_message)
         }
         free(buffer);
         break;
-    case CLIENT_INFECTION_ALERT:
-        client_emergency_alert infec_alert =
-            create_client_infection_alert(get_identifiers()->username, get_identifiers()->session_token);
-        buffer = serialize_client_infection_alert(&infec_alert);
+    case CLIENT_EMERGENCY_ALERT:
+        client_emergency_alert emergency_alert =
+            create_client_emergency_alert(get_identifiers()->username, get_identifiers()->session_token);
+        buffer = serialize_client_emergency_alert(&emergency_alert);
         if (buffer == NULL)
         {
             log_error("Error serializing client_emergency_alert");
@@ -279,8 +282,8 @@ int message_sender(connection_context context, int type_message)
         break;
     case WAREHOUSE_SEND_STOCK_TO_HUB:
         warehouse_send_stock_to_hub send_stock_hub =
-            create_warehouse_send_stock_to_hub(get_identifiers()->username, get_identifiers()->session_token, get_hub_username(),
-                                               get_inventory_to_send(), get_inventory_size());
+            create_warehouse_send_stock_to_hub(get_identifiers()->username, get_identifiers()->session_token,
+                                               get_hub_username(), get_inventory_to_send(), get_inventory_size());
         buffer = serialize_warehouse_send_stock_to_hub(&send_stock_hub, get_inventory_size());
         if (buffer == NULL)
         {
@@ -328,10 +331,12 @@ int message_sender(connection_context context, int type_message)
         }
         free(buffer);
         break;
-    case HUB_RECEIVE_STOCK:
-        client_acknowledgment hub_receive =
-            create_hub_receive_stock(get_identifiers()->username, get_identifiers()->session_token, SUCCESS);
-        buffer = serialize_client_acknowledgment(&hub_receive);
+    case HUB_CONFIRM_STOCK:
+        log_info("Sending confirmation with username warehouse: %s", get_warehouse_username());
+        hub_confirm_stock hub_confirm =
+            create_hub_confirm_stock(get_identifiers()->username, get_warehouse_username(),
+                                     get_identifiers()->session_token, get_inventory_received(), get_inventory_size());
+        buffer = serialize_hub_confirm_stock(&hub_confirm, get_inventory_size());
         if (buffer == NULL)
         {
             log_error("Error serializing client_acknowledgment");
@@ -345,7 +350,7 @@ int message_sender(connection_context context, int type_message)
         free(buffer);
         break;
     default:
-        log_error("Unknown message type to send with ID : %s", get_identifiers()->client_id);
+        log_error("Unknown message type to send with ID : %s", get_identifiers()->username);
         return 1;
         break;
     }
@@ -363,7 +368,7 @@ int* message_receiver(char* response, connection_context context)
     char* type = get_type(response);
     if (type == NULL)
     {
-        log_error("Error getting message type with ID: %s", get_identifiers()->client_id);
+        log_error("Error getting message type with ID: %s", get_identifiers()->username);
         free(response);
         return NULL;
     }
@@ -371,7 +376,7 @@ int* message_receiver(char* response, connection_context context)
     {
         if (validate_checksum(response))
         {
-            log_error("Checksum error with ID: %s", get_identifiers()->client_id);
+            log_error("Checksum error with ID: %s", get_identifiers()->username);
             if (message_sender(context, CLIENT_ACK_FAILURE))
             {
                 log_error("Error sending acknowledgment\n");
@@ -379,7 +384,7 @@ int* message_receiver(char* response, connection_context context)
                 free(response);
                 return NULL;
             }
-            log_info("Client finished with ID: %s", get_identifiers()->client_id);
+            log_info("Client finished with ID: %s", get_identifiers()->username);
             free(type);
             free(response);
             return NULL;
@@ -401,17 +406,17 @@ int* message_receiver(char* response, connection_context context)
         server_auth_response auth_res = deserialize_server_auth_response(response);
         if (!strcmp(auth_res.payload.status, SUCCESS))
         {
-            log_info("Authentication successful with ID: %s", get_identifiers()->client_id);
+            log_info("Authentication successful with ID: %s", get_identifiers()->username);
             next_action[0] = NOTHING;
             next_action[1] = NOTHING;
             set_session_token(auth_res.payload.session_token);
         }
         else
         {
-            log_info("Authentication failed with ID: %s", get_identifiers()->client_id);
+            log_info("Authentication failed with ID: %s", get_identifiers()->username);
             next_action[0] = REPLY;
             next_action[1] = CLIENT_AUTH_REQUEST;
-            log_info("Trying to reauthenticate with ID: %s", get_identifiers()->client_id);
+            log_info("Trying to reauthenticate with ID: %s", get_identifiers()->username);
         }
         free(response);
         free(type);
@@ -424,15 +429,15 @@ int* message_receiver(char* response, connection_context context)
         next_action[1] = NOTHING;
         if (!strcmp(emerg_alert.payload.alert_type, INFECTION_ALERT))
         {
-            log_warning("Emergency alert [INFECTION] received with ID: %s", get_identifiers()->client_id);
+            log_warning("Emergency alert [INFECTION] received with ID: %s", get_identifiers()->username);
         }
         else if (!strcmp(emerg_alert.payload.alert_type, ENEMY_THREAD))
         {
-            log_warning("Emergency alert [ENEMY THREAD] received with ID: %s", get_identifiers()->client_id);
+            log_warning("Emergency alert [ENEMY THREAD] received with ID: %s", get_identifiers()->username);
         }
         else if (!strcmp(emerg_alert.payload.alert_type, WEATHER_ALERT))
         {
-            log_warning("Emergency alert [WEATHER ALERT] received with ID: %s", get_identifiers()->client_id);
+            log_warning("Emergency alert [WEATHER ALERT] received with ID: %s", get_identifiers()->username);
         }
         free(type);
         free(response);
@@ -453,7 +458,14 @@ int* message_receiver(char* response, connection_context context)
     {
         server_w_stock_warehouse stock_warehouse = deserialize_server_w_stock_warehouse(response);
         set_inventory(stock_warehouse.payload.items);
-        log_info("WAREHOUSE stock updated with ID: %s", get_identifiers()->client_id);
+        log_info("WAREHOUSE stock updated with ID: %s", get_identifiers()->username);
+        if (message_sender(context, CLIENT_INVENTORY_UPDATE))
+        {
+            log_error("Error sending acknowledgment\n");
+            free(type);
+            free(response);
+            return NULL;
+        }
         next_action[0] = NOTHING;
         next_action[1] = WAREHOUSE_LOAD_STOCK;
         free(type);
@@ -464,8 +476,17 @@ int* message_receiver(char* response, connection_context context)
     {
         server_h_send_stock stock_hub = deserialize_server_h_send_stock(response);
         set_inventory(stock_hub.payload.items);
-        log_info("HUB stock updated with ID: %s", get_identifiers()->client_id);
-        if (message_sender(context, HUB_RECEIVE_STOCK))
+        set_inventory_received(stock_hub.payload.items);
+        set_warehouse_username(stock_hub.payload.warehouse_username);
+        log_info("HUB stock updated with ID: %s", get_identifiers()->username);
+        if (message_sender(context, HUB_CONFIRM_STOCK))
+        {
+            log_error("Error sending acknowledgment\n");
+            free(type);
+            free(response);
+            return NULL;
+        }
+        if (message_sender(context, CLIENT_INVENTORY_UPDATE))
         {
             log_error("Error sending acknowledgment\n");
             free(type);
@@ -474,6 +495,17 @@ int* message_receiver(char* response, connection_context context)
         }
         next_action[0] = NOTHING;
         next_action[1] = HUB_LOAD_STOCK;
+        free(type);
+        free(response);
+        return next_action;
+    }
+    else if (!strcmp(type, CLIENT_LOAD_INVENTORY))
+    {
+        client_inventory_update inv_upd = deserialize_client_inventory_update(response);
+        set_inventory(inv_upd.payload.items);
+        log_info("Inventory loaded");
+        next_action[0] = NOTHING;
+        next_action[1] = NOTHING;
         free(type);
         free(response);
         return next_action;
@@ -491,33 +523,50 @@ int* message_receiver(char* response, connection_context context)
     return NULL;
 }
 
-int warehouse_logic_sender(connection_context context, int time, int finish)
+int warehouse_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish)
 {
     int infection;
+    int count = 60;
     while (1)
     {
-        if (get_uniform_random(0, 100) < EMERGENCY_PROBABILITY)
+        if (*finish)
         {
-            if (message_sender(context, CLIENT_INFECTION_ALERT))
-                return 1;
-            log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
-        }
-        if (message_sender(context, CLIENT_KEEP_ALIVE))
-            return 1;
-        if (message_sender(context, CLIENT_INVENTORY_UPDATE))
-            return 1;
-        if (finish)
+            log_error("FINISH IN SENDER");
             break;
-        sleep(60);
+        }
+        if (count >= time)
+        {
+            count = 0;
+            if (strcmp(get_identifiers()->protocol, UDP) &&
+                udp_check_connection(get_identifiers()->ip_version, get_identifiers()->ip_address,
+                                     get_identifiers()->port))
+            {
+                log_error("Connection error with ID: %s", get_identifiers()->username);
+                return 1;
+            }
+            if (get_uniform_random(0, 100) < EMERGENCY_PROBABILITY)
+            {
+                if (message_sender(context, CLIENT_EMERGENCY_ALERT))
+                    return 1;
+                log_info("Infection alert sent with ID: %s", get_identifiers()->username);
+            }
+            if (message_sender(context, CLIENT_KEEP_ALIVE))
+                return 1;
+            if (message_sender(context, CLIENT_INVENTORY_UPDATE))
+                return 1;
+        }
+        sleep(1);
+        count++;
     }
     return 0;
 }
 
-int warehouse_logic_receiver(connection_context context, int finish)
+int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* finish)
 {
     char* recv = NULL;
     while (1)
     {
+
         recv = receiver(context, get_identifiers()->protocol);
         if (recv == NULL)
         {
@@ -535,7 +584,7 @@ int warehouse_logic_receiver(connection_context context, int finish)
                 if (replenish())
                 {
                     log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                             get_identifiers()->client_id);
+                             get_identifiers()->username);
                     if (message_sender(context, WAREHOUSE_REQUEST_STOCK))
                         return 1;
                 }
@@ -546,48 +595,58 @@ int warehouse_logic_receiver(connection_context context, int finish)
                     return 1;
             }
         }
-        if (finish)
+        if (*finish)
+        {
+            log_error("FINISH IN RECEIVER");
             break;
+        }
     }
     return 0;
 }
 
-int hub_logic_sender(connection_context context, int time, int finish)
+int hub_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish)
 {
     int count = 60;
     int next_compsumption = get_uniform_random(LOWER_TIME, UPPER_TIME);
     int emergency;
     while (1)
     {
+        if (*finish)
+            break;
         if (--next_compsumption <= 0)
         {
             if (inventory_compsumption())
-                return 1;
-            next_compsumption = (int)get_uniform_random(LOWER_TIME, UPPER_TIME);
-            log_info("Inventory consumption with ID: %s", get_identifiers()->client_id);
-            if (replenish())
             {
                 log_info("Low inventory detected, sending request for supply to server with ID: %s",
-                         get_identifiers()->client_id);
+                         get_identifiers()->username);
                 if (message_sender(context, HUB_REQUEST_STOCK))
                     return 1;
             }
+            next_compsumption = (int)get_uniform_random(LOWER_TIME, UPPER_TIME);
+            log_info("Inventory consumption with ID: %s", get_identifiers()->username);
         }
         if (count >= time)
         {
             count = 0;
+            if (strcmp(get_identifiers()->protocol, UDP) &&
+                udp_check_connection(get_identifiers()->ip_version, get_identifiers()->ip_address,
+                                     get_identifiers()->port))
+            {
+                log_error("Connection error with ID: %s", get_identifiers()->username);
+                return 1;
+            }
             if (get_uniform_random(0, 100) < EMERGENCY_PROBABILITY)
             {
-                if (message_sender(context, CLIENT_INFECTION_ALERT))
+                if (message_sender(context, CLIENT_EMERGENCY_ALERT))
                     return 1;
-                log_info("Infection alert sent with ID: %s", get_identifiers()->client_id);
+                log_info("Infection alert sent with ID: %s", get_identifiers()->username);
             }
             if (message_sender(context, CLIENT_KEEP_ALIVE))
                 return 1;
             if (message_sender(context, CLIENT_INVENTORY_UPDATE))
                 return 1;
-            if (finish)
-                break;
+            // if (finish)
+            //     break;
         }
         sleep(1);
         count++;
@@ -595,11 +654,12 @@ int hub_logic_sender(connection_context context, int time, int finish)
     return 0;
 }
 
-int hub_logic_receiver(connection_context context, int finish)
+int hub_logic_receiver(connection_context context, volatile sig_atomic_t* finish)
 {
     char* recv = NULL;
     while (1)
     {
+
         recv = receiver(context, get_identifiers()->protocol);
         if (recv == NULL)
         {
@@ -613,7 +673,7 @@ int hub_logic_receiver(connection_context context, int finish)
             if (message_sender(context, next_action[1]))
                 return 1;
         }
-        if (finish)
+        if (*finish)
             break;
     }
     return 0;

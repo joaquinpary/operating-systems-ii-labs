@@ -3,6 +3,8 @@
 
 #include "connection.h"
 #include "json_manager.h"
+#include <signal.h>
+#include <stdatomic.h>
 
 #define WAREHOUSE "warehouse"
 #define HUB "hub"
@@ -22,14 +24,14 @@ int authenticate(connection_context context);
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_sender(connection_context context, int time, int finish);
+int manager_sender(connection_context context, int time, volatile sig_atomic_t* finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
  * @param context The connection context.
  * @return 0 on success, -1 on failure.
  */
-int manager_receiver(connection_context context, int finish);
+int manager_receiver(connection_context context, volatile sig_atomic_t* finish);
 /* @brief
  * Function to send a message to the server.
  * @param context The connection context.
@@ -67,7 +69,7 @@ int* message_receiver(char* response, connection_context context);
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_sender(connection_context context, int time, int finish);
+int warehouse_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -76,7 +78,7 @@ int warehouse_logic_sender(connection_context context, int time, int finish);
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int warehouse_logic_receiver(connection_context context, int finish);
+int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* finish);
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -85,7 +87,7 @@ int warehouse_logic_receiver(connection_context context, int finish);
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_sender(connection_context context, int time, int finish);
+int hub_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish);
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -94,6 +96,6 @@ int hub_logic_sender(connection_context context, int time, int finish);
  * @param semid The semaphore ID.
  * @return 0 on success, 1 on failure.
  */
-int hub_logic_receiver(connection_context context, int finish);
+int hub_logic_receiver(connection_context context, volatile sig_atomic_t* finish);
 
 #endif

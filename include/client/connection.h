@@ -38,7 +38,7 @@ int setup_socket_udp(const char* ip_version, const char* ip_address, const char*
  * @param buffer Buffer containing the data to be sent.
  * @param dest_addr Destination address structure.
  * @param addr_len Length of the destination address structure.
- * @return Number of bytes sent.
+ * @return 0 on success, 1 on failure.
  */
 int sender_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, socklen_t addr_len);
 
@@ -48,7 +48,7 @@ int sender_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, soc
  * @param buffer Buffer to store the received data.
  * @param dest_addr Destination address structure.
  * @param addr_len Length of the destination address structure.
- * @return Number of bytes received.
+ * @retur 0 on success, 1 on failure.
  */
 int receiver_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, socklen_t addr_len);
 
@@ -65,7 +65,7 @@ int setup_socket_tpc(const char* ip_version, const char* ip_address, const char*
  * @brief Function to send data over TCP.
  * @param sockfd Socket file descriptor.
  * @param buffer Buffer containing the data to be sent.
- * @return Number of bytes sent.
+ * @return 0 on success, 1 on failure.
  */
 int sender_tpc(int sockfd, char* buffer);
 
@@ -73,7 +73,7 @@ int sender_tpc(int sockfd, char* buffer);
  * @brief Function to receive data over TCP.
  * @param sockfd Socket file descriptor.
  * @param buffer Buffer to store the received data.
- * @return Number of bytes received.
+ * @return 0 on success, 1 on failure.
  */
 int receiver_tcp(int sockfd, char* buffer);
 
@@ -90,5 +90,14 @@ connection_context init_connection_udp(init_params_client params);
  * @return Socket file descriptor.
  */
 int init_connection_tcp(init_params_client params);
+
+/*
+ * @brief Function to check the connection status of a UDP socket.
+ * @param ip_version IP version (IPv4 or IPv6).
+ * @param ip_address IP address.
+ * @param port Port number.
+ * @return 0 if the connection is up, 1 if the server is down.
+ */
+int udp_check_connection(const char* ip_version, const char* ip_address, const char* port);
 
 #endif

@@ -19,12 +19,9 @@ void set_session_token(const char* session_token)
     ident.session_token[SESSION_TOKEN_SIZE - 1] = '\0';
 }
 
-void set_client_id(const char* client_id)
+void set_shm_path()
 {
-    strncpy(ident.client_id, client_id, MIN_SIZE - 1);
-    ident.client_id[MIN_SIZE - 1] = '\0';
-
-    snprintf(ident.shm_path, sizeof(ident.shm_path), "/tmp/shm_client_%s", ident.client_id);
+    snprintf(ident.shm_path, sizeof(ident.shm_path), "/tmp/shm_client_%s", ident.username);
 
     FILE* f = fopen(ident.shm_path, "w");
     if (f)
@@ -45,6 +42,24 @@ void set_protocol(const char* protocol)
     ident.protocol[MIN_SIZE - 1] = '\0';
 }
 
+void set_ip_address(const char* ip_address)
+{
+    strncpy(ident.ip_address, ip_address, MIN_SIZE - 1);
+    ident.ip_address[MIN_SIZE - 1] = '\0';
+}
+
+void set_ip_version(const char* ip_version)
+{
+    strncpy(ident.ip_version, ip_version, MIN_SIZE - 1);
+    ident.ip_version[MIN_SIZE - 1] = '\0';
+}
+
+void set_port(const char* port)
+{
+    strncpy(ident.port, port, MIN_SIZE - 1);
+    ident.port[MIN_SIZE - 1] = '\0';
+}
+
 void set_username(const char* username)
 {
     strncpy(ident.username, username, MIN_SIZE - 1);
@@ -59,9 +74,12 @@ void set_password(const char* password)
 
 void set_params(init_params_client params)
 {
-    set_client_id(params.client_id);
     set_client_type(params.client_type);
     set_protocol(params.connection_params.protocol);
+    set_ip_address(params.connection_params.host);
+    set_ip_version(params.connection_params.ip_version);
+    set_port(params.connection_params.port);
     set_username(params.username);
     set_password(params.password);
+    set_shm_path();
 }

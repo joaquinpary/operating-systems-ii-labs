@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "facade.h"
 #include "behavior.h"
 #include "behavior_cli.h"
@@ -5,23 +6,43 @@
 #include "connection.h"
 #include "inventory.h"
 #include "logger.h"
+#include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
-#include <wait.h>
 
 #define TIME 60
-#define FINISH 0
+
+#define WAREHOUSE_REQUEST_STOCK 8
+#define HUB_REQUEST_STOCK 10
+
 // Father process for Sender
 // Sender process for Receiver
+
+volatile sig_atomic_t finish = 0;
+pid_t child_pid = -1;
+
+void handle_sigint(int sig)
+{
+    (void)sig;
+    finish = 1;
+
+    if (child_pid > 0)
+    {
+        kill(child_pid, SIGTERM);
+    }
+}
 
 int connection(init_params_client params)
 {
     int authentication_status;
+    char* buffer = NULL;
     connection_context context = {0};
-    pid_t pid;
 
+    signal(SIGINT, handle_sigint);
     if (!strcmp(params.connection_params.protocol, UDP))
     {
         context = init_connection_udp(params);
@@ -49,32 +70,55 @@ int connection(init_params_client params)
     authentication_status = authenticate(context);
     if (authentication_status != 0)
     {
-        log_error("Authentication failed with ID: %s", get_identifiers()->client_id);
+        log_error("Authentication failed with ID: %s", get_identifiers()->username);
         close(context.sockfd);
         return 1;
     }
-    pid = fork();
-    if (pid < 0)
+
+    buffer = receiver(context, params.connection_params.protocol);
+    if (buffer == NULL)
     {
-        log_debug("Fork failed");
-        exit(EXIT_FAILURE);
+        log_error("Error receiving response with ID: %s", get_identifiers()->username);
+        close(context.sockfd);
+        return 1;
     }
-    else if (pid == 0)
+    int* next_action = message_receiver(buffer, context);
+    if (next_action == NULL)
     {
-        if (manager_receiver(context, FINISH))
-            exit(EXIT_FAILURE);
+        log_error("Error processing response with ID: %s", get_identifiers()->username);
+        free(buffer);
+        close(context.sockfd);
+        return 1;
+    }
+    log_error("Finished processing response with ID: %s", get_identifiers()->username);
+    child_pid = fork();
+    if (child_pid < 0)
+    {
+        log_error("Fork failed");
+        close(context.sockfd);
+        return 1;
+    }
+    else if (child_pid == 0)
+    {
+        signal(SIGINT, handle_sigint);
+        exit(manager_receiver(context, &finish));
     }
     else
     {
-        if (manager_sender(context, TIME, FINISH))
+        log_error("Finished in father processing response with ID: %s", get_identifiers()->username);
+        if (manager_sender(context, TIME, &finish))
         {
-            wait(NULL);
+            kill(child_pid, SIGTERM);
+            waitpid(child_pid, NULL, 0);
             close(context.sockfd);
             return 1;
         }
+        kill(child_pid, SIGTERM);
+        waitpid(child_pid, NULL, 0);
         wait(NULL);
     }
     close(context.sockfd);
+    log_info("FINISH CLIENT");
     return 0;
 }
 
@@ -89,7 +133,7 @@ int connection_cli(init_params_client params)
     }
     if (logic_cli_sender_recv(params, sockfd))
         return 1;
-    log_info("Client finished with ID: %s", get_identifiers()->client_id);
+    log_info("Client finished with ID: %s", get_identifiers()->username);
     close(sockfd);
     return 0;
 }
