@@ -28,7 +28,6 @@ void tearDown(void)
 void test_connection_tcp()
 {
     init_params_client params = {
-        .client_id = "test_client",
         .client_type = "WAREHOUSE",
         .username = "user_test",
         .password = "pass_test",
@@ -46,7 +45,6 @@ void test_connection_tcp()
 void test_connection_udp()
 {
     init_params_client params = {
-        .client_id = "test_client",
         .client_type = "HUB",
         .username = "user_test",
         .password = "pass_test",
@@ -64,7 +62,6 @@ void test_connection_udp()
 void test_connection_cli_port_failed()
 {
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params =
             {
@@ -85,7 +82,6 @@ void test_connection_cli_port_failed()
 void test_connection_cli_failed()
 {
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params =
             {
@@ -106,7 +102,6 @@ void test_connection_cli_failed()
 void test_connection_cli_success()
 {
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params =
             {

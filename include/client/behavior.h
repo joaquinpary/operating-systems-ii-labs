@@ -13,33 +13,37 @@
 
 /* @brief
  * Function to authenticate the client with the server.
- * @param params The parameters for the client initialization.
  * @param context The connection context.
- * @return 0 on success, -1 on failure.
+ * @return 0 on success, 1 on failure.
  */
 int authenticate(connection_context context);
+
 /* @brief
  * Function to send a keepalive message to the server.
- * @param params The parameters for the client initialization.
  * @param context The connection context.
- * @return 0 on success, -1 on failure.
+ * @param time The time to send the keepalive message and update inventory.
+ * @param finish The flag to finish.
+ * @return 0 on success, 1 on failure.
  */
 int manager_sender(connection_context context, int time, volatile sig_atomic_t* finish);
+
 /* @brief
  * Function to receive a message from the server.
- * @param params The parameters for the client initialization.
  * @param context The connection context.
- * @return 0 on success, -1 on failure.
+ * @param finish The flag to finish.
+ * @return 0 on success, 1 on failure.
  */
 int manager_receiver(connection_context context, volatile sig_atomic_t* finish);
+
 /* @brief
  * Function to send a message to the server.
  * @param context The connection context.
  * @param protocol The protocol to use for sending the message.
  * @param buffer The message buffer to send.
- * @return 0 on success, -1 on failure.
+ * @return 0 on success, 1 on failure.
  */
 int sender(connection_context context, char* protocol, char* buffer);
+
 /* @brief
  * Function to receive a message from the server.
  * @param context The connection context.
@@ -47,20 +51,22 @@ int sender(connection_context context, char* protocol, char* buffer);
  * @return The received message buffer.
  */
 char* receiver(connection_context context, char* protocol);
+
 /* @brief
  * Function to send a message to the server.
- * @param params The parameters for the client initialization.
  * @param context The connection context.
  * @param type_message The type of message to send.
- * @return 0 on success, -1 on failure.
+ * @return 0 on success, 1 on failure.
  */
 int message_sender(connection_context context, int type_message);
+
 /* @brief
  * Function to receive a message from the server.
  * @param response The response message buffer.
  * @return The received message buffer.
  */
 int* message_receiver(char* response, connection_context context);
+
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -70,6 +76,7 @@ int* message_receiver(char* response, connection_context context);
  * @return 0 on success, 1 on failure.
  */
 int warehouse_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish);
+
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.
@@ -79,6 +86,7 @@ int warehouse_logic_sender(connection_context context, int time, volatile sig_at
  * @return 0 on success, 1 on failure.
  */
 int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* finish);
+
 /* @brief
  * Function to send a message to the server.
  * @param params The parameters for the client initialization.
@@ -88,6 +96,7 @@ int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* 
  * @return 0 on success, 1 on failure.
  */
 int hub_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish);
+
 /* @brief
  * Function to receive a message from the server.
  * @param params The parameters for the client initialization.

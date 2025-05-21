@@ -22,17 +22,16 @@ void test_set_session_token_and_get_identifiers(void)
     TEST_ASSERT_EQUAL_STRING(test_token, id->session_token);
 }
 
-void test_set_client_id_and_shm_path(void)
+void test_set_shm_path(void)
 {
-    const char* test_client = "client1";
+    const char* test_username = "testuser";
     char expected_shm_path[SHM_PATH_SIZE];
-    snprintf(expected_shm_path, sizeof(expected_shm_path), "/tmp/shm_client_%s", test_client);
+    snprintf(expected_shm_path, sizeof(expected_shm_path), "/tmp/shm_client_%s", test_username);
 
-    set_client_id(test_client);
+    set_username(test_username);
+    set_shm_path();
 
     identifiers* id = get_identifiers();
-
-    TEST_ASSERT_EQUAL_STRING(test_client, id->client_id);
     TEST_ASSERT_EQUAL_STRING(expected_shm_path, id->shm_path);
 
     FILE* f = fopen(id->shm_path, "r");
@@ -61,6 +60,36 @@ void test_set_protocol(void)
     TEST_ASSERT_EQUAL_STRING(test_protocol, id->protocol);
 }
 
+void test_set_ip_address(void)
+{
+    const char* test_ip = "127.0.0.1";
+
+    set_ip_address(test_ip);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_ip, id->ip_address);
+}
+
+void test_set_ip_version(void)
+{
+    const char* test_version = "ipv4";
+
+    set_ip_version(test_version);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_version, id->ip_version);
+}
+
+void test_set_port(void)
+{
+    const char* test_port = "8080";
+
+    set_port(test_port);
+
+    identifiers* id = get_identifiers();
+    TEST_ASSERT_EQUAL_STRING(test_port, id->port);
+}
+
 void test_set_username(void)
 {
     const char* test_username = "user";
@@ -84,29 +113,33 @@ void test_set_password(void)
 void test_set_params(void)
 {
     init_params_client params = {
-        .client_id = "test_client",
         .client_type = "warehouse",
         .username = "user_test",
         .password = "pass_test",
-        .connection_params = {.protocol = "tcp", .host = "localhost", .port = "8080"},
-    };
+        .connection_params = {.protocol = "tcp", .host = "localhost", .port = "8080", .ip_version = "ipv4"}};
 
     set_params(params);
 
     identifiers* id = get_identifiers();
-    TEST_ASSERT_EQUAL_STRING(params.client_id, id->client_id);
     TEST_ASSERT_EQUAL_STRING(params.client_type, id->client_type);
     TEST_ASSERT_EQUAL_STRING(params.username, id->username);
     TEST_ASSERT_EQUAL_STRING(params.password, id->password);
+    TEST_ASSERT_EQUAL_STRING(params.connection_params.protocol, id->protocol);
+    TEST_ASSERT_EQUAL_STRING(params.connection_params.host, id->ip_address);
+    TEST_ASSERT_EQUAL_STRING(params.connection_params.port, id->port);
+    TEST_ASSERT_EQUAL_STRING(params.connection_params.ip_version, id->ip_version);
 }
 
 int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_set_session_token_and_get_identifiers);
-    RUN_TEST(test_set_client_id_and_shm_path);
+    RUN_TEST(test_set_shm_path);
     RUN_TEST(test_set_client_type);
     RUN_TEST(test_set_protocol);
+    RUN_TEST(test_set_ip_address);
+    RUN_TEST(test_set_ip_version);
+    RUN_TEST(test_set_port);
     RUN_TEST(test_set_username);
     RUN_TEST(test_set_password);
     RUN_TEST(test_set_params);

@@ -30,7 +30,7 @@ void test_start_client_failed(void)
 
 void test_start_cli_failed(void)
 {
-    const char* input = "localhost\n9998\nadmin\nadmin\n3\n";
+    const char* input = "localhost\n9998\nuser_test\npass_test\n3\n";
     FILE* input_stream = fmemopen((void*)input, strlen(input), "r");
     TEST_ASSERT_NOT_NULL(input_stream);
     stdin = input_stream;

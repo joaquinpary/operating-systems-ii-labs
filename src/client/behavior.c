@@ -402,7 +402,6 @@ int* message_receiver(char* response, connection_context context)
     }
     if (!strcmp(type, SERVER_AUTH_RESPONSE))
     {
-        printf("Server auth response received\n");
         server_auth_response auth_res = deserialize_server_auth_response(response);
         if (!strcmp(auth_res.payload.status, SUCCESS))
         {
@@ -526,12 +525,11 @@ int* message_receiver(char* response, connection_context context)
 int warehouse_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish)
 {
     int infection;
-    int count = 60;
+    int count = time;
     while (1)
     {
         if (*finish)
         {
-            log_error("FINISH IN SENDER");
             break;
         }
         if (count >= time)
@@ -597,7 +595,6 @@ int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* 
         }
         if (*finish)
         {
-            log_error("FINISH IN RECEIVER");
             break;
         }
     }
@@ -606,7 +603,7 @@ int warehouse_logic_receiver(connection_context context, volatile sig_atomic_t* 
 
 int hub_logic_sender(connection_context context, int time, volatile sig_atomic_t* finish)
 {
-    int count = 60;
+    int count = time;
     int next_compsumption = get_uniform_random(LOWER_TIME, UPPER_TIME);
     int emergency;
     while (1)
@@ -645,8 +642,6 @@ int hub_logic_sender(connection_context context, int time, volatile sig_atomic_t
                 return 1;
             if (message_sender(context, CLIENT_INVENTORY_UPDATE))
                 return 1;
-            // if (finish)
-            //     break;
         }
         sleep(1);
         count++;

@@ -1,16 +1,18 @@
-#include <gtest/gtest.h>
-#include <fstream>
-#include <cstdio> // std::remove
 #include "config.hpp"
+#include <cstdio> // std::remove
+#include <fstream>
+#include <gtest/gtest.h>
 
-void write_temp_file(const std::string& filename, const std::string& content) {
+void write_temp_file(const std::string& filename, const std::string& content)
+{
     std::ofstream out(filename);
     ASSERT_TRUE(out.is_open());
     out << content;
     out.close();
 }
 
-TEST(ConfigTest, LoadValidConfig) {
+TEST(ConfigTest, LoadValidConfig)
+{
     std::string filename = "test_config.json";
     std::string json = R"({
         "ip_v4": "127.0.0.1",
@@ -27,7 +29,7 @@ TEST(ConfigTest, LoadValidConfig) {
     write_temp_file(filename, json);
 
     config cfg = config::load_config_from_file(filename);
-    
+
     EXPECT_EQ(cfg.ip_v4, "127.0.0.1");
     EXPECT_EQ(cfg.ip_v6, "::1");
     EXPECT_EQ(cfg.port_tcp_v4, 8080);
@@ -41,18 +43,20 @@ TEST(ConfigTest, LoadValidConfig) {
     std::remove(filename.c_str());
 }
 
-TEST(ConfigTest, LoadInvalidJson) {
+TEST(ConfigTest, LoadInvalidJson)
+{
     std::string filename = "test_invalid_config.json";
     std::string json = R"({ "ip_v4": "127.0.0.1", "port_tcp_v4": "not-a-number" })";
     write_temp_file(filename, json);
 
     config cfg = config::load_config_from_file(filename);
 
-    if (cfg.port_tcp_v4 < 0 || cfg.port_tcp_v4 > 65535) {
+    if (cfg.port_tcp_v4 < 0 || cfg.port_tcp_v4 > 65535)
+    {
         cfg.port_tcp_v4 = 0;
     }
 
-    EXPECT_EQ(cfg.ip_v4, "");  
+    EXPECT_EQ(cfg.ip_v4, "");
     EXPECT_EQ(cfg.port_tcp_v4, 0);
 
     std::remove(filename.c_str());

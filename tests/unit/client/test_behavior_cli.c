@@ -44,7 +44,6 @@ void test_cli_authenticate_success_and_exit(void)
     stdin = input_stream;
 
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params = {.host = "localhost", .port = "8080", .protocol = "tcp", .ip_version = "ipv4"}};
 
@@ -65,10 +64,8 @@ void test_cli_authenticate_fail_three_times(void)
     stdin = input_stream;
 
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params = {.host = "localhost", .port = "8080", .protocol = "tcp", .ip_version = "ipv4"}};
-    strcpy(params.client_id, "test_client");
 
     int sockfd = init_connection_tcp(params);
     TEST_ASSERT_TRUE(sockfd > 0);
@@ -88,7 +85,6 @@ void test_logic_cli_sender_recv_transactions(void)
     TEST_ASSERT_NOT_NULL(input_stream);
     stdin = input_stream;
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params = {.host = "localhost", .port = "8080", .protocol = "tcp", .ip_version = "ipv4"}};
     int sockfd = init_connection_tcp(params);
@@ -105,7 +101,6 @@ void test_logic_cli_sender_recv_clients_lives(void)
     TEST_ASSERT_NOT_NULL(input_stream);
     stdin = input_stream;
     init_params_client params = {
-        .client_id = "admin",
         .client_type = "admin",
         .connection_params = {.host = "localhost", .port = "8080", .protocol = "tcp", .ip_version = "ipv4"}};
     int sockfd = init_connection_tcp(params);

@@ -132,13 +132,13 @@ init_params_client load_config_client(const char* filename, const int index)
         cJSON* ip_version = cJSON_GetObjectItemCaseSensitive(connect, "ip_version");
 
         if (cJSON_IsString(host))
-            strncpy(params.connection_params.host, host->valuestring, BUFFER_SIZE - 1);
+            strncpy(params.connection_params.host, host->valuestring, MIN_SIZE - 1);
         if (cJSON_IsString(port))
-            strncpy(params.connection_params.port, port->valuestring, MIN_SIZE - 1);
+            strncpy(params.connection_params.port, port->valuestring, PROTOCOL_SIZE - 1);
         if (cJSON_IsString(protocol))
-            strncpy(params.connection_params.protocol, protocol->valuestring, MIN_SIZE - 1);
+            strncpy(params.connection_params.protocol, protocol->valuestring, PROTOCOL_SIZE - 1);
         if (cJSON_IsString(ip_version))
-            strncpy(params.connection_params.ip_version, ip_version->valuestring, MIN_SIZE - 1);
+            strncpy(params.connection_params.ip_version, ip_version->valuestring, PROTOCOL_SIZE - 1);
     }
 
     cJSON_Delete(root);

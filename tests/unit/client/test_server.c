@@ -142,7 +142,7 @@ static void* handle_client(void* arg)
         else if (!strcmp(type, "hub_request_stock"))
         {
             hub_request_stock stock_req = deserialize_hub_request_stock(buffer);
-            server_h_send_stock send_stock = create_server_h_send_stock(stock_req.payload.items, 6);
+            server_h_send_stock send_stock = create_server_h_send_stock("test_user", stock_req.payload.items, 6);
             char* serialized_response = serialize_server_h_send_stock(&send_stock, 6);
             send(client_socket, serialized_response, strlen(serialized_response), 0);
             free(serialized_response);

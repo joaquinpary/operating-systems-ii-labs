@@ -8,6 +8,7 @@
 #include "test_server.h"
 #include "unity.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -77,7 +78,6 @@ void test_authenticate(void)
         .client_type = "warehouse",
         .username = "user_test",
         .password = "pass_test",
-        .client_id = "client_id_1",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -94,7 +94,6 @@ void test_authenticate_invalid(void)
         .client_type = "warehouse",
         .username = "invalid_user",
         .password = "invalid_pass",
-        .client_id = "client_id_2",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -107,17 +106,17 @@ void test_authenticate_invalid(void)
 
 void test_manager_sender_warehouse(void)
 {
+    volatile sig_atomic_t finish = 1;
     init_params_client params = {
         .client_type = "warehouse",
         .username = "test_sen_ware",
         .password = "test_pass",
-        .client_id = "client_id_3",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
     init_shared_memory();
     connection_context context = {.sockfd = sockfd};
-    int result = manager_sender(context, 2, 1);
+    int result = manager_sender(context, 2, &finish);
     TEST_ASSERT_EQUAL(0, result);
     close(context.sockfd);
     sleep(1);
@@ -125,17 +124,17 @@ void test_manager_sender_warehouse(void)
 
 void test_manager_sender_hub(void)
 {
+    volatile sig_atomic_t finish = 1;
     init_params_client params = {
         .client_type = "hub",
         .username = "test_sen_hub",
         .password = "test_pass",
-        .client_id = "client_id_3",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
     init_shared_memory();
     connection_context context = {.sockfd = sockfd};
-    int result = manager_sender(context, 2, 1);
+    int result = manager_sender(context, 2, &finish);
     TEST_ASSERT_EQUAL(0, result);
     close(context.sockfd);
     sleep(1);
@@ -143,11 +142,11 @@ void test_manager_sender_hub(void)
 
 void test_manager_receiver_warehouse(void)
 {
+    volatile sig_atomic_t finish = 1;
     init_params_client params = {
         .client_type = "warehouse",
         .username = "test_man_recv",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     connection_context context = {.sockfd = 0};
     set_params(params);
@@ -160,7 +159,7 @@ void test_manager_receiver_warehouse(void)
     shm_ptr->items[0].quantity = 10;
     sem_signal();
     message_sender(context, WAREHOUSE_REQUEST_STOCK);
-    int result = manager_receiver(context, 1);
+    int result = manager_receiver(context, &finish);
     TEST_ASSERT_EQUAL(0, result);
     close(context.sockfd);
     sleep(1);
@@ -168,11 +167,11 @@ void test_manager_receiver_warehouse(void)
 
 void test_manager_receiver_hub(void)
 {
+    volatile sig_atomic_t finish = 1;
     init_params_client params = {
         .client_type = "hub",
         .username = "test_man_recv",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     connection_context context = {.sockfd = 0};
     set_params(params);
@@ -185,7 +184,7 @@ void test_manager_receiver_hub(void)
     shm_ptr->items[0].quantity = 3;
     sem_signal();
     message_sender(context, HUB_REQUEST_STOCK);
-    int result = manager_receiver(context, 1);
+    int result = manager_receiver(context, &finish);
 
     TEST_ASSERT_EQUAL(0, result);
     close(context.sockfd);
@@ -198,13 +197,11 @@ void test_message_sender_client_auth_request(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
     connection_context context = {.sockfd = sockfd};
-    client_auth_request auth_req =
-        create_client_auth_request(params.client_id, params.client_type, params.username, params.password);
+    client_auth_request auth_req = create_client_auth_request(params.client_type, params.username, params.password);
     char* serialized_request = serialize_client_auth_request(&auth_req);
     if (serialized_request == NULL)
     {
@@ -221,7 +218,6 @@ void test_message_sender_client_keepalive(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -238,7 +234,6 @@ void test_message_sender_client_inventory_update(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -256,7 +251,6 @@ void test_message_sender_client_acknowledgment_success(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -273,13 +267,10 @@ void test_message_sender_client_acknowledgment_failure(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
     connection_context context = {.sockfd = sockfd};
-    set_client_id(params.client_id);
-    set_client_type(params.client_type);
     set_session_token("test_session_token");
     int result = message_sender(context, CLIENT_ACK_FAILURE);
     TEST_ASSERT_EQUAL(0, result);
@@ -292,7 +283,6 @@ void test_message_sender_client_infection_alert(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -305,12 +295,10 @@ void test_message_sender_client_infection_alert(void)
 
 void test_message_sender_warehouse_send_stock_to_hub(void)
 {
-    // start_test_server((server_config_t){.mode = SERVER_MODE_TCP, .family = SERVER_FAMILY_IPV4, .port = 9999});
     init_params_client params = {
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -329,7 +317,6 @@ void test_message_sender_warehouse_request_stock(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -352,7 +339,6 @@ void test_message_sender_hub_request_stock(void)
         .client_type = "hub",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     int sockfd = init_connection_tcp(params);
@@ -375,7 +361,6 @@ void test_message_receiver_server_auth_response_success(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     server_auth_response auth_res = create_server_auth_response("success", "token", "auth success");
@@ -397,7 +382,6 @@ void test_message_receiver_server_auth_response_failure(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     set_params(params);
     server_auth_response auth_res = create_server_auth_response("failure", "token", "auth failure");
@@ -419,7 +403,6 @@ void test_message_receiver_server_emergency_alert_infection_alert(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     server_emergency_alert emergency_alert = create_server_emergency_alert(INFECTION_ALERT);
     char* serialized_response = serialize_server_emergency_alert(&emergency_alert);
@@ -440,7 +423,6 @@ void test_message_receiver_server_emergency_alert_enemy_thread(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     server_emergency_alert emergency_alert = create_server_emergency_alert(ENEMY_THREAD);
     char* serialized_response = serialize_server_emergency_alert(&emergency_alert);
@@ -461,7 +443,6 @@ void test_message_receiver_server_emergency_alert_wather_alert(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     server_emergency_alert emergency_alert = create_server_emergency_alert(WEATHER_ALERT);
     char* serialized_response = serialize_server_emergency_alert(&emergency_alert);
@@ -481,7 +462,6 @@ void test_message_receiver_server_warehouse_stock_hub()
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     inventory_item items[6] = {{"water", 10}, {"food", 5}, {"medicine", 7}, {"guns", 1}, {"ammo", 3}, {"tools", 2}};
     server_w_stock_hub send_stock = create_server_w_stock_hub("hub0001", items, 6);
@@ -502,7 +482,6 @@ void test_message_receiver_server_warehouse_stock_warehouse(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     inventory_item items[6] = {{"water", 10}, {"food", 5}, {"medicine", 7}, {"guns", 1}, {"ammo", 3}, {"tools", 2}};
     server_w_stock_warehouse send_stock = create_server_w_stock_warehouse(items, 6);
@@ -523,10 +502,9 @@ void test_message_receiver_server_hub_send_stock(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     inventory_item items[6] = {{"water", 10}, {"food", 5}, {"medicine", 7}, {"guns", 1}, {"ammo", 3}, {"tools", 2}};
-    server_h_send_stock send_stock = create_server_h_send_stock(items, 6);
+    server_h_send_stock send_stock = create_server_h_send_stock("warehouse0001", items, 6);
     char* serialized_response = serialize_server_h_send_stock(&send_stock, 6);
     if (serialized_response == NULL)
     {
@@ -544,7 +522,6 @@ void test_message_receiver_unknown_type(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
     char* serialized_response = strdup(
         "{\"type\":\"unknown_type\",\"payload\":{\"items\":[{\"item\":\"water\",\"quantity\":100},{\"item\":\"food\","
@@ -563,7 +540,6 @@ void test_message_receiver_checksum_error(void)
         .client_type = "warehouse",
         .username = "test_user",
         .password = "test_pass",
-        .client_id = "client_id",
         .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
 
     char* serialized_response = strdup(

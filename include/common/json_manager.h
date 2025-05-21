@@ -13,6 +13,7 @@ extern "C"
 #define BUFFER_SIZE 256
 #define MIN_SIZE 32
 #define TIMESTAMP_SIZE 32
+#define PROTOCOL_SIZE 5
 #define CHECKSUM_SIZE 9
 #define USER_PASS_SIZE 17
 #define SESSION_TOKEN_SIZE 37
@@ -20,10 +21,10 @@ extern "C"
 
     typedef struct
     {
-        char host[BUFFER_SIZE];
-        char port[MIN_SIZE];
-        char protocol[MIN_SIZE];
-        char ip_version[MIN_SIZE];
+        char host[MIN_SIZE];
+        char port[PROTOCOL_SIZE];
+        char protocol[PROTOCOL_SIZE];
+        char ip_version[PROTOCOL_SIZE];
     } connection_parameters;
 
     typedef struct

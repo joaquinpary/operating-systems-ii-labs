@@ -5,13 +5,11 @@
 #include <string.h>
 
 init_params_client params_warehouse = {
-    .client_id = "warehouse0001",
     .username = "user_test",
     .password = "pass_test",
     .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
 
 init_params_client params_hub = {
-    .client_id = "hub0001",
     .username = "user_test",
     .password = "pass_test",
     .connection_params = {.host = "localhost", .port = "9999", .protocol = "tcp", .ip_version = "ipv4"}};
@@ -33,6 +31,23 @@ void test_get_timestamp(void)
 {
     char* timestamp = get_timestamp();
     TEST_ASSERT_NOT_NULL(timestamp);
+    free(timestamp);
+}
+
+void test_get_timestamp_format(void)
+{
+    char* timestamp = get_timestamp();
+    TEST_ASSERT_NOT_NULL(timestamp);
+
+    // Verify timestamp format: YYYY-MM-DDThh:mm:ssZ
+    TEST_ASSERT_EQUAL_INT(20, strlen(timestamp));
+    TEST_ASSERT_EQUAL_INT('-', timestamp[4]);
+    TEST_ASSERT_EQUAL_INT('-', timestamp[7]);
+    TEST_ASSERT_EQUAL_INT('T', timestamp[10]);
+    TEST_ASSERT_EQUAL_INT(':', timestamp[13]);
+    TEST_ASSERT_EQUAL_INT(':', timestamp[16]);
+    TEST_ASSERT_EQUAL_INT('Z', timestamp[19]);
+
     free(timestamp);
 }
 
@@ -60,8 +75,8 @@ void test_validate_checksum_failure(void)
 
 void test_client_auth_request(void)
 {
-    client_auth_request request = create_client_auth_request(params_warehouse.client_id, params_warehouse.client_type,
-                                                             params_warehouse.username, params_warehouse.password);
+    client_auth_request request =
+        create_client_auth_request(params_warehouse.client_type, params_warehouse.username, params_warehouse.password);
     char* string = serialize_client_auth_request(&request);
     TEST_ASSERT_NOT_NULL(string);
     client_auth_request deserialized_request = deserialize_client_auth_request(string);
@@ -149,10 +164,10 @@ void test_client_acknowledgment(void)
 
 void test_client_infection_alert(void)
 {
-    client_emergency_alert alert = create_client_infection_alert(params_warehouse.username, "session_token");
-    char* string = serialize_client_infection_alert(&alert);
+    client_emergency_alert alert = create_client_emergency_alert(params_warehouse.username, "session_token");
+    char* string = serialize_client_emergency_alert(&alert);
     TEST_ASSERT_NOT_NULL(string);
-    client_emergency_alert deserialized_alert = deserialize_client_infection_alert(string);
+    client_emergency_alert deserialized_alert = deserialize_client_emergency_alert(string);
     TEST_ASSERT_EQUAL_STRING(alert.type, deserialized_alert.type);
     TEST_ASSERT_EQUAL_STRING(alert.payload.username, deserialized_alert.payload.username);
     TEST_ASSERT_EQUAL_STRING(alert.payload.session_token, deserialized_alert.payload.session_token);
@@ -247,7 +262,7 @@ void test_hub_request_stock(void)
 
 void test_server_h_send_stock(void)
 {
-    server_h_send_stock stock = create_server_h_send_stock(items, ITEM_TYPE);
+    server_h_send_stock stock = create_server_h_send_stock("test_user", items, ITEM_TYPE);
     char* string = serialize_server_h_send_stock(&stock, ITEM_TYPE);
     TEST_ASSERT_NOT_NULL(string);
     server_h_send_stock deserialized_stock = deserialize_server_h_send_stock(string);

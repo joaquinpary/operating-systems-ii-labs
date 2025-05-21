@@ -90,7 +90,6 @@ int connection(init_params_client params)
         close(context.sockfd);
         return 1;
     }
-    log_error("Finished processing response with ID: %s", get_identifiers()->username);
     child_pid = fork();
     if (child_pid < 0)
     {
