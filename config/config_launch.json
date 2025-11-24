@@ -1,0 +1,11 @@
+{
+    "server":{
+        "nothing":"nothing"
+    },
+    "client":{
+       "host":"127.0.0.1",
+       "port":"9999",
+       "ip_version":"ipv4",
+       "protocol":"tcp"
+    }
+ }
