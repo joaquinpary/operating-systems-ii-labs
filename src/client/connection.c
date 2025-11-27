@@ -12,177 +12,124 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define BUFFER_SIZE 256
-#define MIN_SIZE 64
-#define PATH_CONFIG "config/config_launch.json"
-#define SECTION "client"
-#define UDP "udp"
-#define TCP "tcp"
-#define IPV4 "ipv4"
-#define IPV6 "ipv6"
 
-int setup_socket_udp(const char* ip_version, const char* ip_address, const char* port,
-                     struct sockaddr_storage* dest_addr, socklen_t* addr_len)
-{
-    int sockfd;
-    struct addrinfo hints, *res;
+// Later open .conf file
+static void load_client_config(client_config *config) {
+    strncpy(config->host, "127.0.0.1", sizeof(config->host) - 1);
+    strncpy(config->port, "8080", sizeof(config->port) - 1);
+    config->protocol = PROTO_UDP; // Default to UDP
+    config->ip_version = AF_UNSPEC; // Allow IPv4 or IPv6
+}
+
+int client_init(client_context *ctx, client_config *config) {
+    struct addrinfo hints, *res, *p;
     int status;
 
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = (strcmp(ip_version, IPV6) == 0) ? AF_INET6 : AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_family = config->ip_version;
+    hints.ai_socktype = (config->protocol == PROTO_TCP) ? SOCK_STREAM : SOCK_DGRAM;
 
-    if ((status = getaddrinfo(ip_address, port, &hints, &res)) != 0)
-    {
+    if ((status = getaddrinfo(config->host, config->port, &hints, &res)) != 0) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         return -1;
     }
 
-    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sockfd < 0)
-    {
-        perror("socket");
+    for (p = res; p != NULL; p = p->ai_next) {
+        if ((ctx->sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("client: socket");
+            continue;
+        }
+
+        if (config->protocol == PROTO_TCP) {
+            if (connect(ctx->sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+                close(ctx->sockfd);
+                perror("client: connect");
+                continue;
+            }
+        } else {
+            memcpy(&ctx->server_addr, p->ai_addr, p->ai_addrlen);
+            ctx->addr_len = p->ai_addrlen;
+        }
+        break;
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "client: failed to create socket\n");
         freeaddrinfo(res);
         return -1;
     }
 
-    memcpy(dest_addr, res->ai_addr, res->ai_addrlen);
-    *addr_len = res->ai_addrlen;
-
+    ctx->protocol = config->protocol;
     freeaddrinfo(res);
-    return sockfd;
+    return 0;
 }
 
-int send_packet_udp(int sockfd, char* buffer, struct sockaddr_storage* dest_addr, socklen_t addr_len)
-{
-    int num_fd;
-
-    num_fd = sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr*)dest_addr, addr_len);
-    if (num_fd < 0)
-    {
-        perror("Error sendto");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-    memset(buffer, 0, BUFFER_SIZE);
-    num_fd = recvfrom(sockfd, buffer, BUFFER_SIZE - 1, 0, NULL, NULL); // Dont care about the source address
-    if (num_fd < 0)
-    {
-        perror("Error recvfrom");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Response: %s\n", buffer);
-
-    return num_fd;
-}
-
-int setup_socket_tpc(const char* ip_version, const char* ip_address, const char* port_number)
-{
-    int sockfd;
-    struct addrinfo hints, *res;
-    int status;
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = (strcmp(ip_version, IPV6) == 0) ? AF_INET6 : AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-
-    if ((status = getaddrinfo(ip_address, port_number, &hints, &res)) != 0)
-    {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
-        exit(EXIT_FAILURE);
-    }
-
-    sockfd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (sockfd < 0)
-    {
-        perror("socket");
-        freeaddrinfo(res);
-        exit(EXIT_FAILURE);
-    }
-
-    if (connect(sockfd, res->ai_addr, res->ai_addrlen) < 0)
-    {
-        perror("connect");
-        freeaddrinfo(res);
-        exit(EXIT_FAILURE);
-    }
-
-    freeaddrinfo(res);
-    return sockfd;
-}
-
-int send_packet_tcp(int sockfd, char* buffer)
-{
-    int num_fd, finish = 0;
-
-    num_fd = write(sockfd, buffer, strlen(buffer));
-    if (num_fd < 0)
-    {
-        perror("Error write");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-    buffer[strlen(buffer) - 1] = '\0';
-    if (!strcmp("quit", buffer))
-    {
-        finish = 1;
-    }
-
-    memset(buffer, '\0', BUFFER_SIZE);
-    num_fd = read(sockfd, buffer, BUFFER_SIZE);
-    if (num_fd < 0)
-    {
-        perror("Error read");
-        close(sockfd);
-        exit(EXIT_FAILURE);
-    }
-    printf("Response: %s\n", buffer);
-
-    if (finish)
-    {
-        printf("Finish execution\n");
-        close(sockfd);
-        exit(0);
-    }
-    return num_fd;
-}
-
-int init_connection(void)
-{
-    char buffer[BUFFER_SIZE];
-    int num_fd;
-    int sockfd;
-    init_params_client params = load_config_client(PATH_CONFIG, SECTION);
-    char* ip_version = params.ip_version;
-    char* protocol = params.protocol;
-    char* ip_address = params.host;
-    char* port = params.port;
-    if (!strcmp(protocol, UDP))
-    {
-        struct sockaddr_storage dest_addr;
-        socklen_t addr_len;
-        sockfd = setup_socket_udp(ip_version, ip_address, port, &dest_addr, &addr_len);
-
-        printf("Enter the message: ");
-        memset(buffer, '\0', BUFFER_SIZE);
-        fgets(buffer, BUFFER_SIZE - 1, stdin);
-
-        num_fd = send_packet_udp(sockfd, buffer, &dest_addr, addr_len);
-    }
-    else if (!strcmp(protocol, TCP))
-    {
-        sockfd = setup_socket_tpc(ip_version, ip_address, port);
-        while (1)
-        {
-            printf("Enter the message: ");
-            memset(buffer, '\0', BUFFER_SIZE);
-            fgets(buffer, BUFFER_SIZE - 1, stdin);
-
-            num_fd = send_packet_tcp(sockfd, buffer);
+int client_send(client_context *ctx, const char *msg) {
+    if (ctx->protocol == PROTO_TCP) {
+        if (send(ctx->sockfd, msg, strlen(msg), MSG_NOSIGNAL) == -1) {
+            perror("send");
+            return -1;
+        }
+    } else {
+        if (sendto(ctx->sockfd, msg, strlen(msg), 0, 
+                  (struct sockaddr *)&ctx->server_addr, ctx->addr_len) == -1) {
+            perror("sendto");
+            return -1;
         }
     }
+    return 0;
+}
+
+int client_receive(client_context *ctx, char *buffer, size_t buffer_size) {
+    ssize_t num_bytes;
+    memset(buffer, 0, buffer_size);
+
+    if (ctx->protocol == PROTO_TCP) {
+        if ((num_bytes = recv(ctx->sockfd, buffer, buffer_size - 1, 0)) == -1) {
+            perror("recv");
+            return -1;
+        }
+        if (num_bytes == 0) {
+            return -2; // Connection closed by server
+        }
+    } else {
+        struct sockaddr_storage from_addr;
+        socklen_t from_len = sizeof(from_addr);
+        if ((num_bytes = recvfrom(ctx->sockfd, buffer, buffer_size - 1, 0, 
+                                (struct sockaddr *)&from_addr, &from_len)) == -1) {
+            perror("recvfrom");
+            return -1;
+        }
+    }
+
+    if (num_bytes >= 0 && (size_t)num_bytes < buffer_size) {
+        buffer[num_bytes] = '\0';
+    } else if (buffer_size > 0) {
+        buffer[buffer_size - 1] = '\0';
+    }
+    
+    return (int)num_bytes;
+}
+
+void client_close(client_context *ctx) {
+    if (ctx->sockfd >= 0) {
+        close(ctx->sockfd);
+        ctx->sockfd = -1;
+    }
+}
+
+int init_connection(client_context *ctx) {
+    client_config config;
+
+    load_client_config(&config);
+
+    if (client_init(ctx, &config) != 0) {
+        return -1;
+    }
+
+    // Remove this later
+    printf("Connected to %s:%s via %s\n", config.host, config.port, 
+           (config.protocol == PROTO_TCP) ? "TCP" : "UDP");
+
     return 0;
 }

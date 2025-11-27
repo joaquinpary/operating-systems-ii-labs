@@ -50,7 +50,7 @@ extern "C"
 #define ITEM_NAME_SIZE 32
 #define QUANTITY_ITEMS 6
 
-#define MAX_BUFFER_SIZE 1024
+#define BUFFER_SIZE 1024
 
 typedef struct inventory_item
 {
