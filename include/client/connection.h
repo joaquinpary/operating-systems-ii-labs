@@ -14,19 +14,22 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-typedef enum {
+typedef enum
+{
     PROTO_TCP,
     PROTO_UDP
 } protocol_type;
 
-typedef struct {
+typedef struct
+{
     int sockfd;
     protocol_type protocol;
     struct sockaddr_storage server_addr;
     socklen_t addr_len;
 } client_context;
 
-typedef struct {
+typedef struct
+{
     char host[256];
     char port[16];
     protocol_type protocol;
@@ -38,9 +41,8 @@ typedef struct {
  * @param ctx Pointer to the client context to be initialized.
  * @param config Pointer to the client configuration.
  * @return 0 on success, -1 on failure.
-*/
-int client_init(client_context *ctx, client_config *config);
-
+ */
+int client_init(client_context* ctx, client_config* config);
 
 /* @brief
  * Sends a message to the server.
@@ -48,7 +50,7 @@ int client_init(client_context *ctx, client_config *config);
  * @param msg The message to send.
  * @return 0 on success, -1 on failure.
  */
-int client_send(client_context *ctx, const char *msg);
+int client_send(client_context* ctx, const char* msg);
 
 /* @brief
  * Receives a message from the server.
@@ -57,19 +59,19 @@ int client_send(client_context *ctx, const char *msg);
  * @param buffer_size Size of the buffer.
  * @return Number of bytes received, -1 on error, -2 if connection closed by server.
  */
-int client_receive(client_context *ctx, char *buffer, size_t buffer_size);
+int client_receive(client_context* ctx, char* buffer, size_t buffer_size);
 
 /* @brief
  * Closes the client connection.
  * @param ctx Pointer to the client context.
  */
-void client_close(client_context *ctx);
+void client_close(client_context* ctx);
 
 /* @brief
  * Initializes the client connection with default configuration.
  * @param ctx Pointer to the client context.
  * @return 0 on success, -1 on failure.
  */
-int init_connection(client_context *ctx);
+int init_connection(client_context* ctx);
 
 #endif

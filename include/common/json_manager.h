@@ -8,7 +8,7 @@ extern "C"
 
 #include "cJSON.h"
 #include <time.h>
-// #include <zlib.h>
+    // #include <zlib.h>
 
 #define HUB_TO_SERVER__AUTH_REQUEST "HUB_TO_SERVER__AUTH_REQUEST"
 #define WAREHOUSE_TO_SERVER__AUTH_REQUEST "WAREHOUSE_TO_SERVER__AUTH_REQUEST"
@@ -52,86 +52,98 @@ extern "C"
 
 #define BUFFER_SIZE 1024
 
-typedef struct inventory_item
-{
-    int item_id;
-    char item_name[ITEM_NAME_SIZE];
-    int quantity;
-} inventory_item_t;
+    typedef struct inventory_item
+    {
+        int item_id;
+        char item_name[ITEM_NAME_SIZE];
+        int quantity;
+    } inventory_item_t;
 
-typedef struct payload_items_list
-{
-    inventory_item_t items[QUANTITY_ITEMS];
-} payload_items_list;
+    typedef struct payload_items_list
+    {
+        inventory_item_t items[QUANTITY_ITEMS];
+    } payload_items_list;
 
-typedef struct payload_status
-{
-    int status_code;
-} payload_status;
+    typedef struct payload_status
+    {
+        int status_code;
+    } payload_status;
 
-typedef payload_items_list payload_inventory_update;
-typedef payload_items_list payload_stock_request;
-typedef payload_items_list payload_receipt_confirmation;
-typedef payload_items_list payload_shipment_notice;
-typedef payload_items_list payload_order_stock;
-typedef payload_items_list payload_restock_notice;
+    typedef payload_items_list payload_inventory_update;
+    typedef payload_items_list payload_stock_request;
+    typedef payload_items_list payload_receipt_confirmation;
+    typedef payload_items_list payload_shipment_notice;
+    typedef payload_items_list payload_order_stock;
+    typedef payload_items_list payload_restock_notice;
 
-typedef payload_status payload_auth_response;
-typedef payload_status payload_acknowledgment;
+    typedef payload_status payload_auth_response;
+    typedef payload_status payload_acknowledgment;
 
-typedef struct payload_auth_request
-{
-    char username[CREDENTIALS_SIZE];
-    char password[CREDENTIALS_SIZE];
-} payload_auth_request;
+    typedef struct payload_auth_request
+    {
+        char username[CREDENTIALS_SIZE];
+        char password[CREDENTIALS_SIZE];
+    } payload_auth_request;
 
-typedef struct payload_keepalive
-{
-    char message;
-} payload_keepalive;
+    typedef struct payload_keepalive
+    {
+        char message;
+    } payload_keepalive;
 
-typedef struct payload_client_emergency_alert
-{
-    int emergency_code;
-    char emergency_type[20];
-} payload_client_emergency_alert;
+    typedef struct payload_client_emergency_alert
+    {
+        int emergency_code;
+        char emergency_type[20];
+    } payload_client_emergency_alert;
 
-typedef struct payload_server_emergency_alert
-{
-    int emergency_code;
-    char instructions[100];
-} payload_server_emergency_alert;
+    typedef struct payload_server_emergency_alert
+    {
+        int emergency_code;
+        char instructions[100];
+    } payload_server_emergency_alert;
 
-typedef union payload_t{
-    payload_auth_request client_auth_request;
-    payload_auth_response server_auth_response;
-    payload_keepalive keepalive;
-    payload_inventory_update inventory_update;
-    payload_client_emergency_alert client_emergency;
-    payload_server_emergency_alert server_emergency;
-    payload_stock_request stock_request;
-    payload_receipt_confirmation receipt_confirmation;
-    payload_shipment_notice shipment_notice;
-    payload_order_stock order_stock;
-    payload_restock_notice restock_notice;
-    payload_acknowledgment acknowledgment;
-} payload_t;
+    typedef union payload_t {
+        payload_auth_request client_auth_request;
+        payload_auth_response server_auth_response;
+        payload_keepalive keepalive;
+        payload_inventory_update inventory_update;
+        payload_client_emergency_alert client_emergency;
+        payload_server_emergency_alert server_emergency;
+        payload_stock_request stock_request;
+        payload_receipt_confirmation receipt_confirmation;
+        payload_shipment_notice shipment_notice;
+        payload_order_stock order_stock;
+        payload_restock_notice restock_notice;
+        payload_acknowledgment acknowledgment;
+    } payload_t;
 
-typedef struct message_t
-{
-    char msg_type[MESSAGE_TYPE_SIZE];
-    char source_role[SOURCE_ROLE_SIZE];
-    char source_id[SOURCE_ID_SIZE];
-    char target_id[TARGET_ID_SIZE];
-    char timestamp[TIMESTAMP_SIZE];
-    payload_t payload;
-    char checksum[CHECKSUM_SIZE];
+    typedef struct message_t
+    {
+        char msg_type[MESSAGE_TYPE_SIZE];
+        char source_role[SOURCE_ROLE_SIZE];
+        char source_id[SOURCE_ID_SIZE];
+        char target_id[TARGET_ID_SIZE];
+        char timestamp[TIMESTAMP_SIZE];
+        payload_t payload;
+        char checksum[CHECKSUM_SIZE];
 
-} message_t;
+    } message_t;
 
-int serialize_message_to_json(const message_t *msg, char *out);
-
-int deserialize_message_from_json(const char *json, message_t *out);
+    /*@brief
+     * Serializes a message_t structure into a JSON string.
+     * @param msg Pointer to the message_t structure to serialize.
+     * @param out Buffer to store the resulting JSON string.
+     * @return 0 on success, negative value on error.
+     */
+    int serialize_message_to_json(const message_t* msg, char* out);
+    
+    /*@brief
+     * Deserializes a JSON string into a message_t structure.
+     * @param json The JSON string to deserialize.
+     * @param out Pointer to the message_t structure to populate.
+     * @return 0 on success, negative value on error.
+     */
+    int deserialize_message_from_json(const char* json, message_t* out);
 
 #ifdef __cplusplus
 }
