@@ -28,7 +28,7 @@ void test_serialize_deserialize_auth_request(void) {
     strncpy(original_msg.payload.client_auth_request.username, "testuser", CREDENTIALS_SIZE - 1);
     strncpy(original_msg.payload.client_auth_request.password, "secret123", CREDENTIALS_SIZE - 1);
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_NOT_NULL(buffer);
@@ -49,7 +49,7 @@ void test_serialize_deserialize_auth_response(void) {
     
     original_msg.payload.server_auth_response.status_code = 200;
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
 
@@ -68,7 +68,7 @@ void test_serialize_deserialize_keepalive(void) {
     
     original_msg.payload.keepalive.message = 'K';
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
 
@@ -95,7 +95,7 @@ void test_serialize_deserialize_inventory_update(void) {
     strncpy(original_msg.payload.inventory_update.items[1].item_name, "Food", ITEM_NAME_SIZE - 1);
     original_msg.payload.inventory_update.items[1].quantity = 30;
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
 
@@ -124,7 +124,7 @@ void test_serialize_deserialize_client_emergency(void) {
     original_msg.payload.client_emergency.emergency_code = 911;
     strncpy(original_msg.payload.client_emergency.emergency_type, "FIRE", 19);
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
 
@@ -145,7 +145,7 @@ void test_serialize_deserialize_server_emergency(void) {
     original_msg.payload.server_emergency.emergency_code = 999;
     strncpy(original_msg.payload.server_emergency.instructions, "EVACUATE IMMEDIATELY", 99);
 
-    char buffer[MAX_BUFFER_SIZE];
+    char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
     TEST_ASSERT_EQUAL_INT(0, ret);
 
