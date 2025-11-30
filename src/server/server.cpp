@@ -51,7 +51,9 @@ void tcp_session::do_read()
                                      do_write(bytes_transferred);
                                      return;
                                  }
-                                 if (ec != asio::error::operation_aborted)
+                                 // Suppress expected errors: operation_aborted, eof, bad_descriptor
+                                 if (ec != asio::error::operation_aborted && ec != asio::error::eof &&
+                                     ec != asio::error::bad_descriptor)
                                  {
                                      std::cerr << "TCP read error: " << ec.message() << '\n';
                                  }
@@ -145,25 +147,38 @@ void server::start()
 
 void server::stop()
 {
+    asio::error_code ec;
     if (m_tcp4_acceptor.is_open())
     {
-        m_tcp4_acceptor.close();
+        m_tcp4_acceptor.cancel(ec);
+        m_tcp4_acceptor.close(ec);
     }
     if (m_tcp6_acceptor.is_open())
     {
-        m_tcp6_acceptor.close();
+        m_tcp6_acceptor.cancel(ec);
+        m_tcp6_acceptor.close(ec);
     }
 }
 
 void server::start_accept(asio::ip::tcp::acceptor& acceptor)
 {
+    if (!acceptor.is_open())
+    {
+        return;
+    }
+
     acceptor.async_accept([this, &acceptor](const asio::error_code& ec, asio::ip::tcp::socket socket) {
         if (!ec)
         {
-            std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
+            asio::error_code endpoint_ec;
+            auto remote_ep = socket.remote_endpoint(endpoint_ec);
+            if (!endpoint_ec)
+            {
+                std::cout << "Accepted TCP connection from " << remote_ep << '\n';
+            }
             std::make_shared<tcp_session>(std::move(socket))->start();
         }
-        else if (ec != asio::error::operation_aborted)
+        else if (ec != asio::error::operation_aborted && ec != asio::error::bad_descriptor)
         {
             std::cerr << "Accept error: " << ec.message() << '\n';
         }
