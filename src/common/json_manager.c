@@ -212,7 +212,7 @@ static const payload_handler_t* find_handler(const char* msg_type)
 
 int serialize_message_to_json(const message_t* msg, char* out)
 {
-    if (!msg || !out || MAX_BUFFER_SIZE == 0)
+    if (!msg || !out || BUFFER_SIZE == 0)
         return -1;
 
     cJSON* root = cJSON_CreateObject();
@@ -237,7 +237,7 @@ int serialize_message_to_json(const message_t* msg, char* out)
     }
 
     int ret = 0;
-    if (!cJSON_PrintPreallocated(root, out, MAX_BUFFER_SIZE, 0))
+    if (!cJSON_PrintPreallocated(root, out, BUFFER_SIZE, 0))
     {
         ret = -3;
     }

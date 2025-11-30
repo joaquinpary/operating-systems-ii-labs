@@ -5,8 +5,8 @@ file(GLOB CLIENT_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/*.c)
 file(GLOB SERVER_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/server/*.cpp)
 file(GLOB COMMON_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/common/*.c)
 
-# Exclude main test files
-list(FILTER CLIENT_TEST EXCLUDE REGEX ".*test_server\\.c$")
+# Exclude main test files and helper files
+list(FILTER CLIENT_TEST EXCLUDE REGEX ".*mock_server\\.c$")
 
 # Collect source files
 file(GLOB CLIENT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../src/client/*.c)
@@ -60,7 +60,7 @@ set(test_server_file ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/test_server.c)
 foreach(test_file ${CLIENT_TEST})
     get_filename_component(test_name ${test_file} NAME_WE)
     set(exec_name test_client_${test_name})
-    add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${test_server_file})
+    add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/mock_server.c)
     target_link_libraries(${exec_name} PRIVATE unity pthread)
     target_compile_definitions(${exec_name} PRIVATE TESTING)
     add_test(NAME ${exec_name} COMMAND ${exec_name})
