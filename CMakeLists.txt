@@ -59,6 +59,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(asio)
 
+set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
+FetchContent_Declare(
+    pqxx
+    GIT_REPOSITORY ${PQXX_GIT_URL}
+    GIT_TAG        master
+    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/pqxx
+    UPDATE_COMMAND ""
+)
+FetchContent_MakeAvailable(pqxx)
+
 include_directories(include)
 include_directories(include/common)
 
@@ -77,7 +87,7 @@ if(BUILD_TARGET STREQUAL "server")
     )
     set(TARGET_EXEC dhl_server)
     add_executable(${TARGET_EXEC} ${SOURCES})
-    target_link_libraries(${TARGET_EXEC} PRIVATE pthread)
+    target_link_libraries(${TARGET_EXEC} pthread)
     target_link_libraries(${TARGET_EXEC} ${LIBPQXX_LIBRARIES} pq)
 
 
@@ -97,7 +107,7 @@ else()
 endif()
 # Include dirs y linkeo para ambos ejecutables
 target_include_directories(${TARGET_EXEC} PRIVATE ${cjson_SOURCE_DIR})
-target_link_libraries(${TARGET_EXEC} PRIVATE cjson)
+target_link_libraries(${TARGET_EXEC} cjson)
 # Add subdirectory of test
 if(RUN_TEST EQUAL 1 OR RUN_COVERAGE EQUAL 1)
     enable_testing()
