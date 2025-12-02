@@ -3,10 +3,21 @@
 
 #include <memory>
 #include <pqxx/pqxx>
+#include <string>
 
-std::unique_ptr<pqxx::connection> connectToDatabase();
-int createTable(pqxx::work& txn);
-int insertDatabase(pqxx::work& txn, const int& packet_id, const std::string& event, const std::string& origin,
-                   const std::string& level);
+struct credential
+{
+    int id;
+    std::string username;
+    std::string password_hash;
+    std::string client_type;
+    bool is_active;
+};
+
+std::unique_ptr<pqxx::connection> connect_to_database();
+std::unique_ptr<pqxx::connection> initialize_database();
+int create_credentials_table(pqxx::work& txn);
+std::unique_ptr<credential> query_credentials_by_username(pqxx::work& txn, const std::string& username);
+int populate_credentials_table(pqxx::connection& conn, const std::string& json_file_path);
 
 #endif
