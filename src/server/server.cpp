@@ -1,21 +1,24 @@
 #include "server.hpp"
+
 #include <iostream>
 #include <stdexcept>
 #include <utility>
 
-server_config make_default_server_config()
+server_config make_server_config_from_config(const config::server_config& cfg)
 {
     return server_config{
-        .tcp = server_endpoint_config{
-            .address_v4 = server_constants::DEFAULT_IPV4_ADDRESS,
-            .address_v6 = server_constants::DEFAULT_IPV6_ADDRESS,
-            .port = server_constants::DEFAULT_PORT,
-        },
-        .udp = server_endpoint_config{
-            .address_v4 = server_constants::DEFAULT_IPV4_ADDRESS,
-            .address_v6 = server_constants::DEFAULT_IPV6_ADDRESS,
-            .port = server_constants::DEFAULT_PORT,
-        },
+        .tcp =
+            server_endpoint_config{
+                .address_v4 = cfg.ip_v4,
+                .address_v6 = cfg.ip_v6,
+                .port = cfg.network_port,
+            },
+        .udp =
+            server_endpoint_config{
+                .address_v4 = cfg.ip_v4,
+                .address_v6 = cfg.ip_v6,
+                .port = cfg.network_port,
+            },
     };
 }
 
@@ -51,9 +54,7 @@ void tcp_session::do_read()
                                      do_write(bytes_transferred);
                                      return;
                                  }
-                                 // Suppress expected errors: operation_aborted, eof, bad_descriptor
-                                 if (ec != asio::error::operation_aborted && ec != asio::error::eof &&
-                                     ec != asio::error::bad_descriptor)
+                                 if (ec != asio::error::operation_aborted)
                                  {
                                      std::cerr << "TCP read error: " << ec.message() << '\n';
                                  }
@@ -77,32 +78,35 @@ void tcp_session::do_write(std::size_t length)
                       });
 }
 
-udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint)
-    : m_socket(io_context)
+udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint) : m_socket(io_context)
 {
     m_socket.open(endpoint.protocol());
     m_socket.set_option(asio::socket_base::reuse_address(true));
+    // Configure IPv6 sockets to only listen on IPv6 (not dual-stack)
+    if (endpoint.protocol() == asio::ip::udp::v6())
+    {
+        m_socket.set_option(asio::ip::v6_only(true));
+    }
     m_socket.bind(endpoint);
     do_receive();
 }
 
 void udp_server::do_receive()
 {
-    m_socket.async_receive_from(asio::buffer(m_data), m_sender_endpoint,
-                                [this](const asio::error_code& ec, std::size_t bytes_transferred) {
-                                    if (!ec)
-                                    {
-                                        std::cout << "UDP: Received " << bytes_transferred << " bytes from "
-                                                  << m_sender_endpoint << '\n';
-                                        do_send(bytes_transferred);
-                                        return;
-                                    }
-                                    if (ec != asio::error::operation_aborted)
-                                    {
-                                        std::cerr << "UDP receive error: " << ec.message() << '\n';
-                                        do_receive();
-                                    }
-                                });
+    m_socket.async_receive_from(
+        asio::buffer(m_data), m_sender_endpoint, [this](const asio::error_code& ec, std::size_t bytes_transferred) {
+            if (!ec)
+            {
+                std::cout << "UDP: Received " << bytes_transferred << " bytes from " << m_sender_endpoint << '\n';
+                do_send(bytes_transferred);
+                return;
+            }
+            if (ec != asio::error::operation_aborted)
+            {
+                std::cerr << "UDP receive error: " << ec.message() << '\n';
+                do_receive();
+            }
+        });
 }
 
 void udp_server::do_send(std::size_t length)
@@ -118,12 +122,11 @@ void udp_server::do_send(std::size_t length)
 }
 
 server::server(asio::io_context& io_context, const server_config& config)
-    : m_io_context(io_context),
-      m_config(config),
-      m_tcp4_acceptor(io_context),
-      m_tcp6_acceptor(io_context),
-      m_udp_server_ipv4(std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v4, m_config.udp.port))),
-      m_udp_server_ipv6(std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v6, m_config.udp.port)))
+    : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
+      m_udp_server_ipv4(
+          std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v4, m_config.udp.port))),
+      m_udp_server_ipv6(
+          std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v6, m_config.udp.port)))
 {
     configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.tcp.address_v4, m_config.tcp.port));
     configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.tcp.address_v6, m_config.tcp.port));
@@ -147,38 +150,25 @@ void server::start()
 
 void server::stop()
 {
-    asio::error_code ec;
     if (m_tcp4_acceptor.is_open())
     {
-        m_tcp4_acceptor.cancel(ec);
-        m_tcp4_acceptor.close(ec);
+        m_tcp4_acceptor.close();
     }
     if (m_tcp6_acceptor.is_open())
     {
-        m_tcp6_acceptor.cancel(ec);
-        m_tcp6_acceptor.close(ec);
+        m_tcp6_acceptor.close();
     }
 }
 
 void server::start_accept(asio::ip::tcp::acceptor& acceptor)
 {
-    if (!acceptor.is_open())
-    {
-        return;
-    }
-
     acceptor.async_accept([this, &acceptor](const asio::error_code& ec, asio::ip::tcp::socket socket) {
         if (!ec)
         {
-            asio::error_code endpoint_ec;
-            auto remote_ep = socket.remote_endpoint(endpoint_ec);
-            if (!endpoint_ec)
-            {
-                std::cout << "Accepted TCP connection from " << remote_ep << '\n';
-            }
+            std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
             std::make_shared<tcp_session>(std::move(socket))->start();
         }
-        else if (ec != asio::error::operation_aborted && ec != asio::error::bad_descriptor)
+        else if (ec != asio::error::operation_aborted)
         {
             std::cerr << "Accept error: " << ec.message() << '\n';
         }
@@ -194,6 +184,11 @@ void server::configure_acceptor(asio::ip::tcp::acceptor& acceptor, const asio::i
 {
     acceptor.open(endpoint.protocol());
     acceptor.set_option(asio::socket_base::reuse_address(true));
+    // Configure IPv6 sockets to only listen on IPv6 (not dual-stack)
+    if (endpoint.protocol() == asio::ip::tcp::v6())
+    {
+        acceptor.set_option(asio::ip::v6_only(true));
+    }
     acceptor.bind(endpoint);
     acceptor.listen();
 }
