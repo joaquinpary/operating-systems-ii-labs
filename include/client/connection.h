@@ -67,11 +67,4 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size);
  */
 void client_close(client_context* ctx);
 
-/* @brief
- * Initializes the client connection with default configuration.
- * @param ctx Pointer to the client context.
- * @return 0 on success, -1 on failure.
- */
-int init_connection(client_context* ctx);
-
 #endif
