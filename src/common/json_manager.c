@@ -222,9 +222,9 @@ int serialize_message_to_json(const message_t* msg, char* out)
     cJSON_AddStringToObject(root, "msg_type", msg->msg_type);
     cJSON_AddStringToObject(root, "source_role", msg->source_role);
     cJSON_AddStringToObject(root, "source_id", msg->source_id);
+    cJSON_AddStringToObject(root, "target_role", msg->target_role);
     cJSON_AddStringToObject(root, "target_id", msg->target_id);
     cJSON_AddStringToObject(root, "timestamp", msg->timestamp);
-    cJSON_AddStringToObject(root, "checksum", msg->checksum);
 
     const payload_handler_t* handler = find_handler(msg->msg_type);
     if (handler && handler->serialize)
@@ -235,6 +235,8 @@ int serialize_message_to_json(const message_t* msg, char* out)
             cJSON_AddItemToObject(root, "payload", payload_json);
         }
     }
+
+    cJSON_AddStringToObject(root, "checksum", msg->checksum);
 
     int ret = 0;
     if (!cJSON_PrintPreallocated(root, out, BUFFER_SIZE, 0))
@@ -260,6 +262,7 @@ int deserialize_message_from_json(const char* json, message_t* out)
     cJSON* type = cJSON_GetObjectItemCaseSensitive(root, "msg_type");
     cJSON* src_role = cJSON_GetObjectItemCaseSensitive(root, "source_role");
     cJSON* src_id = cJSON_GetObjectItemCaseSensitive(root, "source_id");
+    cJSON* tgt_role = cJSON_GetObjectItemCaseSensitive(root, "target_role");
     cJSON* tgt_id = cJSON_GetObjectItemCaseSensitive(root, "target_id");
     cJSON* ts = cJSON_GetObjectItemCaseSensitive(root, "timestamp");
     cJSON* chk = cJSON_GetObjectItemCaseSensitive(root, "checksum");
@@ -270,6 +273,8 @@ int deserialize_message_from_json(const char* json, message_t* out)
         safe_strcpy(out->source_role, SOURCE_ROLE_SIZE, src_role->valuestring);
     if (cJSON_IsString(src_id))
         safe_strcpy(out->source_id, SOURCE_ID_SIZE, src_id->valuestring);
+    if (cJSON_IsString(tgt_role))
+        safe_strcpy(out->target_role, SOURCE_ROLE_SIZE, tgt_role->valuestring);
     if (cJSON_IsString(tgt_id))
         safe_strcpy(out->target_id, TARGET_ID_SIZE, tgt_id->valuestring);
     if (cJSON_IsString(ts))
@@ -289,4 +294,212 @@ int deserialize_message_from_json(const char* json, message_t* out)
 
     cJSON_Delete(root);
     return 0;
+}
+
+static void generate_timestamp(char* buffer, size_t size)
+{
+    time_t now = time(NULL);
+    struct tm* tm_info = gmtime(&now);
+    strftime(buffer, size, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+}
+
+static void generate_checksum(const message_t* msg, char* checksum_out)
+{
+    unsigned long hash = 5381;
+    const char* str = msg->msg_type;
+    while (*str)
+        hash = ((hash << 5) + hash) + (unsigned char)(*str++);
+    str = msg->source_id;
+    while (*str)
+        hash = ((hash << 5) + hash) + (unsigned char)(*str++);
+
+    snprintf(checksum_out, CHECKSUM_SIZE, "%lX", hash & 0xFFFFFF);
+}
+
+static int create_message(message_t* out, const char* msg_type, const char* source_role, const char* source_id,
+                          const char* target_role, const char* target_id, const void* payload, size_t payload_size)
+{
+    if (!out || !msg_type || !source_role || !source_id || !target_role || !target_id)
+        return -1;
+
+    memset(out, 0, sizeof(message_t));
+
+    safe_strcpy(out->msg_type, MESSAGE_TYPE_SIZE, msg_type);
+    safe_strcpy(out->source_role, SOURCE_ROLE_SIZE, source_role);
+    safe_strcpy(out->source_id, SOURCE_ID_SIZE, source_id);
+    safe_strcpy(out->target_role, SOURCE_ROLE_SIZE, target_role);
+    safe_strcpy(out->target_id, TARGET_ID_SIZE, target_id);
+
+    generate_timestamp(out->timestamp, TIMESTAMP_SIZE);
+
+    if (payload && payload_size > 0 && payload_size <= sizeof(payload_t))
+    {
+        memcpy(&out->payload, payload, payload_size);
+    }
+
+    generate_checksum(out, out->checksum);
+
+    return 0;
+}
+
+int create_auth_request_message(message_t* out, const char* source_role, const char* source_id, const char* username,
+                                const char* password)
+{
+    if (!out || !source_role || !source_id || !username || !password)
+        return -1;
+
+    payload_auth_request payload = {0};
+    safe_strcpy(payload.username, CREDENTIALS_SIZE, username);
+    safe_strcpy(payload.password, CREDENTIALS_SIZE, password);
+
+    const char* msg_type =
+        (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__AUTH_REQUEST : WAREHOUSE_TO_SERVER__AUTH_REQUEST;
+
+    return create_message(out, msg_type, source_role, source_id, SERVER, SERVER, &payload, sizeof(payload));
+}
+
+int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, char message)
+{
+    if (!out || !source_role || !source_id)
+        return -1;
+
+    payload_keepalive payload = {0};
+    payload.message = message;
+
+    const char* msg_type = (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__KEEPALIVE : WAREHOUSE_TO_SERVER__KEEPALIVE;
+
+    return create_message(out, msg_type, source_role, source_id, SERVER, SERVER, &payload, sizeof(payload));
+}
+
+int create_items_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
+                         const char* target_id, const char* message_category, const inventory_item_t* items,
+                         int item_count)
+{
+    if (!out || !source_role || !source_id || !target_role || !target_id || !message_category || !items ||
+        item_count < 0)
+        return -1;
+
+    payload_items_list payload = {0};
+    int count = (item_count > QUANTITY_ITEMS) ? QUANTITY_ITEMS : item_count;
+
+    for (int i = 0; i < count; i++)
+    {
+        payload.items[i] = items[i];
+    }
+
+    const char* msg_type = NULL;
+
+    if (strcmp(message_category, STOCK_REQUEST) == 0)
+    {
+        msg_type =
+            (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__STOCK_REQUEST : WAREHOUSE_TO_SERVER__REPLENISH_REQUEST;
+    }
+    else if (strcmp(message_category, INVENTORY_UPDATE) == 0)
+    {
+        msg_type =
+            (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__INVENTORY_UPDATE : WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
+    }
+    else if (strcmp(message_category, RECEIPT_CONFIRMATION) == 0)
+    {
+        msg_type = HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION;
+    }
+    else if (strcmp(message_category, SHIPMENT_NOTICE) == 0)
+    {
+        msg_type = WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE;
+    }
+    else if (strcmp(message_category, REPLENISH_REQUEST) == 0)
+    {
+        msg_type = WAREHOUSE_TO_SERVER__REPLENISH_REQUEST;
+    }
+    else if (strcmp(message_category, ORDER_DISPATCH) == 0)
+    {
+        msg_type = SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB;
+    }
+    else if (strcmp(message_category, RESTOCK_NOTICE) == 0)
+    {
+        msg_type = SERVER_TO_WAREHOUSE__RESTOCK_NOTICE;
+    }
+    else if (strcmp(message_category, INCOMING_STOCK_NOTICE) == 0)
+    {
+        msg_type = SERVER_TO_HUB__INCOMING_STOCK_NOTICE;
+    }
+    else
+    {
+        return -1; // Unknown category
+    }
+
+    return create_message(out, msg_type, source_role, source_id, target_role, target_id, &payload, sizeof(payload));
+}
+
+int create_status_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
+                          const char* target_id, const char* message_category, int status_code)
+{
+    if (!out || !source_role || !source_id || !target_role || !target_id || !message_category)
+        return -1;
+
+    payload_status payload = {0};
+    payload.status_code = status_code;
+
+    const char* msg_type = NULL;
+
+    if (strcmp(message_category, AUTH_RESPONSE) == 0)
+    {
+        if (strcmp(target_role, HUB) == 0)
+            msg_type = SERVER_TO_HUB__AUTH_RESPONSE;
+        else if (strcmp(target_role, WAREHOUSE) == 0)
+            msg_type = SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
+    }
+    else if (strcmp(message_category, ACK) == 0)
+    {
+        if (strcmp(source_role, HUB) == 0)
+            msg_type = HUB_TO_SERVER__ACK;
+        else if (strcmp(source_role, WAREHOUSE) == 0)
+            msg_type = WAREHOUSE_TO_SERVER__ACK;
+        else if (strcmp(source_role, SERVER) == 0)
+        {
+            if (strcmp(target_role, HUB) == 0)
+                msg_type = SERVER_TO_HUB__ACK;
+            else if (strcmp(target_role, WAREHOUSE) == 0)
+                msg_type = SERVER_TO_WAREHOUSE__ACK;
+        }
+    }
+    else
+    {
+        return -1; // Unknown category
+    }
+
+    if (!msg_type)
+        return -1;
+
+    return create_message(out, msg_type, source_role, source_id, target_role, target_id, &payload, sizeof(payload));
+}
+
+int create_client_emergency_message(message_t* out, const char* source_role, const char* source_id, int emergency_code,
+                                    const char* emergency_type)
+{
+    if (!out || !source_role || !source_id || !emergency_type)
+        return -1;
+
+    payload_client_emergency_alert payload = {0};
+    payload.emergency_code = emergency_code;
+    safe_strcpy(payload.emergency_type, 20, emergency_type);
+
+    const char* msg_type =
+        (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__EMERGENCY_ALERT : WAREHOUSE_TO_SERVER__EMERGENCY_ALERT;
+
+    return create_message(out, msg_type, source_role, source_id, SERVER, SERVER, &payload, sizeof(payload));
+}
+
+int create_server_emergency_message(message_t* out, int emergency_code, const char* instructions)
+{
+    if (!out || !instructions)
+        return -1;
+
+    payload_server_emergency_alert payload = {0};
+    payload.emergency_code = emergency_code;
+    safe_strcpy(payload.instructions, 100, instructions);
+
+    // Placeholder
+    return create_message(out, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, SERVER, "SERVER", CLI, "ALL", &payload,
+                          sizeof(payload));
 }

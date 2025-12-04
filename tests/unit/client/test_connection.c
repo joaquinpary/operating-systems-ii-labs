@@ -1,39 +1,42 @@
-#include "unity.h"
 #include "connection.h"
 #include "mock_server.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include "unity.h"
 #include <arpa/inet.h>
-#include <unistd.h>
+#include <netinet/in.h>
 #include <pthread.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #define LOCALHOST "127.0.0.1"
 #define TCP_TEST_PORT "8081"
 #define UDP_TEST_PORT "8082"
 
-void setUp(void) {
+void setUp(void)
+{
 }
 
-void tearDown(void) {
+void tearDown(void)
+{
 }
 
-void test_client_tcp_connection(void) {
+void test_client_tcp_connection(void)
+{
     pthread_t server_thread;
-    mock_server_args_t args = { .port = 8081, .response_msg = "Hello from server" };
-    
+    mock_server_args_t args = {.port = 8081, .response_msg = "Hello from server"};
+
     pthread_create(&server_thread, NULL, mock_tcp_server, &args);
     sleep(1);
 
     client_context ctx;
     client_config config;
-    
+
     strncpy(config.host, LOCALHOST, sizeof(config.host));
     strncpy(config.port, TCP_TEST_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
     TEST_ASSERT_EQUAL(0, client_init(&ctx, &config));
-    
+
     char response[256];
     TEST_ASSERT_EQUAL(0, client_send(&ctx, "Hello"));
     TEST_ASSERT_GREATER_THAN(0, client_receive(&ctx, response, sizeof(response)));
@@ -43,10 +46,11 @@ void test_client_tcp_connection(void) {
     pthread_join(server_thread, NULL);
 }
 
-void test_client_udp_connection(void) {
+void test_client_udp_connection(void)
+{
     client_context ctx;
     client_config config;
-    
+
     strncpy(config.host, LOCALHOST, sizeof(config.host));
     strncpy(config.port, UDP_TEST_PORT, sizeof(config.port));
     config.protocol = PROTO_UDP;
@@ -54,11 +58,12 @@ void test_client_udp_connection(void) {
 
     TEST_ASSERT_EQUAL(0, client_init(&ctx, &config));
     TEST_ASSERT_EQUAL(0, client_send(&ctx, "Hello UDP"));
-    
+
     client_close(&ctx);
 }
 
-int main(void) {
+int main(void)
+{
     UNITY_BEGIN();
     RUN_TEST(test_client_tcp_connection);
     RUN_TEST(test_client_udp_connection);

@@ -4,7 +4,8 @@
 #include <pthread.h>
 
 // Structure to pass arguments to the mock server thread
-typedef struct {
+typedef struct
+{
     int port;
     const char* response_msg;
 } mock_server_args_t;

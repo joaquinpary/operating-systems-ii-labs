@@ -12,15 +12,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-// Later open .conf file
-static void load_client_config(client_config* config)
-{
-    strncpy(config->host, "127.0.0.1", sizeof(config->host) - 1);
-    strncpy(config->port, "8080", sizeof(config->port) - 1);
-    config->protocol = PROTO_UDP;   // Default to UDP
-    config->ip_version = AF_UNSPEC; // Allow IPv4 or IPv6
-}
-
 int client_init(client_context* ctx, client_config* config)
 {
     struct addrinfo hints, *res, *p;
@@ -142,21 +133,4 @@ void client_close(client_context* ctx)
         close(ctx->sockfd);
         ctx->sockfd = -1;
     }
-}
-
-int init_connection(client_context* ctx)
-{
-    client_config config;
-
-    load_client_config(&config);
-
-    if (client_init(ctx, &config) != 0)
-    {
-        return -1;
-    }
-
-    // Remove this later
-    printf("Connected to %s:%s via %s\n", config.host, config.port, (config.protocol == PROTO_TCP) ? "TCP" : "UDP");
-
-    return 0;
 }

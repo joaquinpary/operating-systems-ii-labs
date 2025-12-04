@@ -37,6 +37,16 @@ extern "C"
 #define HUB "HUB"
 #define SERVER "SERVER"
 #define CLI "CLI"
+#define AUTH_RESPONSE "AUTH_RESPONSE"
+#define ACK "ACK"
+#define STOCK_REQUEST "STOCK_REQUEST"
+#define INVENTORY_UPDATE "INVENTORY_UPDATE"
+#define RECEIPT_CONFIRMATION "RECEIPT_CONFIRMATION"
+#define SHIPMENT_NOTICE "SHIPMENT_NOTICE"
+#define REPLENISH_REQUEST "REPLENISH_REQUEST"
+#define ORDER_DISPATCH "ORDER_DISPATCH"
+#define RESTOCK_NOTICE "RESTOCK_NOTICE"
+#define INCOMING_STOCK_NOTICE "INCOMING_STOCK_NOTICE"
 
 #define MIN_SIZE 8
 #define MESSAGE_TYPE_SIZE 64
@@ -122,6 +132,7 @@ extern "C"
         char msg_type[MESSAGE_TYPE_SIZE];
         char source_role[SOURCE_ROLE_SIZE];
         char source_id[SOURCE_ID_SIZE];
+        char target_role[SOURCE_ROLE_SIZE];
         char target_id[TARGET_ID_SIZE];
         char timestamp[TIMESTAMP_SIZE];
         payload_t payload;
@@ -136,7 +147,7 @@ extern "C"
      * @return 0 on success, negative value on error.
      */
     int serialize_message_to_json(const message_t* msg, char* out);
-    
+
     /*@brief
      * Deserializes a JSON string into a message_t structure.
      * @param json The JSON string to deserialize.
@@ -144,6 +155,83 @@ extern "C"
      * @return 0 on success, negative value on error.
      */
     int deserialize_message_from_json(const char* json, message_t* out);
+
+    /*@brief
+     * Creates an authentication request message.
+     * @param out Pointer to the message_t structure to populate.
+     * @param source_role Source role (HUB or WAREHOUSE).
+     * @param source_id Source identifier (e.g., "client_0001").
+     * @param username Username for authentication.
+     * @param password Password for authentication.
+     * @return 0 on success, negative value on error.
+     */
+    int create_auth_request_message(message_t* out, const char* source_role, const char* source_id,
+                                    const char* username, const char* password);
+
+    /*@brief
+     * Creates a keepalive message.
+     * @param out Pointer to the message_t structure to populate.
+     * @param source_role Source role (HUB or WAREHOUSE).
+     * @param source_id Source identifier (e.g., "client_0001").
+     * @param message Single character message (optional, use 'A' as default).
+     * @return 0 on success, negative value on error.
+     */
+    int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, char message);
+
+    /*@brief
+     * Generic function to create any message with items payload.
+     * Automatically selects msg_type based on source_role and message_category.
+     * @param out Pointer to the message_t structure to populate.
+     * @param source_role Source role (HUB, WAREHOUSE, or SERVER).
+     * @param source_id Source identifier.
+     * @param target_role Target role (HUB, WAREHOUSE, or SERVER).
+     * @param target_id Target identifier (use SERVER for client->server, or specific client for server->client).
+     * @param message_category Category: "stock_request", "inventory_update", "receipt_confirmation",
+     *                         "shipment_notice", "replenish_request", "order_dispatch",
+     *                         "restock_notice", "incoming_stock_notice"
+     * @param items Array of inventory items (max QUANTITY_ITEMS).
+     * @param item_count Number of items in the array.
+     * @return 0 on success, negative value on error.
+     */
+    int create_items_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
+                             const char* target_id, const char* message_category, const inventory_item_t* items,
+                             int item_count);
+
+    /*@brief
+     * Generic function to create any message with status payload.
+     * Automatically selects msg_type based on source_role and target_role.
+     * @param out Pointer to the message_t structure to populate.
+     * @param source_role Source role (HUB, WAREHOUSE, or SERVER).
+     * @param source_id Source identifier.
+     * @param target_role Target role (HUB, WAREHOUSE, or SERVER).
+     * @param target_id Target identifier.
+     * @param message_category Category: "auth_response" or "ack"
+     * @param status_code Status code (e.g., 200 for success).
+     * @return 0 on success, negative value on error.
+     */
+    int create_status_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
+                              const char* target_id, const char* message_category, int status_code);
+
+    /*@brief
+     * Creates an emergency alert message from client (HUB or WAREHOUSE).
+     * @param out Pointer to the message_t structure to populate.
+     * @param source_role Source role (HUB or WAREHOUSE).
+     * @param source_id Source identifier (e.g., "client_0001").
+     * @param emergency_code Emergency code number.
+     * @param emergency_type Type/description of emergency.
+     * @return 0 on success, negative value on error.
+     */
+    int create_client_emergency_message(message_t* out, const char* source_role, const char* source_id,
+                                        int emergency_code, const char* emergency_type);
+
+    /*@brief
+     * Creates a server emergency alert message (SERVER to all clients).
+     * @param out Pointer to the message_t structure to populate.
+     * @param emergency_code Emergency code number.
+     * @param instructions Instructions for clients.
+     * @return 0 on success, negative value on error.
+     */
+    int create_server_emergency_message(message_t* out, int emergency_code, const char* instructions);
 
 #ifdef __cplusplus
 }
