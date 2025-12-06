@@ -83,6 +83,7 @@ if(BUILD_TARGET STREQUAL "server")
     file(GLOB SOURCES
         src/server/*.cpp
         src/common/*.cpp
+        src/common/*.c
         include/server/*.hpp
     )
     set(TARGET_EXEC dhl_server)
