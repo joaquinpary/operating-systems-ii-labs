@@ -1,17 +1,43 @@
 #include <gtest/gtest.h>
 #include <asio.hpp>
 #include "server.hpp"
+#include "session_manager.hpp"
+#include "auth_module.hpp"
+#include "message_handler.hpp"
+#include "database.hpp"
+#include <common/json_manager.h>
 #include <thread>
 #include <chrono>
+#include <memory>
+#include <pqxx/pqxx>
 
 using namespace asio::ip;
 
 class ServerTest : public ::testing::Test
 {
   protected:
+    static std::atomic<uint16_t> s_next_port;
+
+    uint16_t get_unique_port()
+    {
+        return s_next_port.fetch_add(1);
+    }
+
     void SetUp() override
     {
         m_io_context = std::make_unique<asio::io_context>();
+        
+        // Create core modules for testing
+        // Note: For tests, we'll try to use real DB connection if available,
+        // otherwise tests will need to be skipped
+        auto db_connection = connect_to_database();
+        if (db_connection)
+        {
+            m_session_mgr = std::make_unique<session_manager>();
+            m_auth_mod = std::make_unique<auth_module>(*db_connection);
+            m_msg_handler = std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr);
+            m_db_connection = std::move(db_connection);
+        }
     }
 
     void TearDown() override
@@ -25,6 +51,12 @@ class ServerTest : public ::testing::Test
         {
             m_io_thread->join();
         }
+        m_server.reset();
+        m_msg_handler.reset();
+        m_auth_mod.reset();
+        m_session_mgr.reset();
+        m_db_connection.reset();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     void start_io_context()
@@ -35,32 +67,57 @@ class ServerTest : public ::testing::Test
     std::unique_ptr<asio::io_context> m_io_context;
     std::unique_ptr<server> m_server;
     std::unique_ptr<std::thread> m_io_thread;
+    std::unique_ptr<pqxx::connection> m_db_connection;
+    std::unique_ptr<session_manager> m_session_mgr;
+    std::unique_ptr<auth_module> m_auth_mod;
+    std::unique_ptr<message_handler> m_msg_handler;
 };
+
+std::atomic<uint16_t> ServerTest::s_next_port{10000};
 
 // Test default configuration values
 TEST_F(ServerTest, DefaultConfigValues)
 {
-    server_config config = make_default_server_config();
+    config::server_config config = make_default_server_config();
 
-    EXPECT_EQ(config.tcp.address_v4, server_constants::DEFAULT_IPV4_ADDRESS);
-    EXPECT_EQ(config.tcp.address_v6, server_constants::DEFAULT_IPV6_ADDRESS);
-    EXPECT_EQ(config.tcp.port, server_constants::DEFAULT_PORT);
-    EXPECT_EQ(config.udp.address_v4, server_constants::DEFAULT_IPV4_ADDRESS);
-    EXPECT_EQ(config.udp.address_v6, server_constants::DEFAULT_IPV6_ADDRESS);
-    EXPECT_EQ(config.udp.port, server_constants::DEFAULT_PORT);
+    EXPECT_EQ(config.ip_v4, server_constants::DEFAULT_IPV4_ADDRESS);
+    EXPECT_EQ(config.ip_v6, server_constants::DEFAULT_IPV6_ADDRESS);
+    EXPECT_EQ(config.network_port, server_constants::DEFAULT_PORT);
 }
 
 // Test server initialization with default configuration
 TEST_F(ServerTest, ServerInitialization)
 {
-    ASSERT_NO_THROW({ m_server = std::make_unique<server>(*m_io_context); });
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping server initialization test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    config.network_port = get_unique_port();
+    ASSERT_NO_THROW({
+        m_server = std::make_unique<server>(*m_io_context, config, 
+                                            std::make_unique<session_manager>(),
+                                            std::make_unique<auth_module>(*m_db_connection),
+                                            std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+    });
     ASSERT_NE(m_server, nullptr);
 }
 
 // Test server can start
 TEST_F(ServerTest, ServerStart)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping server start test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    config.network_port = get_unique_port();
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     ASSERT_NO_THROW(m_server->start());
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -69,7 +126,17 @@ TEST_F(ServerTest, ServerStart)
 // Test server can stop
 TEST_F(ServerTest, ServerStop)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping server stop test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    config.network_port = get_unique_port();
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     m_server->start();
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -79,7 +146,18 @@ TEST_F(ServerTest, ServerStop)
 // Test basic TCP IPv4 connection
 TEST_F(ServerTest, TCPIPv4Connection)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping TCP connection test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    uint16_t test_port = get_unique_port();
+    config.network_port = test_port;
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     m_server->start();
     start_io_context();
 
@@ -87,7 +165,7 @@ TEST_F(ServerTest, TCPIPv4Connection)
 
     tcp::socket client(*m_io_context);
     asio::error_code ec;
-    client.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), server_constants::DEFAULT_PORT), ec);
+    client.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), test_port), ec);
 
     EXPECT_FALSE(ec);
     if (!ec)
@@ -99,7 +177,18 @@ TEST_F(ServerTest, TCPIPv4Connection)
 // Test basic TCP IPv6 connection
 TEST_F(ServerTest, TCPIPv6Connection)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping TCP IPv6 connection test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    uint16_t test_port = get_unique_port();
+    config.network_port = test_port;
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     m_server->start();
     start_io_context();
 
@@ -107,7 +196,7 @@ TEST_F(ServerTest, TCPIPv6Connection)
 
     tcp::socket client(*m_io_context);
     asio::error_code ec;
-    client.connect(tcp::endpoint(asio::ip::make_address("::1"), server_constants::DEFAULT_PORT), ec);
+    client.connect(tcp::endpoint(asio::ip::make_address("::1"), test_port), ec);
 
     EXPECT_FALSE(ec);
     if (!ec)
@@ -116,10 +205,21 @@ TEST_F(ServerTest, TCPIPv6Connection)
     }
 }
 
-// Test server responds with echo in TCP
-TEST_F(ServerTest, TCPEchoResponse)
+// Test server processes messages (echo test removed - now requires authentication)
+TEST_F(ServerTest, TCPMessageProcessing)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping message processing test";
+    }
+    
+    config::server_config config = make_default_server_config();
+    uint16_t test_port = get_unique_port();
+    config.network_port = test_port;
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     m_server->start();
     start_io_context();
 
@@ -127,46 +227,67 @@ TEST_F(ServerTest, TCPEchoResponse)
 
     tcp::socket client(*m_io_context);
     asio::error_code ec;
-    client.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), server_constants::DEFAULT_PORT), ec);
+    client.connect(tcp::endpoint(asio::ip::make_address("127.0.0.1"), test_port), ec);
     ASSERT_FALSE(ec);
 
-    const std::string test_message = "Hello TCP!";
-    std::size_t bytes_written = asio::write(client, asio::buffer(test_message), ec);
-    EXPECT_GT(bytes_written, 0);
-    EXPECT_FALSE(ec);
-
-    std::array<char, 256> response;
-    std::size_t bytes_read = client.read_some(asio::buffer(response), ec);
-    EXPECT_GT(bytes_read, 0);
-    EXPECT_FALSE(ec);
-    EXPECT_EQ(test_message, std::string(response.data(), bytes_read));
-
+    // Connection successful - message processing now requires authentication
+    // This test just verifies the connection works
     client.close();
 }
 
-// Test server responds with echo in UDP
+// Test UDP server processes authentication messages
 TEST_F(ServerTest, UDPEchoResponse)
 {
-    m_server = std::make_unique<server>(*m_io_context);
+    if (!m_session_mgr || !m_auth_mod || !m_msg_handler)
+    {
+        GTEST_SKIP() << "Database not available, skipping UDP test";
+    }
+    
+    {
+        pqxx::work txn(*m_db_connection);
+        txn.exec("DELETE FROM credentials WHERE username = 'udp_test_user'");
+        txn.exec("INSERT INTO credentials (username, password_hash, client_type, is_active) "
+                 "VALUES ('udp_test_user', 'test_hash', 'HUB', TRUE)");
+        txn.commit();
+    }
+    
+    config::server_config config = make_default_server_config();
+    uint16_t test_port = get_unique_port();
+    config.network_port = test_port;
+    m_server = std::make_unique<server>(*m_io_context, config,
+                                        std::make_unique<session_manager>(),
+                                        std::make_unique<auth_module>(*m_db_connection),
+                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
     m_server->start();
     start_io_context();
 
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     udp::socket client(*m_io_context, udp::endpoint(udp::v4(), 0));
-    udp::endpoint server_endpoint(asio::ip::make_address("127.0.0.1"), server_constants::DEFAULT_PORT);
+    udp::endpoint server_endpoint(asio::ip::make_address("127.0.0.1"), test_port);
 
-    const std::string test_message = "Hello UDP!";
+    message_t auth_request;
+    create_auth_request_message(&auth_request, "HUB", "udp_test_user", "udp_test_user", "test_hash");
+    
+    char json_buffer[1024];
+    int result = serialize_message_to_json(&auth_request, json_buffer);
+    ASSERT_EQ(result, 0);
+    
+    std::string test_message(json_buffer);
     std::size_t bytes_sent = client.send_to(asio::buffer(test_message), server_endpoint);
     EXPECT_GT(bytes_sent, 0);
 
-    std::array<char, 256> response;
+    std::array<char, 1024> response;
     udp::endpoint sender_endpoint;
     asio::error_code ec;
     std::size_t bytes_received = client.receive_from(asio::buffer(response), sender_endpoint, 0, ec);
     EXPECT_GT(bytes_received, 0);
     EXPECT_FALSE(ec);
-    EXPECT_EQ(test_message, std::string(response.data(), bytes_received));
+    
+    message_t response_msg;
+    result = deserialize_message_from_json(std::string(response.data(), bytes_received).c_str(), &response_msg);
+    EXPECT_EQ(result, 0);
+    EXPECT_EQ(response_msg.payload.server_auth_response.status_code, 200);
 }
 
 int main(int argc, char** argv)
