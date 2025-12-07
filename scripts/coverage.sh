@@ -1,28 +1,26 @@
 #!/bin/bash
 
-# Enter the build
-cd ../build/ || exit 1
+cd "$(dirname "$0")/../build/" || exit 1
 
-# Run the tests
-#ctest --output-on-failure
-./tests/test_server
-#./tests/test_client
-./tests/test_common
+echo "Running tests..."
+for test_exec in tests/test_*; do
+    if [ -f "$test_exec" ] && [ -x "$test_exec" ]; then
+        echo "Executing $test_exec"
+        "$test_exec"
+    fi
+done
 
-# Create output folder for coverage
 mkdir -p coverage
 
-# Capture coverage
-lcov --capture --directory . --output-file coverage/coverage.info\
+lcov --capture --directory . --output-file coverage/coverage.info \
   --include "*/src/client/*" \
   --include "*/src/common/*" \
   --include "*/src/server/*"
 
-# Filter out irrelevant files like external libs or unity
 lcov --remove coverage/coverage.info '*/external/*' '*/tests/*' --output-file coverage/coverage.info
 
-# Generate HTML report
 genhtml coverage/coverage.info --output-directory coverage/coverage-report
 
-# Open the report in the browser (optional)
-xdg-open coverage/coverage-report/index.html
+if command -v xdg-open &> /dev/null; then
+    xdg-open coverage/coverage-report/index.html
+fi

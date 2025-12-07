@@ -2,10 +2,10 @@ import os
 import random
 import hashlib
 import json
+import sys
 
 SERVER_HOST = "127.0.0.1"
-SERVER_PORT_TCP = "9999"
-SERVER_PORT_UDP = "9998"
+SERVER_PORT = "9999"  # Mismo puerto para TCP y UDP
 
 ERROR_RATE = 0.1 
 
@@ -16,7 +16,7 @@ def generate_password(username):
     """Gen a password based on the username using MD5 hash"""
     return hashlib.md5(username.encode()).hexdigest()
 
-def generate_configs():
+def generate_configs(num_clients=2000):
     if not os.path.exists(OUTPUT_DIR):
         try:
             os.makedirs(OUTPUT_DIR)
@@ -28,9 +28,20 @@ def generate_configs():
     clients = []
     server_credentials = []
 
-    for i in range(1, 2001):
+    # Limpiar archivos existentes si estamos generando menos clientes
+    if num_clients < 2000:
+        print(f"Cleaning existing client config files...")
+        for filename in os.listdir(OUTPUT_DIR):
+            if filename.endswith('.conf'):
+                os.remove(os.path.join(OUTPUT_DIR, filename))
+
+    for i in range(1, num_clients + 1):
         username = f"client_{i:04d}"
-        client_type = "warehouse" if i <= 1000 else "hub"       
+        # Para pocos clientes, alternar entre WAREHOUSE y HUB
+        if num_clients <= 20:
+            client_type = "WAREHOUSE" if i % 2 == 1 else "HUB"
+        else:
+            client_type = "WAREHOUSE" if i <= (num_clients // 2) else "HUB"
         clients.append({
             "username": username,
             "type": client_type
@@ -56,7 +67,7 @@ def generate_configs():
         protocol = random.choice(['tcp', 'udp'])
         ip_version = random.choice(['v4', 'v6'])
         
-        port = SERVER_PORT_TCP if protocol == 'tcp' else SERVER_PORT_UDP
+        port = SERVER_PORT  # Mismo puerto para TCP y UDP
 
         filename = os.path.join(OUTPUT_DIR, f"{username}.conf")
         
@@ -82,4 +93,11 @@ def generate_configs():
 
     print("Process completed.")
 if __name__ == "__main__":
-    generate_configs()
+    num_clients = 2000  # Default
+    if len(sys.argv) > 1:
+        try:
+            num_clients = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid number of clients: {sys.argv[1]}. Using default: 2000")
+            num_clients = 2000
+    generate_configs(num_clients)

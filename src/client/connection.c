@@ -68,11 +68,22 @@ int client_send(client_context* ctx, const char* msg)
 {
     if (ctx->protocol == PROTO_TCP)
     {
-        if (send(ctx->sockfd, msg, strlen(msg), MSG_NOSIGNAL) == -1)
+        char* tcp_msg = malloc(BUFFER_SIZE);
+        if (!tcp_msg)
         {
-            perror("send");
+            perror("malloc");
             return -1;
         }
+        memset(tcp_msg, 0, BUFFER_SIZE);
+        snprintf(tcp_msg, BUFFER_SIZE, "%s", msg);
+        if (send(ctx->sockfd, tcp_msg, BUFFER_SIZE, MSG_NOSIGNAL) == -1)
+        {
+            perror("send");
+            free(tcp_msg);
+            return -1;
+        }
+        
+        free(tcp_msg);
     }
     else
     {
@@ -92,35 +103,37 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
 
     if (ctx->protocol == PROTO_TCP)
     {
-        if ((num_bytes = recv(ctx->sockfd, buffer, buffer_size - 1, 0)) == -1)
+        size_t total_received = 0;
+        while (total_received < BUFFER_SIZE)
         {
-            perror("recv");
-            return -1;
+            ssize_t n = recv(ctx->sockfd, buffer + total_received, BUFFER_SIZE - total_received, 0);
+            if (n == -1)
+            {
+                perror("recv");
+                return -1;
+            }
+            if (n == 0)
+            {
+                return -2;
+            }
+            total_received += n;
         }
-        if (num_bytes == 0)
-        {
-            return -2; // Connection closed by server
-        }
+        num_bytes = total_received;
+        buffer[BUFFER_SIZE - 1] = '\0';
     }
     else
     {
         struct sockaddr_storage from_addr;
         socklen_t from_len = sizeof(from_addr);
-        if ((num_bytes = recvfrom(ctx->sockfd, buffer, buffer_size - 1, 0, (struct sockaddr*)&from_addr, &from_len)) ==
-            -1)
+        if ((num_bytes = recvfrom(ctx->sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr*)&from_addr, &from_len)) == -1)
         {
             perror("recvfrom");
             return -1;
         }
-    }
-
-    if (num_bytes >= 0 && (size_t)num_bytes < buffer_size)
-    {
-        buffer[num_bytes] = '\0';
-    }
-    else if (buffer_size > 0)
-    {
-        buffer[buffer_size - 1] = '\0';
+        if (num_bytes >= 0 && num_bytes < BUFFER_SIZE)
+        {
+            buffer[num_bytes] = '\0';
+        }
     }
 
     return (int)num_bytes;

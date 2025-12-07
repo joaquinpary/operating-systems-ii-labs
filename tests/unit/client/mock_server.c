@@ -7,6 +7,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#define BUFFER_SIZE 1024
+
 void* mock_tcp_server(void* arg)
 {
     mock_server_args_t* args = (mock_server_args_t*)arg;
@@ -17,7 +19,8 @@ void* mock_tcp_server(void* arg)
     struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
-    char buffer[1024] = {0};
+    char recv_buffer[BUFFER_SIZE] = {0};
+    char send_buffer[BUFFER_SIZE] = {0};
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
     {
@@ -47,15 +50,17 @@ void* mock_tcp_server(void* arg)
         return NULL;
     }
 
-    // Accept one connection
     if ((new_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen)) < 0)
     {
         perror("mock_server: accept");
         return NULL;
     }
 
-    read(new_socket, buffer, 1024);
-    send(new_socket, response, strlen(response), 0);
+    read(new_socket, recv_buffer, BUFFER_SIZE);
+    
+    memset(send_buffer, 0, BUFFER_SIZE);
+    strncpy(send_buffer, response, BUFFER_SIZE - 1);
+    send(new_socket, send_buffer, BUFFER_SIZE, 0);
 
     close(new_socket);
     close(server_fd);

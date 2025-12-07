@@ -1,24 +1,19 @@
 #include "server.hpp"
 
+#include <common/json_manager.h>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
-server_config make_server_config_from_config(const config::server_config& cfg)
+config::server_config make_default_server_config()      // revisar, no deberiamos tener configuracion default
 {
-    return server_config{
-        .tcp =
-            server_endpoint_config{
-                .address_v4 = cfg.ip_v4,
-                .address_v6 = cfg.ip_v6,
-                .port = cfg.network_port,
-            },
-        .udp =
-            server_endpoint_config{
-                .address_v4 = cfg.ip_v4,
-                .address_v6 = cfg.ip_v6,
-                .port = cfg.network_port,
-            },
+    return config::server_config{
+        .ip_v4 = server_constants::DEFAULT_IPV4_ADDRESS,
+        .ip_v6 = server_constants::DEFAULT_IPV6_ADDRESS,
+        .network_port = server_constants::DEFAULT_PORT,
+        .ack_timeout = 3,
+        .max_auth_attempts = 3,
     };
 }
 
@@ -34,7 +29,10 @@ asio::ip::address server::parse_address(const std::string& address_literal)
     }
 }
 
-tcp_session::tcp_session(asio::ip::tcp::socket socket) : m_socket(std::move(socket))
+// TCP SESSION CONSTRUCTOR
+tcp_session::tcp_session(asio::ip::tcp::socket socket, message_handler& msg_handler, session_manager& session_mgr)
+    : m_socket(std::move(socket)), m_message_handler(msg_handler), m_session_manager(session_mgr),
+      m_session_id(session_mgr.create_session())
 {
 }
 
@@ -46,43 +44,106 @@ void tcp_session::start()
 void tcp_session::do_read()
 {
     auto self = shared_from_this();
-    m_socket.async_read_some(asio::buffer(m_data),
-                             [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
-                                 if (!ec)
-                                 {
-                                     std::cout << "TCP: Received " << bytes_transferred << " bytes\n";
-                                     do_write(bytes_transferred);
-                                     return;
-                                 }
-                                 if (ec != asio::error::operation_aborted)
-                                 {
-                                     std::cerr << "TCP read error: " << ec.message() << '\n';
-                                 }
-                             });
+    asio::async_read(m_socket, asio::buffer(m_data, server_constants::DEFAULT_BUFFER_SIZE),
+                     [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
+                         if (!ec)
+                         {
+                             if (bytes_transferred != server_constants::DEFAULT_BUFFER_SIZE)
+                             {
+                                 std::cerr << "\n\n[TCP] ERROR: Expected " << server_constants::DEFAULT_BUFFER_SIZE 
+                                           << " bytes but received " << bytes_transferred << std::endl;
+                             }
+                             
+                             m_data[server_constants::DEFAULT_BUFFER_SIZE - 1] = '\0';
+                             std::cout << "\n\n[TCP] <- " << m_data.data() << std::endl;
+                             
+                             process_received_data(bytes_transferred);
+                             return;
+                         }
+                         if (ec != asio::error::operation_aborted)
+                         {
+                             std::cerr << "\n\n[TCP] ERROR: " << ec.message() << std::endl;
+                         }
+                         if (ec == asio::error::eof || ec == asio::error::connection_reset)
+                         {
+                             m_session_manager.remove_session(m_session_id);
+                         }
+                     });
 }
 
-void tcp_session::do_write(std::size_t length)
+void tcp_session::process_received_data(std::size_t bytes_transferred)
+{
+    std::string json_input(m_data.data());
+
+    message_processing_result result = m_message_handler.process_message(json_input, m_session_id);
+
+    if (!result.success)
+    {
+        std::cerr << "\n\n[TCP] ERROR: Message processing failed - " << result.error_message << std::endl;
+        do_read();
+        return;
+    }
+
+    if (result.should_send_response)
+    {
+        char response_json[BUFFER_SIZE];
+        if (serialize_message_to_json(&result.response_message, response_json) == 0)
+        {
+            std::string response_str(response_json);
+            do_write(response_str);
+        }
+        else
+        {
+            std::cerr << "\n\n[TCP] ERROR: Failed to serialize response message" << std::endl;
+            do_read();
+        }
+    }
+    else
+    {
+        do_read();
+    }
+}
+
+void tcp_session::do_write(const std::string& data)
 {
     auto self = shared_from_this();
-    asio::async_write(m_socket, asio::buffer(m_data, length),
-                      [this, self](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
+    
+    auto fixed_buffer = std::make_shared<std::array<char, server_constants::DEFAULT_BUFFER_SIZE>>();
+    std::fill(fixed_buffer->begin(), fixed_buffer->end(), 0);
+    
+    if (data.length() >= server_constants::DEFAULT_BUFFER_SIZE)
+    {
+        std::cerr << "\n\n[TCP] ERROR: Message too large (" << data.length() << " bytes), truncating to " 
+                  << (server_constants::DEFAULT_BUFFER_SIZE - 1) << " bytes" << std::endl;
+        std::copy_n(data.begin(), server_constants::DEFAULT_BUFFER_SIZE - 1, fixed_buffer->begin());
+    }
+    else
+    {
+        std::copy(data.begin(), data.end(), fixed_buffer->begin());
+    }
+    
+    asio::async_write(m_socket, asio::buffer(*fixed_buffer, server_constants::DEFAULT_BUFFER_SIZE),
+                      [this, self, fixed_buffer, data](const asio::error_code& ec, std::size_t bytes_transferred) {
                           if (!ec)
                           {
+                              std::cout << "\n\n[TCP] -> " << data << std::endl;
                               do_read();
                               return;
                           }
                           if (ec != asio::error::operation_aborted)
                           {
-                              std::cerr << "TCP write error: " << ec.message() << '\n';
+                              std::cerr << "\n\n[TCP] ERROR: " << ec.message() << std::endl;
                           }
                       });
 }
 
-udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint) : m_socket(io_context)
+// UDP SERVER CONSTRUCTOR
+udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
+                       message_handler& msg_handler, session_manager& session_mgr)
+    : m_socket(io_context), m_message_handler(msg_handler), m_session_manager(session_mgr)
 {
     m_socket.open(endpoint.protocol());
     m_socket.set_option(asio::socket_base::reuse_address(true));
-    // Configure IPv6 sockets to only listen on IPv6 (not dual-stack)
     if (endpoint.protocol() == asio::ip::udp::v6())
     {
         m_socket.set_option(asio::ip::v6_only(true));
@@ -97,39 +158,112 @@ void udp_server::do_receive()
         asio::buffer(m_data), m_sender_endpoint, [this](const asio::error_code& ec, std::size_t bytes_transferred) {
             if (!ec)
             {
-                std::cout << "UDP: Received " << bytes_transferred << " bytes from " << m_sender_endpoint << '\n';
-                do_send(bytes_transferred);
+                if (bytes_transferred >= server_constants::DEFAULT_BUFFER_SIZE)
+                {
+                    std::cerr << "\n\n[UDP] ERROR: Message too large! Received " << bytes_transferred 
+                              << " bytes, buffer is " << server_constants::DEFAULT_BUFFER_SIZE << " bytes" << std::endl;
+                    do_receive();
+                    return;
+                }
+                
+                m_data[bytes_transferred] = '\0';
+                
+                std::string message_copy(m_data.data(), bytes_transferred);
+                asio::ip::udp::endpoint sender_copy = m_sender_endpoint;
+                
+                std::cout << "\n\n[UDP] <- " << message_copy << std::endl;
+
+                do_receive();
+                
+                process_received_data(message_copy, sender_copy);
                 return;
             }
             if (ec != asio::error::operation_aborted)
             {
-                std::cerr << "UDP receive error: " << ec.message() << '\n';
+                std::cerr << "\n\n[UDP] ERROR: " << ec.message() << std::endl;
                 do_receive();
             }
         });
 }
 
-void udp_server::do_send(std::size_t length)
+void udp_server::process_received_data(const std::string& json_input, const asio::ip::udp::endpoint& sender_endpoint)
 {
-    m_socket.async_send_to(asio::buffer(m_data, length), m_sender_endpoint,
-                           [this](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
+    if (json_input.empty())
+    {
+        std::cerr << "ERROR: Empty message received from " << sender_endpoint << std::endl;
+        return;
+    }
+
+    std::string session_id = get_session_id_from_endpoint(sender_endpoint);
+    
+    if (!m_session_manager.is_authenticated(session_id))
+    {
+        auto session_info = m_session_manager.get_session_info(session_id);
+        if (!session_info)
+        {
+            session_id = m_session_manager.create_session();
+        }
+    }
+
+    message_processing_result result = m_message_handler.process_message(json_input, session_id);
+
+    if (!result.success)
+    {
+        std::cerr << "\n\n[UDP] ERROR: Message processing failed - " << result.error_message << std::endl;
+        return;
+    }
+
+    if (result.should_send_response)
+    {
+        char response_json[BUFFER_SIZE];
+        if (serialize_message_to_json(&result.response_message, response_json) == 0)
+        {
+            std::string response_str(response_json);
+            do_send(response_str, sender_endpoint);
+        }
+        else
+        {
+            std::cerr << "\n\n[UDP] ERROR: Failed to serialize response message" << std::endl;
+        }
+    }
+}
+
+void udp_server::do_send(const std::string& data, const asio::ip::udp::endpoint& target_endpoint)
+{
+    m_socket.async_send_to(asio::buffer(data.data(), data.length()), target_endpoint,
+                           [this, data](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
                                if (ec && ec != asio::error::operation_aborted)
                                {
-                                   std::cerr << "UDP send error: " << ec.message() << '\n';
+                                   std::cerr << "\n\n[UDP] ERROR: " << ec.message() << std::endl;
                                }
-                               do_receive();
+                               else
+                               {
+                                   std::cout << "\n\n[UDP] -> " << data << std::endl;
+                               }
                            });
 }
 
-server::server(asio::io_context& io_context, const server_config& config)
-    : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
-      m_udp_server_ipv4(
-          std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v4, m_config.udp.port))),
-      m_udp_server_ipv6(
-          std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.udp.address_v6, m_config.udp.port)))
+std::string udp_server::get_session_id_from_endpoint(const asio::ip::udp::endpoint& endpoint) const
 {
-    configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.tcp.address_v4, m_config.tcp.port));
-    configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.tcp.address_v6, m_config.tcp.port));
+    std::ostringstream oss;
+    oss << "udp_" << endpoint.address().to_string() << "_" << endpoint.port();
+    return oss.str();
+}
+
+server::server(asio::io_context& io_context, const config::server_config& config,
+               std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
+               std::unique_ptr<message_handler> msg_handler)
+    : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
+      m_session_manager(std::move(session_mgr)), m_auth_module(std::move(auth_mod)),
+      m_message_handler(std::move(msg_handler))
+{
+    configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.ip_v4, m_config.network_port));
+    configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.ip_v6, m_config.network_port));
+    
+    m_udp_server_ipv4 = std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.ip_v4, m_config.network_port),
+                                                     *m_message_handler, *m_session_manager);
+    m_udp_server_ipv6 = std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.ip_v6, m_config.network_port),
+                                                     *m_message_handler, *m_session_manager);
 }
 
 server::~server()
@@ -142,10 +276,10 @@ void server::start()
     start_accept(m_tcp4_acceptor);
     start_accept(m_tcp6_acceptor);
     std::cout << "Server started:\n"
-              << "  TCP IPv4: " << m_config.tcp.address_v4 << ":" << m_config.tcp.port << '\n'
-              << "  TCP IPv6: " << m_config.tcp.address_v6 << ":" << m_config.tcp.port << '\n'
-              << "  UDP IPv4: " << m_config.udp.address_v4 << ":" << m_config.udp.port << '\n'
-              << "  UDP IPv6: " << m_config.udp.address_v6 << ":" << m_config.udp.port << '\n';
+              << "  TCP IPv4: " << m_config.ip_v4 << ":" << m_config.network_port << '\n'
+              << "  TCP IPv6: " << m_config.ip_v6 << ":" << m_config.network_port << '\n'
+              << "  UDP IPv4: " << m_config.ip_v4 << ":" << m_config.network_port << '\n'
+              << "  UDP IPv6: " << m_config.ip_v6 << ":" << m_config.network_port << '\n';
 }
 
 void server::stop()
@@ -166,7 +300,7 @@ void server::start_accept(asio::ip::tcp::acceptor& acceptor)
         if (!ec)
         {
             std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
-            std::make_shared<tcp_session>(std::move(socket))->start();
+            std::make_shared<tcp_session>(std::move(socket), *m_message_handler, *m_session_manager)->start();
         }
         else if (ec != asio::error::operation_aborted)
         {
@@ -184,7 +318,6 @@ void server::configure_acceptor(asio::ip::tcp::acceptor& acceptor, const asio::i
 {
     acceptor.open(endpoint.protocol());
     acceptor.set_option(asio::socket_base::reuse_address(true));
-    // Configure IPv6 sockets to only listen on IPv6 (not dual-stack)
     if (endpoint.protocol() == asio::ip::tcp::v6())
     {
         acceptor.set_option(asio::ip::v6_only(true));
@@ -202,3 +335,4 @@ asio::ip::udp::endpoint server::make_udp_endpoint(const std::string& address, st
 {
     return asio::ip::udp::endpoint(parse_address(address), port);
 }
+

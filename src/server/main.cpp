@@ -1,6 +1,9 @@
+#include "auth_module.hpp"
 #include "config.hpp"
 #include "database.hpp"
+#include "message_handler.hpp"
 #include "server.hpp"
+#include "session_manager.hpp"
 
 #include <csignal>
 #include <iostream>
@@ -21,11 +24,13 @@ int main()
             throw std::runtime_error("Failed to initialize database. Server cannot start.");
         }
 
-        // Convert to server internal config structure
-        server_config server_cfg = make_server_config_from_config(cfg);
+        // Create core modules
+        auto session_mgr = std::make_unique<session_manager>();
+        auto auth_mod = std::make_unique<auth_module>(*db_connection);
+        auto msg_handler = std::make_unique<message_handler>(*auth_mod, *session_mgr);
 
         asio::io_context io_context;
-        server srv(io_context, server_cfg);
+        server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(msg_handler));
 
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](const asio::error_code&, int) {

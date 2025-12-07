@@ -69,10 +69,6 @@ static int parse_conf(const char* path, client_config* config, client_credential
 
     if (config->host[0] == '\0' || config->port[0] == '\0' || creds->username[0] == '\0' || creds->password[0] == '\0')
     {
-        printf("%s\n", config->host);
-        printf("%s\n", config->port);
-        printf("%s\n", creds->username);
-        printf("%s\n", creds->password);
         fprintf(stderr, "[CONFIG] missing required fields in %s\n", path);
         return -1;
     }
@@ -161,13 +157,6 @@ int run_client(const char* config_path)
             return -1;
         }
         printf("Connection successful.\n");
-        const char* msg = "hello";
-        if (client_send(&ctx, msg) == 0)
-        {
-            int bytes = client_receive(&ctx, response, BUFFER_SIZE);
-            if (bytes > 0)
-                printf("[SERVER]: %s\n", response);
-        }
         client_close(&ctx);
         return 0;
     }

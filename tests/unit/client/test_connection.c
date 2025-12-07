@@ -37,9 +37,10 @@ void test_client_tcp_connection(void)
 
     TEST_ASSERT_EQUAL(0, client_init(&ctx, &config));
 
-    char response[256];
+    char response[1024];
     TEST_ASSERT_EQUAL(0, client_send(&ctx, "Hello"));
-    TEST_ASSERT_GREATER_THAN(0, client_receive(&ctx, response, sizeof(response)));
+    int bytes_received = client_receive(&ctx, response, sizeof(response));
+    TEST_ASSERT_GREATER_THAN(0, bytes_received);
     TEST_ASSERT_EQUAL_STRING("Hello from server", response);
 
     client_close(&ctx);
