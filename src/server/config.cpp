@@ -6,9 +6,16 @@
 
 namespace config
 {
+
+std::string get_env_var(const char* env_var, const char* default_value)
+{
+    const char* value = std::getenv(env_var);
+    return value ? std::string(value) : std::string(default_value);
+}
+
 void load_config_from_file(const std::string& config_path, server_config& config)
 {
-    std::ifstream file(config_path);
+    std::ifstream file(get_env_var("CONFIG_PATH", config_path.c_str()));
     if (!file.is_open())
     {
         throw std::runtime_error("Cannot open config file: " + config_path);

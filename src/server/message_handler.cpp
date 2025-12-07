@@ -132,4 +132,3 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
     }
     return nullptr;
 }
-

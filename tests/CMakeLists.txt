@@ -83,19 +83,22 @@ foreach(test_file ${SERVER_TEST})
     get_filename_component(test_name ${test_file} NAME_WE)
     set(exec_name test_server_${test_name})
     add_executable(${exec_name} ${test_file} ${SERVER_SRC} ${COMMON_SRC})
+    
+    # Find PostgreSQL for server tests
+    find_package(PostgreSQL REQUIRED)
+    
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
         ${PROJECT_SOURCE_DIR}/include/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include
-        ${LIBPQXX_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../external/server/asio/asio/include
+        ${PostgreSQL_INCLUDE_DIRS}
     )
     target_link_libraries(${exec_name} PRIVATE
         gtest
         gtest_main
         pthread
-        # ZLIB::ZLIB
-        ${LIBPQXX_LIBRARIES}
-        pq
+        pqxx
+        ${PostgreSQL_LIBRARIES}
     )
     target_compile_definitions(${exec_name} PRIVATE TESTING)
 

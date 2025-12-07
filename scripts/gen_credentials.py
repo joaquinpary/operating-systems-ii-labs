@@ -4,8 +4,8 @@ import hashlib
 import json
 import sys
 
-SERVER_HOST = "127.0.0.1"
-SERVER_PORT = "9999"  # Mismo puerto para TCP y UDP
+SERVER_HOST = "server"
+SERVER_PORT = "9999"
 
 ERROR_RATE = 0.1 
 
@@ -28,7 +28,6 @@ def generate_configs(num_clients=2000):
     clients = []
     server_credentials = []
 
-    # Limpiar archivos existentes si estamos generando menos clientes
     if num_clients < 2000:
         print(f"Cleaning existing client config files...")
         for filename in os.listdir(OUTPUT_DIR):
@@ -37,7 +36,6 @@ def generate_configs(num_clients=2000):
 
     for i in range(1, num_clients + 1):
         username = f"client_{i:04d}"
-        # Para pocos clientes, alternar entre WAREHOUSE y HUB
         if num_clients <= 20:
             client_type = "WAREHOUSE" if i % 2 == 1 else "HUB"
         else:
@@ -67,7 +65,7 @@ def generate_configs(num_clients=2000):
         protocol = random.choice(['tcp', 'udp'])
         ip_version = random.choice(['v4', 'v6'])
         
-        port = SERVER_PORT  # Mismo puerto para TCP y UDP
+        port = SERVER_PORT
 
         filename = os.path.join(OUTPUT_DIR, f"{username}.conf")
         

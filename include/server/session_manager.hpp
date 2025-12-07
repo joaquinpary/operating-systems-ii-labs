@@ -25,8 +25,7 @@ class session_manager
     std::string create_session();
 
     // Mark a session as authenticated
-    void mark_authenticated(const std::string& session_id, const std::string& client_type,
-                            const std::string& username);
+    void mark_authenticated(const std::string& session_id, const std::string& client_type, const std::string& username);
 
     // Check if a session is authenticated
     bool is_authenticated(const std::string& session_id) const;
@@ -47,4 +46,3 @@ class session_manager
 };
 
 #endif // SESSION_MANAGER_HPP
-

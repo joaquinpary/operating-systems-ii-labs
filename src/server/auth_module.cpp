@@ -63,4 +63,3 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
         return result;
     }
 }
-

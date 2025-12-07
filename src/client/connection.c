@@ -82,7 +82,7 @@ int client_send(client_context* ctx, const char* msg)
             free(tcp_msg);
             return -1;
         }
-        
+
         free(tcp_msg);
     }
     else
@@ -125,7 +125,8 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
     {
         struct sockaddr_storage from_addr;
         socklen_t from_len = sizeof(from_addr);
-        if ((num_bytes = recvfrom(ctx->sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr*)&from_addr, &from_len)) == -1)
+        if ((num_bytes = recvfrom(ctx->sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr*)&from_addr, &from_len)) ==
+            -1)
         {
             perror("recvfrom");
             return -1;

@@ -84,4 +84,3 @@ std::string session_manager::get_client_type(const std::string& session_id) cons
     }
     return "";
 }
-

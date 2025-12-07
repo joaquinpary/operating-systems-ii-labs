@@ -8,10 +8,10 @@
 // Authentication result codes
 enum class auth_result_code
 {
-    SUCCESS = 200,           // Authentication successful
+    SUCCESS = 200,             // Authentication successful
     INVALID_CREDENTIALS = 401, // Invalid username or password
-    USER_INACTIVE = 403,      // User exists but is inactive
-    ERROR = 500               // Internal error
+    USER_INACTIVE = 403,       // User exists but is inactive
+    ERROR = 500                // Internal error
 };
 
 struct auth_result
@@ -37,4 +37,3 @@ class auth_module
 };
 
 #endif // AUTH_MODULE_HPP
-

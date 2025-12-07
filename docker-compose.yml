@@ -1,21 +1,6 @@
 version: "3.8"
 
 services:
-  server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: dhl_server
-    depends_on:
-      - db
-    environment:
-      POSTGRES_HOST: db
-      POSTGRES_DB: dhl_db
-      POSTGRES_USER: dhl_user
-      POSTGRES_PASSWORD: dhl_pass
-    networks:
-      - dhl_net
-
   db:
     image: postgres:15
     container_name: dhl_db
@@ -30,9 +15,64 @@ services:
       - dhl_net
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dhl_user -d dhl_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_TARGET: server
+    container_name: dhl_server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_DB: dhl_db
+      POSTGRES_USER: dhl_user
+      POSTGRES_PASSWORD: dhl_pass
+      CONFIG_PATH: /etc/server/config.json
+      CLIENT_CREDENTIALS_PATH: /etc/server/credentials.json
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./config/server_config.json:/etc/server/config.json
+      - ./config/credentials.json:/etc/server/credentials.json
+    networks:
+      - dhl_net
+    command: ["/app/dhl_server"]
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BUILD_TARGET: client
+    container_name: dhl_clients
+    depends_on:
+      - server
+    environment:
+      - NUM_CLIENTS=${NUM_CLIENTS:-10}
+      - CONFIG_BASE_PATH=/etc/clients/client_%s.conf
+    networks:
+      - dhl_net
+    volumes:
+      - ./config/clients:/etc/client/
+      - ./scripts:/app/scripts
+    command: ["/bin/bash", "/app/scripts/run_n_clients_docker.sh"]
 
 networks:
   dhl_net:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+        - subnet: fd00::/64
 
 volumes:
   pgdata:
