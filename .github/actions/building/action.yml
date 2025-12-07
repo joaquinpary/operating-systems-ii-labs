@@ -7,13 +7,10 @@ runs:
       - name: Compile
         shell: bash
         run: |
-          SRC_FOLDER=$(pwd)/src
-
           mkdir -p build && cd build
-          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make
-
-          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=client -DRUN_COVERAGE=1 .. && make"
-
-          cmake -DSRC_FOLDER=${SRC_FOLDER} -DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make
-
-          echo "Running command: cmake -DSRC_FOLDER=${SRC_FOLDER}-DBUILD_TARGET=server -DRUN_COVERAGE=1 .. && make"
+          cmake -DBUILD_TARGET=client .. && make
+          echo "Client built successfully"
+          cmake -DBUILD_TARGET=server .. && make
+          echo "Server built successfully"
+          cmake -DRUN_COVERAGE=1 .. && make
+          echo "Coverage build completed"
