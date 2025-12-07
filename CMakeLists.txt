@@ -76,10 +76,10 @@ if(BUILD_TARGET STREQUAL "server")
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(LIBPQXX REQUIRED libpqxx)
-    include_directories(${LIBPQXX_INCLUDE_DIRS})
-    link_directories(${LIBPQXX_LIBRARY_DIRS})
+    
+    find_package(PostgreSQL REQUIRED)
+    include_directories(${PostgreSQL_INCLUDE_DIRS})
+    
     file(GLOB SOURCES
         src/server/*.cpp
         src/common/*.cpp
@@ -89,7 +89,7 @@ if(BUILD_TARGET STREQUAL "server")
     set(TARGET_EXEC dhl_server)
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread)
-    target_link_libraries(${TARGET_EXEC} ${LIBPQXX_LIBRARIES} pq)
+    target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
 
 
 elseif(BUILD_TARGET STREQUAL "client")
@@ -106,10 +106,10 @@ elseif(BUILD_TARGET STREQUAL "client")
 else()
     message(FATAL_ERROR "Invalid TARGET. Use -DTARGET=server or -DTARGET=client")
 endif()
-# Include dirs y linkeo para ambos ejecutables
+
 target_include_directories(${TARGET_EXEC} PRIVATE ${cjson_SOURCE_DIR})
 target_link_libraries(${TARGET_EXEC} cjson)
-# Add subdirectory of test
+
 if(RUN_TEST EQUAL 1 OR RUN_COVERAGE EQUAL 1)
     enable_testing()
     add_subdirectory(tests)

@@ -9,13 +9,15 @@
 #include <iostream>
 #include <stdexcept>
 
+#define SERVER_CONFIG_DEFAULT "config/server_config.json"
+
 int main()
 {
     try
     {
         // Load configuration from file
         config::server_config cfg;
-        config::load_config_from_file("config/server_config.json", cfg);
+        config::load_config_from_file(SERVER_CONFIG_DEFAULT, cfg);
 
         // Initialize database (connect and create tables)
         auto db_connection = initialize_database();

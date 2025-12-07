@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <utility>
 
-config::server_config make_default_server_config()      // revisar, no deberiamos tener configuracion default
+config::server_config make_default_server_config() // revisar, no deberiamos tener configuracion default
 {
     return config::server_config{
         .ip_v4 = server_constants::DEFAULT_IPV4_ADDRESS,
@@ -50,13 +50,13 @@ void tcp_session::do_read()
                          {
                              if (bytes_transferred != server_constants::DEFAULT_BUFFER_SIZE)
                              {
-                                 std::cerr << "\n\n[TCP] ERROR: Expected " << server_constants::DEFAULT_BUFFER_SIZE 
+                                 std::cerr << "\n\n[TCP] ERROR: Expected " << server_constants::DEFAULT_BUFFER_SIZE
                                            << " bytes but received " << bytes_transferred << std::endl;
                              }
-                             
+
                              m_data[server_constants::DEFAULT_BUFFER_SIZE - 1] = '\0';
                              std::cout << "\n\n[TCP] <- " << m_data.data() << std::endl;
-                             
+
                              process_received_data(bytes_transferred);
                              return;
                          }
@@ -107,13 +107,13 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
 void tcp_session::do_write(const std::string& data)
 {
     auto self = shared_from_this();
-    
+
     auto fixed_buffer = std::make_shared<std::array<char, server_constants::DEFAULT_BUFFER_SIZE>>();
     std::fill(fixed_buffer->begin(), fixed_buffer->end(), 0);
-    
+
     if (data.length() >= server_constants::DEFAULT_BUFFER_SIZE)
     {
-        std::cerr << "\n\n[TCP] ERROR: Message too large (" << data.length() << " bytes), truncating to " 
+        std::cerr << "\n\n[TCP] ERROR: Message too large (" << data.length() << " bytes), truncating to "
                   << (server_constants::DEFAULT_BUFFER_SIZE - 1) << " bytes" << std::endl;
         std::copy_n(data.begin(), server_constants::DEFAULT_BUFFER_SIZE - 1, fixed_buffer->begin());
     }
@@ -121,7 +121,7 @@ void tcp_session::do_write(const std::string& data)
     {
         std::copy(data.begin(), data.end(), fixed_buffer->begin());
     }
-    
+
     asio::async_write(m_socket, asio::buffer(*fixed_buffer, server_constants::DEFAULT_BUFFER_SIZE),
                       [this, self, fixed_buffer, data](const asio::error_code& ec, std::size_t bytes_transferred) {
                           if (!ec)
@@ -160,21 +160,21 @@ void udp_server::do_receive()
             {
                 if (bytes_transferred >= server_constants::DEFAULT_BUFFER_SIZE)
                 {
-                    std::cerr << "\n\n[UDP] ERROR: Message too large! Received " << bytes_transferred 
+                    std::cerr << "\n\n[UDP] ERROR: Message too large! Received " << bytes_transferred
                               << " bytes, buffer is " << server_constants::DEFAULT_BUFFER_SIZE << " bytes" << std::endl;
                     do_receive();
                     return;
                 }
-                
+
                 m_data[bytes_transferred] = '\0';
-                
+
                 std::string message_copy(m_data.data(), bytes_transferred);
                 asio::ip::udp::endpoint sender_copy = m_sender_endpoint;
-                
+
                 std::cout << "\n\n[UDP] <- " << message_copy << std::endl;
 
                 do_receive();
-                
+
                 process_received_data(message_copy, sender_copy);
                 return;
             }
@@ -195,7 +195,7 @@ void udp_server::process_received_data(const std::string& json_input, const asio
     }
 
     std::string session_id = get_session_id_from_endpoint(sender_endpoint);
-    
+
     if (!m_session_manager.is_authenticated(session_id))
     {
         auto session_info = m_session_manager.get_session_info(session_id);
@@ -259,11 +259,11 @@ server::server(asio::io_context& io_context, const config::server_config& config
 {
     configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.ip_v4, m_config.network_port));
     configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.ip_v6, m_config.network_port));
-    
-    m_udp_server_ipv4 = std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.ip_v4, m_config.network_port),
-                                                     *m_message_handler, *m_session_manager);
-    m_udp_server_ipv6 = std::make_unique<udp_server>(io_context, make_udp_endpoint(m_config.ip_v6, m_config.network_port),
-                                                     *m_message_handler, *m_session_manager);
+
+    m_udp_server_ipv4 = std::make_unique<udp_server>(
+        io_context, make_udp_endpoint(m_config.ip_v4, m_config.network_port), *m_message_handler, *m_session_manager);
+    m_udp_server_ipv6 = std::make_unique<udp_server>(
+        io_context, make_udp_endpoint(m_config.ip_v6, m_config.network_port), *m_message_handler, *m_session_manager);
 }
 
 server::~server()
@@ -335,4 +335,3 @@ asio::ip::udp::endpoint server::make_udp_endpoint(const std::string& address, st
 {
     return asio::ip::udp::endpoint(parse_address(address), port);
 }
-

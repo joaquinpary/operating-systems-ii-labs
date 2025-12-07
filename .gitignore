@@ -34,3 +34,5 @@
 # Directories
 build/
 external/
+.github/prompts/
+.vscode/

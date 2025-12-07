@@ -6,6 +6,8 @@
 #include <iostream>
 #include <stdexcept>
 
+#define CREDENTIALS_PATH "config/credentials.json"
+#define CLIENT_CREDENTIALS_PATH "CLIENT_CREDENTIALS_PATH"
 namespace
 {
 constexpr const char* DEFAULT_DB_HOST = "localhost";
@@ -92,7 +94,7 @@ std::unique_ptr<pqxx::connection> initialize_database()
         }
 
         // Populate credentials table from JSON file if it exists
-        const std::string credentials_file = "config/credentials.json";
+        const std::string credentials_file = get_env_var(CLIENT_CREDENTIALS_PATH, CREDENTIALS_PATH);
         if (populate_credentials_table(*conn, credentials_file) != 0)
         {
             // Non-fatal: credentials file might not exist or might be empty
