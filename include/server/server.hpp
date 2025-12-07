@@ -5,8 +5,8 @@
 #include "config.hpp"
 #include "message_handler.hpp"
 #include "session_manager.hpp"
-#include <asio.hpp>
 #include <array>
+#include <asio.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -42,8 +42,8 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
 class udp_server
 {
   public:
-    udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
-               message_handler& msg_handler, session_manager& session_mgr);
+    udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, message_handler& msg_handler,
+               session_manager& session_mgr);
 
   private:
     void do_receive();

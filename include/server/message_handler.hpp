@@ -43,4 +43,3 @@ class message_handler
 };
 
 #endif // MESSAGE_HANDLER_HPP
-
