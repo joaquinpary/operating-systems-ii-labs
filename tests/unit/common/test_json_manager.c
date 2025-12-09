@@ -16,10 +16,10 @@ void tearDown(void)
 void fill_header(message_t* msg, const char* type)
 {
     strncpy(msg->msg_type, type, MESSAGE_TYPE_SIZE - 1);
-    strncpy(msg->source_role, "HUB", SOURCE_ROLE_SIZE - 1);
-    strncpy(msg->source_id, "HUB001", SOURCE_ID_SIZE - 1);
-    strncpy(msg->target_role, "SERVER", SOURCE_ROLE_SIZE - 1);
-    strncpy(msg->target_id, "SRV001", TARGET_ID_SIZE - 1);
+    strncpy(msg->source_role, "HUB", ROLE_SIZE - 1);
+    strncpy(msg->source_id, "HUB001", ID_SIZE - 1);
+    strncpy(msg->target_role, "SERVER", ROLE_SIZE - 1);
+    strncpy(msg->target_id, "SRV001", ID_SIZE - 1);
     strncpy(msg->timestamp, "2025-11-25T10:00:00Z", TIMESTAMP_SIZE - 1);
     strncpy(msg->checksum, "00000000", CHECKSUM_SIZE - 1);
 }
