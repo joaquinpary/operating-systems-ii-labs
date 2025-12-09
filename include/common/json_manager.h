@@ -50,9 +50,8 @@ extern "C"
 
 #define MIN_SIZE 8
 #define MESSAGE_TYPE_SIZE 64
-#define SOURCE_ROLE_SIZE 16
-#define SOURCE_ID_SIZE 16
-#define TARGET_ID_SIZE 16
+#define ROLE_SIZE 16
+#define ID_SIZE 16
 #define TIMESTAMP_SIZE 32
 #define CHECKSUM_SIZE 8
 #define CREDENTIALS_SIZE 64
@@ -130,10 +129,10 @@ extern "C"
     typedef struct message_t
     {
         char msg_type[MESSAGE_TYPE_SIZE];
-        char source_role[SOURCE_ROLE_SIZE];
-        char source_id[SOURCE_ID_SIZE];
-        char target_role[SOURCE_ROLE_SIZE];
-        char target_id[TARGET_ID_SIZE];
+        char source_role[ROLE_SIZE];
+        char source_id[ID_SIZE];
+        char target_role[ROLE_SIZE];
+        char target_id[ID_SIZE];
         char timestamp[TIMESTAMP_SIZE];
         payload_t payload;
         char checksum[CHECKSUM_SIZE];

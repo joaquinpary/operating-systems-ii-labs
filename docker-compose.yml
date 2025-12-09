@@ -58,7 +58,7 @@ services:
       - server
     environment:
       - NUM_CLIENTS=${NUM_CLIENTS:-10}
-      - CONFIG_BASE_PATH=/etc/clients/client_%s.conf
+      - CONFIG_BASE_PATH=/etc/client/client_%s.conf
     networks:
       - dhl_net
     volumes:

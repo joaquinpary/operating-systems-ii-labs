@@ -270,13 +270,13 @@ int deserialize_message_from_json(const char* json, message_t* out)
     if (cJSON_IsString(type))
         safe_strcpy(out->msg_type, MESSAGE_TYPE_SIZE, type->valuestring);
     if (cJSON_IsString(src_role))
-        safe_strcpy(out->source_role, SOURCE_ROLE_SIZE, src_role->valuestring);
+        safe_strcpy(out->source_role, ROLE_SIZE, src_role->valuestring);
     if (cJSON_IsString(src_id))
-        safe_strcpy(out->source_id, SOURCE_ID_SIZE, src_id->valuestring);
+        safe_strcpy(out->source_id, ID_SIZE, src_id->valuestring);
     if (cJSON_IsString(tgt_role))
-        safe_strcpy(out->target_role, SOURCE_ROLE_SIZE, tgt_role->valuestring);
+        safe_strcpy(out->target_role, ROLE_SIZE, tgt_role->valuestring);
     if (cJSON_IsString(tgt_id))
-        safe_strcpy(out->target_id, TARGET_ID_SIZE, tgt_id->valuestring);
+        safe_strcpy(out->target_id, ID_SIZE, tgt_id->valuestring);
     if (cJSON_IsString(ts))
         safe_strcpy(out->timestamp, TIMESTAMP_SIZE, ts->valuestring);
     if (cJSON_IsString(chk))
@@ -325,10 +325,10 @@ static int create_message(message_t* out, const char* msg_type, const char* sour
     memset(out, 0, sizeof(message_t));
 
     safe_strcpy(out->msg_type, MESSAGE_TYPE_SIZE, msg_type);
-    safe_strcpy(out->source_role, SOURCE_ROLE_SIZE, source_role);
-    safe_strcpy(out->source_id, SOURCE_ID_SIZE, source_id);
-    safe_strcpy(out->target_role, SOURCE_ROLE_SIZE, target_role);
-    safe_strcpy(out->target_id, TARGET_ID_SIZE, target_id);
+    safe_strcpy(out->source_role, ROLE_SIZE, source_role);
+    safe_strcpy(out->source_id, ID_SIZE, source_id);
+    safe_strcpy(out->target_role, ROLE_SIZE, target_role);
+    safe_strcpy(out->target_id, ID_SIZE, target_id);
 
     generate_timestamp(out->timestamp, TIMESTAMP_SIZE);
 
