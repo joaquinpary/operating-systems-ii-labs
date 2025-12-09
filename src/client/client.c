@@ -1,11 +1,13 @@
 #include "client.h"
 #include "connection.h"
+#include "logic.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #define MAX_ATTEMPTS 3
+#define LINE_SIZE 512
 
 static int parse_conf(const char* path, client_config* config, client_credentials* creds)
 {
@@ -15,7 +17,7 @@ static int parse_conf(const char* path, client_config* config, client_credential
         perror("fopen");
         return -1;
     }
-    char line[512];
+    char line[LINE_SIZE];
 
     memset(config, 0, sizeof(*config));
     memset(creds, 0, sizeof(*creds));
@@ -119,6 +121,26 @@ int authenticate(client_context* ctx, client_credentials* creds)
         {
             if (response_msg.payload.server_auth_response.status_code == 200)
             {
+                message_t ack_msg;
+                if (create_status_message(&ack_msg, creds->type, creds->username, SERVER, SERVER, ACK, 200) == 0)
+                {
+                    if (serialize_message_to_json(&ack_msg, json_buffer) == 0)
+                    {
+                        if (client_send(ctx, json_buffer) == 0)
+                        {
+                            printf("[AUTH] Sent ACK for successful authentication\n");
+                        }
+                        else
+                        {
+                            fprintf(stderr, "[AUTH] Failed to send ACK message\n");
+                        }
+                    }
+                }
+                else
+                {
+                    fprintf(stderr, "[AUTH] Failed to create ACK message\n");
+                    return -1;
+                }
                 printf("[AUTH] Authentication successful\n");
                 return 0;
             }
@@ -157,6 +179,12 @@ int run_client(const char* config_path)
             return -1;
         }
         printf("Connection successful.\n");
+        if (logic_init(&ctx, creds.type, creds.username) != 0)
+        {
+            printf("Client logic encountered an error.\n");
+            client_close(&ctx);
+            return -1;
+        }
         client_close(&ctx);
         return 0;
     }
