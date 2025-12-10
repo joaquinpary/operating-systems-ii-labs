@@ -41,7 +41,7 @@ def calculate_checksum(json_str):
 
 def create_message(msg_type, payload):
     """Create a message with proper structure"""
-    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'  # Milliseconds precision
     
     # Determine target role based on message type
     if 'HUB' in msg_type:

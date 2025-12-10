@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <zlib.h>
 
@@ -323,9 +324,17 @@ int deserialize_message_from_json(const char* json, message_t* out)
 
 static void generate_timestamp(char* buffer, size_t size)
 {
-    time_t now = time(NULL);
-    struct tm* tm_info = gmtime(&now);
-    strftime(buffer, size, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    
+    struct tm* tm_info = gmtime(&tv.tv_sec);
+    
+    // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
+    char base[32];
+    strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
+    
+    int milliseconds = tv.tv_usec / 1000;
+    snprintf(buffer, size, "%s.%03dZ", base, milliseconds);
 }
 
 static void generate_checksum(const message_t* msg, char* checksum_out)
