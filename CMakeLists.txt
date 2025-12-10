@@ -48,31 +48,33 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(cjson)
 
-# ASIO
-set(ASIO_GIT_URL "https://github.com/chriskohlhoff/asio.git")
-FetchContent_Declare(
-    asio
-    GIT_REPOSITORY ${ASIO_GIT_URL}
-    GIT_TAG        master
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(asio)
 
-set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
-FetchContent_Declare(
-    pqxx
-    GIT_REPOSITORY ${PQXX_GIT_URL}
-    GIT_TAG        master
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/pqxx
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(pqxx)
 
 include_directories(include)
 include_directories(include/common)
 
 if(BUILD_TARGET STREQUAL "server")
+
+    # ASIO
+    set(ASIO_GIT_URL "https://github.com/chriskohlhoff/asio.git")
+    FetchContent_Declare(
+        asio
+        GIT_REPOSITORY ${ASIO_GIT_URL}
+        GIT_TAG        master
+        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio
+        UPDATE_COMMAND ""
+    )
+    FetchContent_MakeAvailable(asio)
+
+    set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
+    FetchContent_Declare(
+        pqxx
+        GIT_REPOSITORY ${PQXX_GIT_URL}
+        GIT_TAG        master
+        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/pqxx
+        UPDATE_COMMAND ""
+    )
+    FetchContent_MakeAvailable(pqxx)
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
     include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include)

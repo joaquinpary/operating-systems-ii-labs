@@ -109,7 +109,10 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
             ssize_t n = recv(ctx->sockfd, buffer + total_received, BUFFER_SIZE - total_received, 0);
             if (n == -1)
             {
-                perror("recv");
+                if (errno != EAGAIN && errno != EWOULDBLOCK)
+                {
+                    perror("recv");
+                }
                 return -1;
             }
             if (n == 0)
@@ -128,7 +131,10 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
         if ((num_bytes = recvfrom(ctx->sockfd, buffer, BUFFER_SIZE - 1, 0, (struct sockaddr*)&from_addr, &from_len)) ==
             -1)
         {
-            perror("recvfrom");
+            if (errno != EAGAIN && errno != EWOULDBLOCK)
+            {
+                perror("recvfrom");
+            }
             return -1;
         }
         if (num_bytes >= 0 && num_bytes < BUFFER_SIZE)

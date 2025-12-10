@@ -49,5 +49,3 @@ COPY --from=builder /app/build/_deps/pqxx-build/src/libpqxx*.so* /usr/local/lib/
 COPY --from=builder /app/build/_deps/cjson-build/libcjson*.so* /usr/local/lib/
 
 RUN ldconfig
-
-COPY config/ ./config/
