@@ -4,6 +4,7 @@
 #include "message_handler.hpp"
 #include "server.hpp"
 #include "session_manager.hpp"
+#include "timer_manager.hpp"
 
 #include <csignal>
 #include <iostream>
@@ -27,12 +28,13 @@ int main()
         }
 
         // Create core modules
+        asio::io_context io_context;
         auto session_mgr = std::make_unique<session_manager>();
         auto auth_mod = std::make_unique<auth_module>(*db_connection);
-        auto msg_handler = std::make_unique<message_handler>(*auth_mod, *session_mgr);
-
-        asio::io_context io_context;
-        server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(msg_handler));
+        auto timer_mgr = std::make_unique<timer_manager>(io_context);
+        // Note: message_handler is created by server with send callback configured
+        
+        server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(timer_mgr));
 
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](const asio::error_code&, int) {

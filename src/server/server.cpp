@@ -38,7 +38,16 @@ tcp_session::tcp_session(asio::ip::tcp::socket socket, message_handler& msg_hand
 
 void tcp_session::start()
 {
+    // Register this session in session_manager for retry mechanism
+    auto self = shared_from_this();
+    m_session_manager.set_tcp_session(m_session_id, self);
+    
     do_read();
+}
+
+void tcp_session::send(const std::string& data)
+{
+    do_write(data);
 }
 
 void tcp_session::do_read()
@@ -75,6 +84,29 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
 {
     std::string json_input(m_data.data());
 
+    // First, deserialize to check if we need to send ACK
+    message_t incoming_msg;
+    if (deserialize_message_from_json(json_input.c_str(), &incoming_msg) == 0)
+    {
+        // Generate and send ACK immediately (if needed)
+        message_t ack_msg;
+        if (m_message_handler.generate_ack_if_needed(incoming_msg, m_session_id, &ack_msg))
+        {
+            char ack_json[BUFFER_SIZE];
+            if (serialize_message_to_json(&ack_msg, ack_json) == 0)
+            {
+                std::string ack_str(ack_json);
+                do_write(ack_str);
+                std::cout << "[TCP] ACK sent immediately" << std::endl;
+            }
+            else
+            {
+                std::cerr << "\n\n[TCP] ERROR: Failed to serialize ACK message" << std::endl;
+            }
+        }
+    }
+
+    // Now process the message (can take time)
     message_processing_result result = m_message_handler.process_message(json_input, m_session_id);
 
     if (!result.success)
@@ -84,6 +116,7 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
         return;
     }
 
+    // Send additional response if needed
     if (result.should_send_response)
     {
         char response_json[BUFFER_SIZE];
@@ -194,7 +227,8 @@ void udp_server::process_received_data(const std::string& json_input, const asio
         return;
     }
 
-    std::string session_id = get_session_id_from_endpoint(sender_endpoint);
+    // Get or create UDP session (deterministic session_id from endpoint)
+    std::string session_id = m_session_manager.get_or_create_udp_session(sender_endpoint);
 
     if (!m_session_manager.is_authenticated(session_id))
     {
@@ -205,6 +239,29 @@ void udp_server::process_received_data(const std::string& json_input, const asio
         }
     }
 
+    // First, deserialize to check if we need to send ACK
+    message_t incoming_msg;
+    if (deserialize_message_from_json(json_input.c_str(), &incoming_msg) == 0)
+    {
+        // Generate and send ACK immediately (if needed)
+        message_t ack_msg;
+        if (m_message_handler.generate_ack_if_needed(incoming_msg, session_id, &ack_msg))
+        {
+            char ack_json[BUFFER_SIZE];
+            if (serialize_message_to_json(&ack_msg, ack_json) == 0)
+            {
+                std::string ack_str(ack_json);
+                do_send(ack_str, sender_endpoint);
+                std::cout << "[UDP] ACK sent immediately" << std::endl;
+            }
+            else
+            {
+                std::cerr << "\n\n[UDP] ERROR: Failed to serialize ACK message" << std::endl;
+            }
+        }
+    }
+
+    // Now process the message (can take time)
     message_processing_result result = m_message_handler.process_message(json_input, session_id);
 
     if (!result.success)
@@ -213,6 +270,7 @@ void udp_server::process_received_data(const std::string& json_input, const asio
         return;
     }
 
+    // Send additional response if needed
     if (result.should_send_response)
     {
         char response_json[BUFFER_SIZE];
@@ -231,32 +289,83 @@ void udp_server::process_received_data(const std::string& json_input, const asio
 void udp_server::do_send(const std::string& data, const asio::ip::udp::endpoint& target_endpoint)
 {
     m_socket.async_send_to(asio::buffer(data.data(), data.length()), target_endpoint,
-                           [this, data](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
-                               if (ec && ec != asio::error::operation_aborted)
+                           [this, data, target_endpoint](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
+                            auto addr = target_endpoint.address().to_string();
+                            auto port = target_endpoint.port();   
+                            if (ec && ec != asio::error::operation_aborted)
                                {
-                                   std::cerr << "\n\n[UDP] ERROR: " << ec.message() << std::endl;
-                               }
+                                std::cerr << "\n\n[UDP] ERROR: " << ec.message()
+                                << " -> " << addr << ":" << port << std::endl;                               }
                                else
                                {
-                                   std::cout << "\n\n[UDP] -> " << data << std::endl;
-                               }
+                                std::cout << "\n\n[UDP] -> " << addr << ":" << port
+                                << " | data=" << data << std::endl;                               }
                            });
 }
 
-std::string udp_server::get_session_id_from_endpoint(const asio::ip::udp::endpoint& endpoint) const
+void udp_server::send_to_session(const std::string& session_id, const std::string& data)
 {
-    std::ostringstream oss;
-    oss << "udp_" << endpoint.address().to_string() << "_" << endpoint.port();
-    return oss.str();
+    // Look up endpoint from session_manager
+    auto endpoint = m_session_manager.get_udp_endpoint(session_id);
+    if (endpoint)
+    {
+        do_send(data, *endpoint);
+    }
+    else
+    {
+        std::cerr << "[UDP] ERROR: No endpoint found for session: " << session_id << std::endl;
+    }
 }
 
 server::server(asio::io_context& io_context, const config::server_config& config,
                std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-               std::unique_ptr<message_handler> msg_handler)
+               std::unique_ptr<timer_manager> timer_mgr)
     : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
       m_session_manager(std::move(session_mgr)), m_auth_module(std::move(auth_mod)),
-      m_message_handler(std::move(msg_handler))
+      m_timer_manager(std::move(timer_mgr))
 {
+    // Create message_handler with generic send callback
+    // The callback resolves whether to send via TCP or UDP
+    m_message_handler = std::make_unique<message_handler>(
+        *m_auth_module,
+        *m_session_manager,
+        *m_timer_manager,
+        [this](const std::string& session_id, const std::string& data) {
+            // Generic send callback - determines TCP vs UDP and sends appropriately
+            auto session_info = m_session_manager->get_session_info(session_id);
+            if (!session_info)
+            {
+                std::cerr << "[SERVER] Cannot send to session " << session_id << ": session not found" << std::endl;
+                return;
+            }
+            
+            if (session_info->type == session_info::connection_type::UDP)
+            {
+                if (session_info->udp_endpoint->address().is_v6())
+                {
+                    m_udp_server_ipv6->send_to_session(session_id, data);
+                }
+                else
+                {
+                    m_udp_server_ipv4->send_to_session(session_id, data);
+                }
+            }
+            else
+            {
+                // For TCP, use weak_ptr from session_info
+                if (auto session = session_info->tcp_session_ref.lock())
+                {
+                    session->send(data);
+                }
+                else
+                {
+                    std::cerr << "[SERVER] WARNING: TCP session " << session_id 
+                              << " expired, cannot resend" << std::endl;
+                }
+            }
+        }
+    );
+    
     configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.ip_v4, m_config.network_port));
     configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.ip_v6, m_config.network_port));
 
@@ -299,7 +408,14 @@ void server::start_accept(asio::ip::tcp::acceptor& acceptor)
     acceptor.async_accept([this, &acceptor](const asio::error_code& ec, asio::ip::tcp::socket socket) {
         if (!ec)
         {
-            std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
+            try
+            {
+                std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
+            }
+            catch (const std::exception&)
+            {
+                std::cout << "Accepted TCP connection\n";
+            }
             std::make_shared<tcp_session>(std::move(socket), *m_message_handler, *m_session_manager)->start();
         }
         else if (ec != asio::error::operation_aborted)
