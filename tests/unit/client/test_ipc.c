@@ -24,7 +24,7 @@ void test_enqueue_and_pop_message(void)
     message_t msg_in, msg_out;
 
     // Create a test message
-    strncpy(msg_in.msg_type, "WAREHOUSE_TO_SERVER__STATUS", sizeof(msg_in.msg_type) - 1);
+    strncpy(msg_in.msg_type, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, sizeof(msg_in.msg_type) - 1);
     strncpy(msg_in.timestamp, "2025-12-09T20:00:00Z", sizeof(msg_in.timestamp) - 1);
     strncpy(msg_in.source_role, "WAREHOUSE", sizeof(msg_in.source_role) - 1);
     strncpy(msg_in.source_id, "client_0001", sizeof(msg_in.source_id) - 1);
@@ -129,8 +129,8 @@ void test_add_and_remove_pending_ack(void)
 void test_add_duplicate_ack_updates_timestamp(void)
 {
     const char* msg_id = "2025-12-09T20:00:00Z";
-    const char* msg_type = "WAREHOUSE_TO_SERVER__STATUS";
-    const char* json_msg = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__STATUS\"}";
+    const char* msg_type = WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
+    const char* json_msg = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__INVENTORY_UPDATE\"}";
 
     // Add ACK first time
     TEST_ASSERT_EQUAL(0, add_pending_ack(msg_id, msg_type, json_msg));
@@ -159,10 +159,10 @@ void test_add_duplicate_ack_updates_timestamp(void)
 void test_add_different_msg_type_same_timestamp(void)
 {
     const char* msg_id = "2025-12-09T20:00:00Z";
-    const char* msg_type_1 = "WAREHOUSE_TO_SERVER__STATUS";
-    const char* msg_type_2 = "WAREHOUSE_TO_SERVER__INVENTORY_UPDATE";
-    const char* json_msg_1 = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__STATUS\"}";
-    const char* json_msg_2 = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__INVENTORY_UPDATE\"}";
+    const char* msg_type_1 = WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
+    const char* msg_type_2 = WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE;
+    const char* json_msg_1 = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__INVENTORY_UPDATE\"}";
+    const char* json_msg_2 = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE\"}";
 
     // Add two different messages with same timestamp but different types
     TEST_ASSERT_EQUAL(0, add_pending_ack(msg_id, msg_type_1, json_msg_1));

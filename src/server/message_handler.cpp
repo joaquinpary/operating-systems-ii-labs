@@ -66,8 +66,8 @@ message_processing_result message_handler::handle_auth_request(const message_t& 
     }
 
     // Create AUTH_RESPONSE message
-    int create_result = create_status_message(&response_msg, SERVER, "server", msg.source_role, msg.source_id,
-                                              AUTH_RESPONSE, static_cast<int>(auth_res.status_code));
+    int create_result = create_auth_response_message(&response_msg, msg.source_role, msg.source_id,
+                                                      static_cast<int>(auth_res.status_code));
 
     if (create_result != 0)
     {

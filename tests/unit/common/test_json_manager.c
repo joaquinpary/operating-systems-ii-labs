@@ -236,25 +236,30 @@ void test_create_items_message_inventory_update(void)
     TEST_ASSERT_EQUAL_STRING("Blankets", msg.payload.inventory_update.items[0].item_name);
 }
 
-void test_create_status_message_auth_response(void)
+void test_create_auth_response_message(void)
 {
     message_t msg;
-    int ret = create_status_message(&msg, SERVER, "SERVER", HUB, "client_hub_001", AUTH_RESPONSE, 200);
+    int ret = create_auth_response_message(&msg, HUB, "client_hub_001", 200);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_EQUAL_STRING(SERVER_TO_HUB__AUTH_RESPONSE, msg.msg_type);
     TEST_ASSERT_EQUAL_STRING(SERVER, msg.source_role);
-    TEST_ASSERT_EQUAL_STRING("SERVER", msg.source_id);
+    TEST_ASSERT_EQUAL_STRING(SERVER, msg.source_id);
     TEST_ASSERT_EQUAL_STRING(HUB, msg.target_role);
+    TEST_ASSERT_EQUAL_STRING("client_hub_001", msg.target_id);
     TEST_ASSERT_EQUAL_INT(200, msg.payload.server_auth_response.status_code);
 }
 
-void test_create_status_message_ack(void)
+void test_create_acknowledgment_message(void)
 {
     message_t msg;
-    int ret = create_status_message(&msg, HUB, "client_0001", SERVER, SERVER, ACK, 200);
+    const char* test_timestamp = "2025-12-10T10:30:45Z";
+    int ret = create_acknowledgment_message(&msg, HUB, "client_0001", SERVER, SERVER, test_timestamp, 200);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__ACK, msg.msg_type);
+    TEST_ASSERT_EQUAL_STRING(HUB, msg.source_role);
+    TEST_ASSERT_EQUAL_STRING("client_0001", msg.source_id);
     TEST_ASSERT_EQUAL_INT(200, msg.payload.acknowledgment.status_code);
+    TEST_ASSERT_EQUAL_STRING(test_timestamp, msg.payload.acknowledgment.ack_for_timestamp);
 }
 
 void test_create_client_emergency_message(void)
@@ -313,8 +318,8 @@ int main(void)
     RUN_TEST(test_create_keepalive_message);
     RUN_TEST(test_create_items_message_stock_request);
     RUN_TEST(test_create_items_message_inventory_update);
-    RUN_TEST(test_create_status_message_auth_response);
-    RUN_TEST(test_create_status_message_ack);
+    RUN_TEST(test_create_auth_response_message);
+    RUN_TEST(test_create_acknowledgment_message);
     RUN_TEST(test_create_client_emergency_message);
     RUN_TEST(test_create_server_emergency_message);
     RUN_TEST(test_checksum_at_end_of_json);

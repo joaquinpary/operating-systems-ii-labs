@@ -171,7 +171,7 @@ TEST_F(MessageHandlerTest, ProcessMessageWithoutAuthentication)
     std::string session_id = session_mgr->create_session();
 
     message_t status_msg;
-    create_status_message(&status_msg, "HUB", "hub_001", "SERVER", "server", "STATUS", 1);
+    create_keepalive_message(&status_msg, "HUB", "hub_001", 'K');
 
     char json_input[1024];
     serialize_message_to_json(&status_msg, json_input);
@@ -202,7 +202,7 @@ TEST_F(MessageHandlerTest, ProcessMessageAfterAuthentication)
     EXPECT_TRUE(session_mgr->is_authenticated(session_id));
 
     message_t status_msg;
-    create_status_message(&status_msg, "HUB", "hub_user", "SERVER", "server", "STATUS", 1);
+    create_keepalive_message(&status_msg, "HUB", "hub_user", 'K');
 
     char status_json[1024];
     serialize_message_to_json(&status_msg, status_json);
