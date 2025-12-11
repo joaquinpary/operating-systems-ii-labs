@@ -4,6 +4,7 @@
 #include "session_manager.hpp"
 #include "auth_module.hpp"
 #include "message_handler.hpp"
+#include "timer_manager.hpp"
 #include "database.hpp"
 #include <common/json_manager.h>
 #include <thread>
@@ -35,7 +36,10 @@ class ServerTest : public ::testing::Test
         {
             m_session_mgr = std::make_unique<session_manager>();
             m_auth_mod = std::make_unique<auth_module>(*db_connection);
-            m_msg_handler = std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr);
+            m_timer_mgr = std::make_unique<timer_manager>(*m_io_context);
+            // Dummy send callback for tests
+            auto send_callback = [](const std::string&, const std::string&) {};
+            m_msg_handler = std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr, *m_timer_mgr, send_callback);
             m_db_connection = std::move(db_connection);
         }
     }
@@ -70,6 +74,7 @@ class ServerTest : public ::testing::Test
     std::unique_ptr<pqxx::connection> m_db_connection;
     std::unique_ptr<session_manager> m_session_mgr;
     std::unique_ptr<auth_module> m_auth_mod;
+    std::unique_ptr<timer_manager> m_timer_mgr;
     std::unique_ptr<message_handler> m_msg_handler;
 };
 
@@ -99,7 +104,7 @@ TEST_F(ServerTest, ServerInitialization)
         m_server = std::make_unique<server>(*m_io_context, config, 
                                             std::make_unique<session_manager>(),
                                             std::make_unique<auth_module>(*m_db_connection),
-                                            std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                            std::make_unique<timer_manager>(*m_io_context));
     });
     ASSERT_NE(m_server, nullptr);
 }
@@ -117,7 +122,7 @@ TEST_F(ServerTest, ServerStart)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     ASSERT_NO_THROW(m_server->start());
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -136,7 +141,7 @@ TEST_F(ServerTest, ServerStop)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     m_server->start();
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -157,7 +162,7 @@ TEST_F(ServerTest, TCPIPv4Connection)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     m_server->start();
     start_io_context();
 
@@ -188,7 +193,7 @@ TEST_F(ServerTest, TCPIPv6Connection)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     m_server->start();
     start_io_context();
 
@@ -219,7 +224,7 @@ TEST_F(ServerTest, TCPMessageProcessing)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     m_server->start();
     start_io_context();
 
@@ -257,7 +262,7 @@ TEST_F(ServerTest, UDPEchoResponse)
     m_server = std::make_unique<server>(*m_io_context, config,
                                         std::make_unique<session_manager>(),
                                         std::make_unique<auth_module>(*m_db_connection),
-                                        std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr));
+                                        std::make_unique<timer_manager>(*m_io_context));
     m_server->start();
     start_io_context();
 

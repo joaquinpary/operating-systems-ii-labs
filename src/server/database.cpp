@@ -233,6 +233,14 @@ int populate_credentials_table(pqxx::connection& conn, const std::string& json_f
         }
 
         cJSON_Delete(json);
+        
+        // If array has items but none were valid, return error
+        if (array_size > 0 && count == 0)
+        {
+            std::cerr << "Error: No valid credentials found in file" << std::endl;
+            return 1;
+        }
+        
         txn.commit();
         std::cout << "Populated " << count << " credentials into database." << std::endl;
         return 0;

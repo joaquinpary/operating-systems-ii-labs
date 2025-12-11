@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <zlib.h>
 
@@ -37,11 +38,20 @@ static cJSON* serialize_items_list(const void* ptr)
     return root;
 }
 
-static cJSON* serialize_status(const void* ptr)
+static cJSON* serialize_auth_response(const void* ptr)
 {
-    const payload_status* payload = (const payload_status*)ptr;
+    const payload_auth_response* payload = (const payload_auth_response*)ptr;
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "status_code", payload->status_code);
+    return root;
+}
+
+static cJSON* serialize_acknowledgment(const void* ptr)
+{
+    const payload_acknowledgment* payload = (const payload_acknowledgment*)ptr;
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "status_code", payload->status_code);
+    cJSON_AddStringToObject(root, "ack_for_timestamp", payload->ack_for_timestamp);
     return root;
 }
 
@@ -110,13 +120,29 @@ static void deserialize_items_list(const cJSON* root, void* ptr)
     }
 }
 
-static void deserialize_status(const cJSON* root, void* ptr)
+static void deserialize_auth_response(const cJSON* root, void* ptr)
 {
-    payload_status* payload = (payload_status*)ptr;
+    payload_auth_response* payload = (payload_auth_response*)ptr;
     cJSON* code = cJSON_GetObjectItemCaseSensitive(root, "status_code");
     if (cJSON_IsNumber(code))
     {
         payload->status_code = code->valueint;
+    }
+}
+
+static void deserialize_acknowledgment(const cJSON* root, void* ptr)
+{
+    payload_acknowledgment* payload = (payload_acknowledgment*)ptr;
+    cJSON* code = cJSON_GetObjectItemCaseSensitive(root, "status_code");
+    cJSON* ack_ts = cJSON_GetObjectItemCaseSensitive(root, "ack_for_timestamp");
+    
+    if (cJSON_IsNumber(code))
+    {
+        payload->status_code = code->valueint;
+    }
+    if (cJSON_IsString(ack_ts))
+    {
+        safe_strcpy(payload->ack_for_timestamp, TIMESTAMP_SIZE, ack_ts->valuestring);
     }
 }
 
@@ -176,8 +202,8 @@ typedef struct
 static const payload_handler_t handlers[] = {
     {HUB_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
     {WAREHOUSE_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
-    {SERVER_TO_HUB__AUTH_RESPONSE, serialize_status, deserialize_status},
-    {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_status, deserialize_status},
+    {SERVER_TO_HUB__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
+    {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {HUB_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {WAREHOUSE_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {HUB_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
@@ -192,10 +218,10 @@ static const payload_handler_t handlers[] = {
     {SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_HUB__INCOMING_STOCK_NOTICE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, serialize_server_emergency, deserialize_server_emergency},
-    {HUB_TO_SERVER__ACK, serialize_status, deserialize_status},
-    {WAREHOUSE_TO_SERVER__ACK, serialize_status, deserialize_status},
-    {SERVER_TO_HUB__ACK, serialize_status, deserialize_status},
-    {SERVER_TO_WAREHOUSE__ACK, serialize_status, deserialize_status},
+    {HUB_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {WAREHOUSE_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {SERVER_TO_HUB__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {SERVER_TO_WAREHOUSE__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {NULL, NULL, NULL}};
 
 static const payload_handler_t* find_handler(const char* msg_type)
@@ -298,9 +324,17 @@ int deserialize_message_from_json(const char* json, message_t* out)
 
 static void generate_timestamp(char* buffer, size_t size)
 {
-    time_t now = time(NULL);
-    struct tm* tm_info = gmtime(&now);
-    strftime(buffer, size, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    
+    struct tm* tm_info = gmtime(&tv.tv_sec);
+    
+    // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
+    char base[32];
+    strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
+    
+    int milliseconds = tv.tv_usec / 1000;
+    snprintf(buffer, size, "%s.%03dZ", base, milliseconds);
 }
 
 static void generate_checksum(const message_t* msg, char* checksum_out)
@@ -431,42 +465,47 @@ int create_items_message(message_t* out, const char* source_role, const char* so
     return create_message(out, msg_type, source_role, source_id, target_role, target_id, &payload, sizeof(payload));
 }
 
-int create_status_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
-                          const char* target_id, const char* message_category, int status_code)
+int create_auth_response_message(message_t* out, const char* target_role, const char* target_id, int status_code)
 {
-    if (!out || !source_role || !source_id || !target_role || !target_id || !message_category)
+    if (!out || !target_role || !target_id)
         return -1;
 
-    payload_status payload = {0};
+    payload_auth_response payload = {0};
     payload.status_code = status_code;
 
     const char* msg_type = NULL;
+    if (strcmp(target_role, HUB) == 0)
+        msg_type = SERVER_TO_HUB__AUTH_RESPONSE;
+    else if (strcmp(target_role, WAREHOUSE) == 0)
+        msg_type = SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
 
-    if (strcmp(message_category, AUTH_RESPONSE) == 0)
-    {
-        if (strcmp(target_role, HUB) == 0)
-            msg_type = SERVER_TO_HUB__AUTH_RESPONSE;
-        else if (strcmp(target_role, WAREHOUSE) == 0)
-            msg_type = SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
-    }
-    else if (strcmp(message_category, ACK) == 0)
-    {
-        if (strcmp(source_role, HUB) == 0)
-            msg_type = HUB_TO_SERVER__ACK;
-        else if (strcmp(source_role, WAREHOUSE) == 0)
-            msg_type = WAREHOUSE_TO_SERVER__ACK;
-        else if (strcmp(source_role, SERVER) == 0)
-        {
-            if (strcmp(target_role, HUB) == 0)
-                msg_type = SERVER_TO_HUB__ACK;
-            else if (strcmp(target_role, WAREHOUSE) == 0)
-                msg_type = SERVER_TO_WAREHOUSE__ACK;
-        }
-    }
-    else
-    {
-        return -1; // Unknown category
-    }
+    if (!msg_type)
+        return -1;
+
+    return create_message(out, msg_type, SERVER, SERVER, target_role, target_id, &payload, sizeof(payload));
+}
+
+int create_acknowledgment_message(message_t* out, const char* source_role, const char* source_id,
+                                 const char* target_role, const char* target_id,
+                                 const char* ack_for_timestamp, int status_code)
+{
+    if (!out || !source_role || !source_id || !target_role || !target_id || !ack_for_timestamp)
+        return -1;
+
+    payload_acknowledgment payload = {0};
+    payload.status_code = status_code;
+    safe_strcpy(payload.ack_for_timestamp, TIMESTAMP_SIZE, ack_for_timestamp);
+
+    const char* msg_type = NULL;
+
+    if (strcmp(source_role, HUB) == 0 && strcmp(target_role, SERVER) == 0)
+        msg_type = HUB_TO_SERVER__ACK;
+    else if (strcmp(source_role, WAREHOUSE) == 0 && strcmp(target_role, SERVER) == 0)
+        msg_type = WAREHOUSE_TO_SERVER__ACK;
+    else if (strcmp(source_role, SERVER) == 0 && strcmp(target_role, HUB) == 0)
+        msg_type = SERVER_TO_HUB__ACK;
+    else if (strcmp(source_role, SERVER) == 0 && strcmp(target_role, WAREHOUSE) == 0)
+        msg_type = SERVER_TO_WAREHOUSE__ACK;
 
     if (!msg_type)
         return -1;

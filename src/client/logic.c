@@ -87,8 +87,8 @@ static int handle_server_message(const message_t* msg)
     {
         message_t ack_msg;
 
-        if (create_status_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER, ACK,
-                                  200) == 0)
+        if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
+                                         msg->timestamp, 200) == 0)
         {
             if (enqueue_pending_message(&ack_msg) == 0)
             {

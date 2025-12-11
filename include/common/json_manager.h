@@ -73,11 +73,6 @@ extern "C"
         inventory_item_t items[QUANTITY_ITEMS];
     } payload_items_list;
 
-    typedef struct payload_status
-    {
-        int status_code;
-    } payload_status;
-
     typedef payload_items_list payload_inventory_update;
     typedef payload_items_list payload_stock_request;
     typedef payload_items_list payload_receipt_confirmation;
@@ -85,8 +80,16 @@ extern "C"
     typedef payload_items_list payload_order_stock;
     typedef payload_items_list payload_restock_notice;
 
-    typedef payload_status payload_auth_response;
-    typedef payload_status payload_acknowledgment;
+    typedef struct payload_auth_response
+    {
+        int status_code;
+    } payload_auth_response;
+
+    typedef struct payload_acknowledgment
+    {
+        int status_code;
+        char ack_for_timestamp[TIMESTAMP_SIZE];
+    } payload_acknowledgment;
 
     typedef struct payload_auth_request
     {
@@ -197,19 +200,29 @@ extern "C"
                              int item_count);
 
     /*@brief
-     * Generic function to create any message with status payload.
-     * Automatically selects msg_type based on source_role and target_role.
+     * Creates an authentication response message (SERVER to client).
+     * @param out Pointer to the message_t structure to populate.
+     * @param target_role Target role (HUB or WAREHOUSE).
+     * @param target_id Target identifier (client ID).
+     * @param status_code Status code (e.g., 200 for success, 401 for unauthorized).
+     * @return 0 on success, negative value on error.
+     */
+    int create_auth_response_message(message_t* out, const char* target_role, const char* target_id, int status_code);
+
+    /*@brief
+     * Creates an acknowledgement (ACK) message.
      * @param out Pointer to the message_t structure to populate.
      * @param source_role Source role (HUB, WAREHOUSE, or SERVER).
      * @param source_id Source identifier.
      * @param target_role Target role (HUB, WAREHOUSE, or SERVER).
      * @param target_id Target identifier.
-     * @param message_category Category: "auth_response" or "ack"
-     * @param status_code Status code (e.g., 200 for success).
+     * @param ack_for_timestamp The timestamp of the message being acknowledged.
+     * @param status_code Status code (typically 200 for success).
      * @return 0 on success, negative value on error.
      */
-    int create_status_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
-                              const char* target_id, const char* message_category, int status_code);
+    int create_acknowledgment_message(message_t* out, const char* source_role, const char* source_id,
+                                     const char* target_role, const char* target_id,
+                                     const char* ack_for_timestamp, int status_code);
 
     /*@brief
      * Creates an emergency alert message from client (HUB or WAREHOUSE).

@@ -15,6 +15,9 @@ struct server_config
     std::uint32_t max_auth_attempts;
 };
 
+// Get environment variable or return default value
+std::string get_env_var(const char* env_var, const char* default_value);
+
 void load_config_from_file(const std::string& config_path, server_config& config);
 } // namespace config
 

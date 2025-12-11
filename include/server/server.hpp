@@ -5,6 +5,7 @@
 #include "config.hpp"
 #include "message_handler.hpp"
 #include "session_manager.hpp"
+#include "timer_manager.hpp"
 #include <array>
 #include <asio.hpp>
 #include <cstdint>
@@ -26,6 +27,9 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
   public:
     tcp_session(asio::ip::tcp::socket socket, message_handler& msg_handler, session_manager& session_mgr);
     void start();
+    
+    // Public method for sending data (used for retries)
+    void send(const std::string& data);
 
   private:
     void do_read();
@@ -44,12 +48,14 @@ class udp_server
   public:
     udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, message_handler& msg_handler,
                session_manager& session_mgr);
+    
+    // Send message to a session (looks up endpoint from session_manager)
+    void send_to_session(const std::string& session_id, const std::string& data);
 
   private:
     void do_receive();
     void do_send(const std::string& data, const asio::ip::udp::endpoint& target_endpoint);
     void process_received_data(const std::string& json_input, const asio::ip::udp::endpoint& sender_endpoint);
-    std::string get_session_id_from_endpoint(const asio::ip::udp::endpoint& endpoint) const;
 
     asio::ip::udp::socket m_socket;
     asio::ip::udp::endpoint m_sender_endpoint;
@@ -63,7 +69,7 @@ class server
   public:
     server(asio::io_context& io_context, const config::server_config& config,
            std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-           std::unique_ptr<message_handler> msg_handler);
+           std::unique_ptr<timer_manager> timer_mgr);
     ~server();
     void start();
     void stop();
@@ -83,6 +89,7 @@ class server
     std::unique_ptr<udp_server> m_udp_server_ipv6;
     std::unique_ptr<session_manager> m_session_manager;
     std::unique_ptr<auth_module> m_auth_module;
+    std::unique_ptr<timer_manager> m_timer_manager;
     std::unique_ptr<message_handler> m_message_handler;
 };
 
