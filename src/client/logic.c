@@ -3,6 +3,7 @@
 #include "connection.h"
 #include "ipc.h"
 #include "json_manager.h"
+#include "logger.h"
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -22,7 +23,7 @@ static void* ack_timeout_checker_thread(void* arg)
     shared_data_t* shared_data = get_shared_data();
     sem_t* message_available_sem = get_message_sem();
 
-    printf("[ACK_CHECKER] Thread started\n");
+    LOG_INFO_MSG("ACK checker thread started");
 
     while (!shared_data->should_exit)
     {
@@ -30,7 +31,7 @@ static void* ack_timeout_checker_thread(void* arg)
 
         if (result < 0)
         {
-            fprintf(stderr, "[ACK_CHECKER] Max retries exceeded, triggering shutdown...\n");
+            LOG_ERROR_MSG("Max retries exceeded, triggering shutdown");
             shared_data->should_exit = 1;
             sem_post(message_available_sem);
             break;
@@ -46,8 +47,8 @@ static void* ack_timeout_checker_thread(void* arg)
             {
                 if (shared_data->pending_acks[i].active && shared_data->pending_acks[i].retry_count > 0)
                 {
-                    printf("[ACK_CHECKER] Preparing to re-enqueue msg_id: %s (attempt %d)\n",
-                           shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count);
+                    LOG_DEBUG_MSG("Re-enqueueing msg_id: %s (attempt %d)", 
+                                  shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count);
 
                     strncpy(messages_to_retry[retry_count], shared_data->pending_acks[i].message_json, BUFFER_SIZE - 1);
                     retry_count++;
@@ -59,7 +60,7 @@ static void* ack_timeout_checker_thread(void* arg)
             {
                 if (enqueue_pending_message_json(messages_to_retry[i]) != 0)
                 {
-                    fprintf(stderr, "[ACK_CHECKER] Failed to re-enqueue message\n");
+                    LOG_ERROR_MSG("Failed to re-enqueue message");
                 }
             }
         }
@@ -67,7 +68,7 @@ static void* ack_timeout_checker_thread(void* arg)
         sleep(1);
     }
 
-    printf("[ACK_CHECKER] Thread exiting\n");
+    LOG_INFO_MSG("ACK checker thread exiting");
     return NULL;
 }
 
@@ -121,7 +122,7 @@ static void* receiver_thread(void* arg)
     tv.tv_usec = 0;
     if (setsockopt(ctx->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
     {
-        perror("[RECEIVER] setsockopt SO_RCVTIMEO");
+        LOG_ERROR_MSG("Failed to set socket receive timeout: %s", strerror(errno));
     }
 
     while (!shared_data->should_exit)
@@ -136,7 +137,7 @@ static void* receiver_thread(void* arg)
             }
             else
             {
-                fprintf(stderr, "[RECEIVER] Failed to deserialize message\n");
+                LOG_ERROR_MSG("Failed to deserialize received message");
             }
         }
         else if (bytes == -1)
@@ -148,18 +149,18 @@ static void* receiver_thread(void* arg)
                 continue;
             }
             // Real error
-            fprintf(stderr, "[RECEIVER] Receive error: %s\n", strerror(errno));
+            LOG_ERROR_MSG("Receive error: %s", strerror(errno));
             break;
         }
         else if (bytes == -2)
         {
-            fprintf(stderr, "[RECEIVER] Connection closed by server\n");
+            LOG_WARNING_MSG("Connection closed by server");
             shared_data->should_exit = 1;
             break;
         }
     }
 
-    printf("[RECEIVER] Thread exiting\n");
+    LOG_INFO_MSG("Receiver thread exiting");
     return NULL;
 }
 
@@ -171,7 +172,7 @@ static void* sender_thread(void* arg)
     shared_data_t* shared_data = get_shared_data();
     sem_t* message_available_sem = get_message_sem();
 
-    printf("[SENDER] Thread started\n");
+    LOG_INFO_MSG("Sender thread started");
 
     while (!shared_data->should_exit)
     {
@@ -179,7 +180,6 @@ static void* sender_thread(void* arg)
         clock_gettime(CLOCK_REALTIME, &ts);
         ts.tv_sec += 1;
 
-        // De momento queda asi, cuando implemente el resto de mensaje capaz que lo cambio
         int sem_result = sem_timedwait(message_available_sem, &ts);
 
         if (sem_result == 0)
@@ -191,8 +191,7 @@ static void* sender_thread(void* arg)
                 {
                     if (client_send(ctx, json_buffer) == 0)
                     {
-                        printf("[SENDER] Message sent successfully (type: %s, timestamp: %s)\n", msg.msg_type,
-                               msg.timestamp);
+                        LOG_DEBUG_MSG("Message sent: type=%s, timestamp=%s", msg.msg_type, msg.timestamp);
 
                         if (strstr(msg.msg_type, "ACK") == NULL && strstr(msg.msg_type, "AUTH_REQUEST") == NULL &&
                             strstr(msg.msg_type, "KEEPALIVE") == NULL)
@@ -202,19 +201,18 @@ static void* sender_thread(void* arg)
                     }
                     else
                     {
-                        fprintf(stderr, "[SENDER] Failed to send message\n");
+                        LOG_ERROR_MSG("Failed to send message");
                     }
                 }
             }
         }
         else if (errno == ETIMEDOUT)
         {
-
             test_counter++;
             if (test_counter >= 30)
             {
                 test_counter = 0;
-                printf("[SENDER] === SENDING TEST INVENTORY_UPDATE ===\n");
+                LOG_DEBUG_MSG("Sending test INVENTORY_UPDATE message");
 
                 message_t test_msg;
                 inventory_item_t items[1];
@@ -225,42 +223,38 @@ static void* sender_thread(void* arg)
                 items[0].item_name[3] = 't';
                 items[0].item_name[4] = '\0';
                 items[0].quantity = 100;
-                printf("[SENDER] Test item: ID=%d, Qty=%d\n", items[0].item_id, items[0].quantity);
+                
                 if (create_items_message(&test_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                         INVENTORY_UPDATE, items,
-                                         1) == 0) // quantity (hardcoded)
+                                         INVENTORY_UPDATE, items, 1) == 0)
                 {
-                    printf("[SENDER] Created test INVENTORY_UPDATE message\n");
                     if (enqueue_pending_message(&test_msg) == 0)
                     {
-                        printf("[SENDER] Test INVENTORY_UPDATE enqueued (item: 42, qty: 100)\n");
+                        LOG_DEBUG_MSG("Test INVENTORY_UPDATE enqueued");
                     }
                     else
                     {
-                        fprintf(stderr, "[SENDER] Failed to enqueue test message\n");
+                        LOG_ERROR_MSG("Failed to enqueue test message");
                     }
                 }
                 else
                 {
-                    fprintf(stderr, "[SENDER] Failed to create test message\n");
+                    LOG_ERROR_MSG("Failed to create test message");
                 }
             }
 
-            continue;
         }
         else if (errno == EINTR)
         {
-            // Interrupted by signal - continue
             continue;
         }
         else
         {
-            perror("[SENDER] sem_timedwait");
+            LOG_ERROR_MSG("sem_timedwait error: %s", strerror(errno));
             break;
         }
     }
 
-    printf("[SENDER] Thread exiting\n");
+    LOG_INFO_MSG("Sender thread exiting");
     return NULL;
 }
 
@@ -268,17 +262,16 @@ static int child_logic_process(void)
 {
     shared_data_t* shared_data = get_shared_data();
 
-    printf("[CHILD] Logic process started (PID: %d)\n", getpid());
+    LOG_INFO_MSG("Business logic process started (PID: %d)", getpid());
 
     int counter = 0;
     while (!shared_data->should_exit)
     {
         counter++;
-
         sleep(60);
     }
 
-    printf("[CHILD] Logic process exiting\n");
+    LOG_INFO_MSG("Business logic process exiting");
     return 0;
 }
 
@@ -288,10 +281,12 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
 {
     logic_ctx = ctx;
 
+    LOG_INFO_MSG("Initializing client logic for %s/%s", client_role, client_id);
+
     // Initialize IPC
     if (ipc_init() != 0)
     {
-        fprintf(stderr, "[LOGIC] Failed to initialize IPC\n");
+        LOG_ERROR_MSG("Failed to initialize IPC");
         return -1;
     }
 
@@ -299,13 +294,13 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
     shared_data_t* shared_data = get_shared_data();
     strncpy(shared_data->client_role, client_role, sizeof(shared_data->client_role) - 1);
     strncpy(shared_data->client_id, client_id, sizeof(shared_data->client_id) - 1);
-    printf("[LOGIC] Client identity: %s / %s\n", shared_data->client_role, shared_data->client_id);
+    LOG_INFO_MSG("Client identity set: %s / %s", shared_data->client_role, shared_data->client_id);
 
     pid_t pid = fork();
 
     if (pid < 0)
     {
-        perror("[LOGIC] fork");
+        LOG_ERROR_MSG("Fork failed: %s", strerror(errno));
         ipc_cleanup();
         return -1;
     }
@@ -319,14 +314,14 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
     else
     {
         // ============ PARENT PROCESS ============
-        printf("[PARENT] Network handler started (PID: %d, Child PID: %d)\n", getpid(), pid);
+        LOG_INFO_MSG("Network handler started (PID: %d, Child PID: %d)", getpid(), pid);
 
         pthread_t receiver, sender, ack_checker;
 
         // Create threads
         if (pthread_create(&receiver, NULL, receiver_thread, ctx) != 0)
         {
-            perror("[LOGIC] pthread_create receiver");
+            LOG_ERROR_MSG("Failed to create receiver thread");
             kill(pid, SIGTERM);
             waitpid(pid, NULL, 0);
             ipc_cleanup();
@@ -335,7 +330,7 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
 
         if (pthread_create(&sender, NULL, sender_thread, ctx) != 0)
         {
-            perror("[LOGIC] pthread_create sender");
+            LOG_ERROR_MSG("Failed to create sender thread");
             shared_data->should_exit = 1;
             pthread_join(receiver, NULL);
             kill(pid, SIGTERM);
@@ -346,7 +341,7 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
 
         if (pthread_create(&ack_checker, NULL, ack_timeout_checker_thread, NULL) != 0)
         {
-            perror("[LOGIC] pthread_create ack_checker");
+            LOG_ERROR_MSG("Failed to create ACK checker thread");
             shared_data->should_exit = 1;
             sem_post(get_message_sem());
             pthread_join(receiver, NULL);
@@ -360,7 +355,7 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
         // Wait for child process
         int status;
         waitpid(pid, &status, 0);
-        printf("[PARENT] Child process exited with status %d\n", WEXITSTATUS(status));
+        LOG_INFO_MSG("Child process exited with status %d", WEXITSTATUS(status));
 
         // Signal threads to exit
         shared_data->should_exit = 1;
@@ -376,11 +371,12 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
         // Check if exit was due to ACK timeout
         if (shared_data->ack_timeout_occurred)
         {
-            fprintf(stderr, "[PARENT] Disconnection due to ACK timeout\n");
+            LOG_WARNING_MSG("Disconnection due to ACK timeout");
         }
 
         ipc_cleanup();
     }
 
+    LOG_INFO_MSG("Client logic shutdown complete");
     return 0;
 }

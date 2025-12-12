@@ -1,6 +1,7 @@
 #include "client.h"
 #include "connection.h"
 #include "logic.h"
+#include "logger.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +15,7 @@ static int parse_conf(const char* path, client_config* config, client_credential
     FILE* f = fopen(path, "r");
     if (!f)
     {
-        perror("fopen");
+        LOG_ERROR_MSG("Failed to open config file '%s': %s", path, strerror(errno));
         return -1;
     }
     char line[LINE_SIZE];
@@ -71,9 +72,11 @@ static int parse_conf(const char* path, client_config* config, client_credential
 
     if (config->host[0] == '\0' || config->port[0] == '\0' || creds->username[0] == '\0' || creds->password[0] == '\0')
     {
-        fprintf(stderr, "[CONFIG] missing required fields in %s\n", path);
+        LOG_ERROR_MSG("Missing required fields in config file '%s'", path);
         return -1;
     }
+    
+    LOG_INFO_MSG("Configuration loaded successfully from '%s'", path);
     return 0;
 }
 
@@ -82,38 +85,41 @@ int authenticate(client_context* ctx, client_credentials* creds)
     message_t msg;
     char json_buffer[BUFFER_SIZE];
     char response[BUFFER_SIZE];
+    
+    LOG_INFO_MSG("Starting authentication for user '%s'", creds->username);
+    
     for (int i = 0; i < MAX_ATTEMPTS; i++)
     {
         if (create_auth_request_message(&msg, creds->type, creds->username, creds->username, creds->password) != 0)
         {
-            fprintf(stderr, "[AUTH] Failed to create auth request message\n");
+            LOG_ERROR_MSG("Failed to create auth request message");
             return -1;
         }
 
         if (serialize_message_to_json(&msg, json_buffer) != 0)
         {
-            fprintf(stderr, "[AUTH] Failed to serialize auth request message\n");
+            LOG_ERROR_MSG("Failed to serialize auth request message");
             return -1;
         }
 
         if (client_send(ctx, json_buffer) != 0)
         {
-            fprintf(stderr, "[AUTH] Failed to send auth request message\n");
-            return -1;
+            LOG_ERROR_MSG("Failed to send auth request message (attempt %d/%d)", i + 1, MAX_ATTEMPTS);
+            continue;
         }
 
         int bytes = client_receive(ctx, response, BUFFER_SIZE);
         if (bytes <= 0)
         {
-            fprintf(stderr, "[AUTH] Failed to receive auth response message\n");
-            return -1;
+            LOG_ERROR_MSG("Failed to receive auth response message (attempt %d/%d)", i + 1, MAX_ATTEMPTS);
+            continue;
         }
 
         message_t response_msg;
         if (deserialize_message_from_json(response, &response_msg) != 0)
         {
-            fprintf(stderr, "[AUTH] Failed to deserialize auth response\n");
-            return -1;
+            LOG_ERROR_MSG("Failed to deserialize auth response");
+            continue;
         }
 
         if (strcmp(response_msg.msg_type, SERVER_TO_HUB__AUTH_RESPONSE) == 0 ||
@@ -129,32 +135,33 @@ int authenticate(client_context* ctx, client_credentials* creds)
                     {
                         if (client_send(ctx, json_buffer) == 0)
                         {
-                            printf("[AUTH] Sent ACK for successful authentication\n");
+                            LOG_INFO_MSG("Sent ACK for successful authentication");
                         }
                         else
                         {
-                            fprintf(stderr, "[AUTH] Failed to send ACK message\n");
+                            LOG_WARNING_MSG("Failed to send ACK message");
                         }
                     }
                 }
                 else
                 {
-                    fprintf(stderr, "[AUTH] Failed to create ACK message\n");
+                    LOG_ERROR_MSG("Failed to create ACK message");
                     return -1;
                 }
+                LOG_INFO_MSG("Authentication successful");
                 printf("[AUTH] Authentication successful\n");
                 return 0;
             }
             else
             {
-                fprintf(stderr, "[AUTH] Authentication failed with status code %d\n",
+                LOG_ERROR_MSG("Authentication failed with status code %d",
                         response_msg.payload.server_auth_response.status_code);
                 return -1;
             }
         }
-        fprintf(stderr, "[AUTH] Unexpected response type: %s\n", response_msg.msg_type);
+        LOG_WARNING_MSG("Unexpected response type: %s", response_msg.msg_type);
     }
-    fprintf(stderr, "[AUTH] Authentication failed after %d attempts.\n", MAX_ATTEMPTS);
+    LOG_ERROR_MSG("Authentication failed after %d attempts", MAX_ATTEMPTS);
     return -1;
 }
 
@@ -163,31 +170,68 @@ int run_client(const char* config_path)
     client_config config;
     client_context ctx;
     client_credentials creds;
-    char response[BUFFER_SIZE];
+
+    // Initialize logger
+    logger_config_t log_config = {
+        .log_file_path = "/tmp/dhl_client.log",
+        .max_file_size = 10 * 1024 * 1024,  // 10 MB
+        .max_backup_files = 5,
+        .min_level = LOG_DEBUG
+    };
+    
+    if (log_init(&log_config) != 0)
+    {
+        fprintf(stderr, "Failed to initialize logger\n");
+        return 1;
+    }
+
+    LOG_INFO_MSG("=== DHL Client Starting ===");
+    LOG_INFO_MSG("Loading configuration from: %s", config_path);
 
     if (parse_conf(config_path, &config, &creds) != 0)
+    {
+        log_close();
         return 1;
+    }
 
     printf("Initializing client from %s (%s:%s %s) ...\n", config_path, config.host, config.port,
            (config.protocol == PROTO_TCP ? "tcp" : "udp"));
+    
+    LOG_INFO_MSG("Connecting to %s:%s (%s)", config.host, config.port,
+                 config.protocol == PROTO_TCP ? "TCP" : "UDP");
 
     if (client_init(&ctx, &config) == 0)
     {
+        LOG_INFO_MSG("Connection established successfully");
+        
         if (authenticate(&ctx, &creds) != 0)
         {
             printf("Authentication failed.\n");
+            LOG_ERROR_MSG("Authentication failed, closing connection");
             client_close(&ctx);
+            log_close();
             return -1;
         }
+        
         printf("Connection successful.\n");
+        LOG_INFO_MSG("Starting client logic");
+        
         if (logic_init(&ctx, creds.type, creds.username) != 0)
         {
             printf("Client logic encountered an error.\n");
+            LOG_ERROR_MSG("Client logic failed");
             client_close(&ctx);
+            log_close();
             return -1;
         }
+        
+        LOG_INFO_MSG("Client shutting down normally");
         client_close(&ctx);
+        log_close();
         return 0;
     }
+    
+    LOG_ERROR_MSG("Failed to initialize client connection");
+    log_close();
     return 1;
 }
