@@ -11,25 +11,27 @@ extern "C"
     // #include <zlib.h>
 
 #define HUB_TO_SERVER__AUTH_REQUEST "HUB_TO_SERVER__AUTH_REQUEST"
-#define WAREHOUSE_TO_SERVER__AUTH_REQUEST "WAREHOUSE_TO_SERVER__AUTH_REQUEST"
-#define SERVER_TO_HUB__AUTH_RESPONSE "SERVER_TO_HUB__AUTH_RESPONSE"
-#define SERVER_TO_WAREHOUSE__AUTH_RESPONSE "SERVER_TO_WAREHOUSE__AUTH_RESPONSE"
 #define HUB_TO_SERVER__KEEPALIVE "HUB_TO_SERVER__KEEPALIVE"
-#define WAREHOUSE_TO_SERVER__KEEPALIVE "WAREHOUSE_TO_SERVER__KEEPALIVE"
 #define HUB_TO_SERVER__INVENTORY_UPDATE "HUB_TO_SERVER__INVENTORY_UPDATE"
-#define WAREHOUSE_TO_SERVER__INVENTORY_UPDATE "WAREHOUSE_TO_SERVER__INVENTORY_UPDATE"
 #define HUB_TO_SERVER__EMERGENCY_ALERT "HUB_TO_SERVER__EMERGENCY_ALERT"
-#define WAREHOUSE_TO_SERVER__EMERGENCY_ALERT "WAREHOUSE_TO_SERVER__EMERGENCY_ALERT"
 #define HUB_TO_SERVER__STOCK_REQUEST "HUB_TO_SERVER__STOCK_REQUEST"
 #define HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION "HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION"
+#define HUB_TO_SERVER__ACK "HUB_TO_SERVER__ACK"
+#define WAREHOUSE_TO_SERVER__AUTH_REQUEST "WAREHOUSE_TO_SERVER__AUTH_REQUEST"
+#define WAREHOUSE_TO_SERVER__KEEPALIVE "WAREHOUSE_TO_SERVER__KEEPALIVE"
+#define WAREHOUSE_TO_SERVER__INVENTORY_UPDATE "WAREHOUSE_TO_SERVER__INVENTORY_UPDATE"
 #define WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE "WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE"
 #define WAREHOUSE_TO_SERVER__REPLENISH_REQUEST "WAREHOUSE_TO_SERVER__REPLENISH_REQUEST"
+#define WAREHOUSE_TO_SERVER__EMERGENCY_ALERT "WAREHOUSE_TO_SERVER__EMERGENCY_ALERT"
+#define WAREHOUSE_TO_SERVER__ACK "WAREHOUSE_TO_SERVER__ACK"
+#define SERVER_TO_HUB__AUTH_RESPONSE "SERVER_TO_HUB__AUTH_RESPONSE"
+#define SERVER_TO_WAREHOUSE__AUTH_RESPONSE "SERVER_TO_WAREHOUSE__AUTH_RESPONSE"
+#define SERVER_TO_HUB__INVENTORY_UPDATE "SERVER_TO_HUB__INVENTORY_UPDATE"
+#define SERVER_TO_WAREHOUSE__INVENTORY_UPDATE "SERVER_TO_WAREHOUSE__INVENTORY_UPDATE"
 #define SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB "SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB"
 #define SERVER_TO_WAREHOUSE__RESTOCK_NOTICE "SERVER_TO_WAREHOUSE__RESTOCK_NOTICE"
 #define SERVER_TO_HUB__INCOMING_STOCK_NOTICE "SERVER_TO_HUB__INCOMING_STOCK_NOTICE"
 #define SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
-#define HUB_TO_SERVER__ACK "HUB_TO_SERVER__ACK"
-#define WAREHOUSE_TO_SERVER__ACK "WAREHOUSE_TO_SERVER__ACK"
 #define SERVER_TO_HUB__ACK "SERVER_TO_HUB__ACK"
 #define SERVER_TO_WAREHOUSE__ACK "SERVER_TO_WAREHOUSE__ACK"
 
@@ -37,6 +39,13 @@ extern "C"
 #define HUB "HUB"
 #define SERVER "SERVER"
 #define CLI "CLI"
+
+// Message type prefixes for parsing (used in create_items_message)
+#define MSG_PREFIX_HUB_TO_SERVER "HUB_TO_SERVER"
+#define MSG_PREFIX_WAREHOUSE_TO_SERVER "WAREHOUSE_TO_SERVER"
+#define MSG_PREFIX_SERVER_TO_HUB "SERVER_TO_HUB"
+#define MSG_PREFIX_SERVER_TO_WAREHOUSE "SERVER_TO_WAREHOUSE"
+
 #define AUTH_RESPONSE "AUTH_RESPONSE"
 #define ACK "ACK"
 #define STOCK_REQUEST "STOCK_REQUEST"
@@ -47,6 +56,8 @@ extern "C"
 #define ORDER_DISPATCH "ORDER_DISPATCH"
 #define RESTOCK_NOTICE "RESTOCK_NOTICE"
 #define INCOMING_STOCK_NOTICE "INCOMING_STOCK_NOTICE"
+#define KEEPALIVE "KEEPALIVE"
+#define ALIVE "ALIVE"
 
 #define MIN_SIZE 8
 #define MESSAGE_TYPE_SIZE 64
@@ -55,6 +66,7 @@ extern "C"
 #define TIMESTAMP_SIZE 32
 #define CHECKSUM_SIZE 8
 #define CREDENTIALS_SIZE 64
+#define DESCRIPTION_SIZE 128
 
 #define ITEM_NAME_SIZE 32
 #define QUANTITY_ITEMS 6
@@ -99,7 +111,7 @@ extern "C"
 
     typedef struct payload_keepalive
     {
-        char message;
+        char message[DESCRIPTION_SIZE];
     } payload_keepalive;
 
     typedef struct payload_client_emergency_alert
@@ -175,29 +187,31 @@ extern "C"
      * @param out Pointer to the message_t structure to populate.
      * @param source_role Source role (HUB or WAREHOUSE).
      * @param source_id Source identifier (e.g., "client_0001").
-     * @param message Single character message (optional, use 'A' as default).
+     * @param message Keepalive message content.
      * @return 0 on success, negative value on error.
      */
-    int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, char message);
+    int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, const char* message);
 
     /*@brief
      * Generic function to create any message with items payload.
-     * Automatically selects msg_type based on source_role and message_category.
+     * Uses the exact msg_type string provided (e.g., HUB_TO_SERVER__INVENTORY_UPDATE).
+     * This ensures consistency between message creation and reception - you use the same
+     * string constant in both client and server code.
+     * 
      * @param out Pointer to the message_t structure to populate.
-     * @param source_role Source role (HUB, WAREHOUSE, or SERVER).
-     * @param source_id Source identifier.
-     * @param target_role Target role (HUB, WAREHOUSE, or SERVER).
-     * @param target_id Target identifier (use SERVER for client->server, or specific client for server->client).
-     * @param message_category Category: "stock_request", "inventory_update", "receipt_confirmation",
-     *                         "shipment_notice", "replenish_request", "order_dispatch",
-     *                         "restock_notice", "incoming_stock_notice"
+     * @param msg_type Complete message type (use the #define constants like HUB_TO_SERVER__INVENTORY_UPDATE).
+     * @param source_id Source identifier (e.g., "client_0001").
+     * @param target_id Target identifier (e.g., "SERVER" or specific client ID).
      * @param items Array of inventory items (max QUANTITY_ITEMS).
      * @param item_count Number of items in the array.
      * @return 0 on success, negative value on error.
+     * 
+     * Example usage:
+     *   create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, "client_0001", "SERVER", items, count);
+     *   create_items_message(&msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "client_0002", "SERVER", items, count);
      */
-    int create_items_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
-                             const char* target_id, const char* message_category, const inventory_item_t* items,
-                             int item_count);
+    int create_items_message(message_t* out, const char* msg_type, const char* source_id, const char* target_id,
+                            const inventory_item_t* items, int item_count);
 
     /*@brief
      * Creates an authentication response message (SERVER to client).
@@ -221,8 +235,8 @@ extern "C"
      * @return 0 on success, negative value on error.
      */
     int create_acknowledgment_message(message_t* out, const char* source_role, const char* source_id,
-                                     const char* target_role, const char* target_id,
-                                     const char* ack_for_timestamp, int status_code);
+                                      const char* target_role, const char* target_id, const char* ack_for_timestamp,
+                                      int status_code);
 
     /*@brief
      * Creates an emergency alert message from client (HUB or WAREHOUSE).

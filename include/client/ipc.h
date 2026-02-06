@@ -32,8 +32,8 @@ typedef struct
     char client_id[ID_SIZE];     // username (e.g., "client_0001")
 
     // Inventario (placeholder por ahora)
-    int inventory[100];
-    int inventory_count;
+    
+    inventory_item_t inventory_item[QUANTITY_ITEMS];
 
     // Message queue entre procesos
     char pending_messages[10][BUFFER_SIZE];
@@ -43,6 +43,9 @@ typedef struct
     pending_ack_t pending_acks[MAX_PENDING_ACKS];
     int ack_timeout_occurred; // Flag set when timeout happens
 
+    // Inventory control flags
+    volatile sig_atomic_t inventory_updated; // Flag set when inventory is updated
+
     // Control flags
     volatile sig_atomic_t should_exit;
 } shared_data_t;
@@ -51,9 +54,10 @@ typedef struct
 
 /**
  * Initialize IPC resources (shared memory and semaphores)
+ * @param client_id Unique client identifier (e.g., "client_0001") for namespace isolation
  * @return 0 on success, -1 on error
  */
-int ipc_init(void);
+int ipc_init(const char* client_id);
 
 /**
  * Cleanup IPC resources
@@ -116,17 +120,16 @@ int check_ack_timeouts(void);
 // ==================== INVENTORY ====================
 
 /**
- * Update inventory count for an item
- * @param item_id Item ID (0-99)
- * @param quantity Quantity to add (can be negative)
- * @return 0 on success
+ * Update inventory from an array of items
+ * @param items Array of inventory items to update
+ * @return 0 on success, -1 on error
  */
-int update_inventory(int item_id, int quantity);
+int update_inventory(const inventory_item_t* items);
 
 /**
- * Get inventory count for an item
- * @param item_id Item ID (0-99)
- * @return Item count
+ * Get inventory count for an item by ID
+ * @param item_id Item ID to query
+ * @return Item count, or -1 if not found
  */
 int get_inventory_count(int item_id);
 

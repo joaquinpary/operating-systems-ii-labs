@@ -12,7 +12,7 @@ extern "C"
 
 #define FILE_PATH 256
 
-// ==================== LOG LEVELS ====================
+    // ==================== LOG LEVELS ====================
 
     typedef enum
     {
@@ -22,17 +22,17 @@ extern "C"
         LOG_ERROR = 3
     } log_level_t;
 
-// ==================== CONFIGURATION ====================
+    // ==================== CONFIGURATION ====================
 
     typedef struct
     {
         char log_file_path[FILE_PATH]; // Path to the main log file
-        size_t max_file_size;    // Maximum file size in bytes before rotation
-        int max_backup_files;    // Maximum number of backup files to keep
-        log_level_t min_level;   // Minimum log level to write (filters lower levels)
+        size_t max_file_size;          // Maximum file size in bytes before rotation
+        int max_backup_files;          // Maximum number of backup files to keep
+        log_level_t min_level;         // Minimum log level to write (filters lower levels)
     } logger_config_t;
 
-// ==================== PUBLIC API ====================
+    // ==================== PUBLIC API ====================
 
     /**
      * @brief Initialize the logger with the specified configuration.
@@ -140,10 +140,10 @@ extern "C"
  * Convenience macros for common log levels.
  * These provide a shorter syntax for logging.
  */
-#define LOG_DEBUG_MSG(...)   log_write(LOG_DEBUG, __VA_ARGS__)
-#define LOG_INFO_MSG(...)    log_write(LOG_INFO, __VA_ARGS__)
+#define LOG_DEBUG_MSG(...) log_write(LOG_DEBUG, __VA_ARGS__)
+#define LOG_INFO_MSG(...) log_write(LOG_INFO, __VA_ARGS__)
 #define LOG_WARNING_MSG(...) log_write(LOG_WARNING, __VA_ARGS__)
-#define LOG_ERROR_MSG(...)   log_write(LOG_ERROR, __VA_ARGS__)
+#define LOG_ERROR_MSG(...) log_write(LOG_ERROR, __VA_ARGS__)
 
 #ifdef __cplusplus
 }

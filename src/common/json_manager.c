@@ -68,8 +68,7 @@ static cJSON* serialize_keepalive(const void* ptr)
 {
     const payload_keepalive* payload = (const payload_keepalive*)ptr;
     cJSON* root = cJSON_CreateObject();
-    char msg_str[2] = {payload->message, '\0'};
-    cJSON_AddStringToObject(root, "message", msg_str);
+    cJSON_AddStringToObject(root, "message", payload->message);
     return root;
 }
 
@@ -135,7 +134,7 @@ static void deserialize_acknowledgment(const cJSON* root, void* ptr)
     payload_acknowledgment* payload = (payload_acknowledgment*)ptr;
     cJSON* code = cJSON_GetObjectItemCaseSensitive(root, "status_code");
     cJSON* ack_ts = cJSON_GetObjectItemCaseSensitive(root, "ack_for_timestamp");
-    
+
     if (cJSON_IsNumber(code))
     {
         payload->status_code = code->valueint;
@@ -164,7 +163,7 @@ static void deserialize_keepalive(const cJSON* root, void* ptr)
     cJSON* msg = cJSON_GetObjectItemCaseSensitive(root, "message");
     if (cJSON_IsString(msg) && strlen(msg->valuestring) > 0)
     {
-        payload->message = msg->valuestring[0];
+        safe_strcpy(payload->message, DESCRIPTION_SIZE, msg->valuestring);
     }
 }
 
@@ -208,6 +207,8 @@ static const payload_handler_t handlers[] = {
     {WAREHOUSE_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {HUB_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
+    {SERVER_TO_HUB__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
+    {SERVER_TO_WAREHOUSE__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {HUB_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
     {WAREHOUSE_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
     {HUB_TO_SERVER__STOCK_REQUEST, serialize_items_list, deserialize_items_list},
@@ -326,13 +327,13 @@ static void generate_timestamp(char* buffer, size_t size)
 {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    
+
     struct tm* tm_info = gmtime(&tv.tv_sec);
-    
+
     // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
     char base[32];
     strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
-    
+
     int milliseconds = tv.tv_usec / 1000;
     snprintf(buffer, size, "%s.%03dZ", base, milliseconds);
 }
@@ -392,25 +393,23 @@ int create_auth_request_message(message_t* out, const char* source_role, const c
     return create_message(out, msg_type, source_role, source_id, SERVER, SERVER, &payload, sizeof(payload));
 }
 
-int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, char message)
+int create_keepalive_message(message_t* out, const char* source_role, const char* source_id, const char* message)
 {
     if (!out || !source_role || !source_id)
         return -1;
 
     payload_keepalive payload = {0};
-    payload.message = message;
+    safe_strcpy(payload.message, DESCRIPTION_SIZE, message);
 
     const char* msg_type = (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__KEEPALIVE : WAREHOUSE_TO_SERVER__KEEPALIVE;
 
     return create_message(out, msg_type, source_role, source_id, SERVER, SERVER, &payload, sizeof(payload));
 }
 
-int create_items_message(message_t* out, const char* source_role, const char* source_id, const char* target_role,
-                         const char* target_id, const char* message_category, const inventory_item_t* items,
-                         int item_count)
+int create_items_message(message_t* out, const char* msg_type, const char* source_id, const char* target_id,
+                        const inventory_item_t* items, int item_count)
 {
-    if (!out || !source_role || !source_id || !target_role || !target_id || !message_category || !items ||
-        item_count < 0)
+    if (!out || !msg_type || !source_id || !target_id || !items || item_count < 0)
         return -1;
 
     payload_items_list payload = {0};
@@ -421,45 +420,32 @@ int create_items_message(message_t* out, const char* source_role, const char* so
         payload.items[i] = items[i];
     }
 
-    const char* msg_type = NULL;
+    const char* source_role = NULL;
+    const char* target_role = NULL;
 
-    if (strcmp(message_category, STOCK_REQUEST) == 0)
+    if (strncmp(msg_type, MSG_PREFIX_HUB_TO_SERVER, strlen(MSG_PREFIX_HUB_TO_SERVER)) == 0)
     {
-        msg_type =
-            (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__STOCK_REQUEST : WAREHOUSE_TO_SERVER__REPLENISH_REQUEST;
+        source_role = HUB;
+        target_role = SERVER;
     }
-    else if (strcmp(message_category, INVENTORY_UPDATE) == 0)
+    else if (strncmp(msg_type, MSG_PREFIX_WAREHOUSE_TO_SERVER, strlen(MSG_PREFIX_WAREHOUSE_TO_SERVER)) == 0)
     {
-        msg_type =
-            (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__INVENTORY_UPDATE : WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
+        source_role = WAREHOUSE;
+        target_role = SERVER;
     }
-    else if (strcmp(message_category, RECEIPT_CONFIRMATION) == 0)
+    else if (strncmp(msg_type, MSG_PREFIX_SERVER_TO_HUB, strlen(MSG_PREFIX_SERVER_TO_HUB)) == 0)
     {
-        msg_type = HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION;
+        source_role = SERVER;
+        target_role = HUB;
     }
-    else if (strcmp(message_category, SHIPMENT_NOTICE) == 0)
+    else if (strncmp(msg_type, MSG_PREFIX_SERVER_TO_WAREHOUSE, strlen(MSG_PREFIX_SERVER_TO_WAREHOUSE)) == 0)
     {
-        msg_type = WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE;
-    }
-    else if (strcmp(message_category, REPLENISH_REQUEST) == 0)
-    {
-        msg_type = WAREHOUSE_TO_SERVER__REPLENISH_REQUEST;
-    }
-    else if (strcmp(message_category, ORDER_DISPATCH) == 0)
-    {
-        msg_type = SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB;
-    }
-    else if (strcmp(message_category, RESTOCK_NOTICE) == 0)
-    {
-        msg_type = SERVER_TO_WAREHOUSE__RESTOCK_NOTICE;
-    }
-    else if (strcmp(message_category, INCOMING_STOCK_NOTICE) == 0)
-    {
-        msg_type = SERVER_TO_HUB__INCOMING_STOCK_NOTICE;
+        source_role = SERVER;
+        target_role = WAREHOUSE;
     }
     else
     {
-        return -1; // Unknown category
+        return -1; // Unknown message type format
     }
 
     return create_message(out, msg_type, source_role, source_id, target_role, target_id, &payload, sizeof(payload));
@@ -486,8 +472,8 @@ int create_auth_response_message(message_t* out, const char* target_role, const 
 }
 
 int create_acknowledgment_message(message_t* out, const char* source_role, const char* source_id,
-                                 const char* target_role, const char* target_id,
-                                 const char* ack_for_timestamp, int status_code)
+                                  const char* target_role, const char* target_id, const char* ack_for_timestamp,
+                                  int status_code)
 {
     if (!out || !source_role || !source_id || !target_role || !target_id || !ack_for_timestamp)
         return -1;

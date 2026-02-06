@@ -1,7 +1,7 @@
 #include "client.h"
 #include "connection.h"
-#include "logic.h"
 #include "logger.h"
+#include "logic.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,7 +75,7 @@ static int parse_conf(const char* path, client_config* config, client_credential
         LOG_ERROR_MSG("Missing required fields in config file '%s'", path);
         return -1;
     }
-    
+
     LOG_INFO_MSG("Configuration loaded successfully from '%s'", path);
     return 0;
 }
@@ -85,9 +85,9 @@ int authenticate(client_context* ctx, client_credentials* creds)
     message_t msg;
     char json_buffer[BUFFER_SIZE];
     char response[BUFFER_SIZE];
-    
+
     LOG_INFO_MSG("Starting authentication for user '%s'", creds->username);
-    
+
     for (int i = 0; i < MAX_ATTEMPTS; i++)
     {
         if (create_auth_request_message(&msg, creds->type, creds->username, creds->username, creds->password) != 0)
@@ -129,7 +129,7 @@ int authenticate(client_context* ctx, client_credentials* creds)
             {
                 message_t ack_msg;
                 if (create_acknowledgment_message(&ack_msg, creds->type, creds->username, SERVER, SERVER,
-                                                 response_msg.timestamp, 200) == 0)
+                                                  response_msg.timestamp, 200) == 0)
                 {
                     if (serialize_message_to_json(&ack_msg, json_buffer) == 0)
                     {
@@ -155,7 +155,7 @@ int authenticate(client_context* ctx, client_credentials* creds)
             else
             {
                 LOG_ERROR_MSG("Authentication failed with status code %d",
-                        response_msg.payload.server_auth_response.status_code);
+                              response_msg.payload.server_auth_response.status_code);
                 return -1;
             }
         }
@@ -172,13 +172,11 @@ int run_client(const char* config_path)
     client_credentials creds;
 
     // Initialize logger
-    logger_config_t log_config = {
-        .log_file_path = "/tmp/dhl_client.log",
-        .max_file_size = 10 * 1024 * 1024,  // 10 MB
-        .max_backup_files = 5,
-        .min_level = LOG_DEBUG
-    };
-    
+    logger_config_t log_config = {.log_file_path = "/tmp/dhl_client.log",
+                                  .max_file_size = 10 * 1024 * 1024, // 10 MB
+                                  .max_backup_files = 5,
+                                  .min_level = LOG_DEBUG};
+
     if (log_init(&log_config) != 0)
     {
         fprintf(stderr, "Failed to initialize logger\n");
@@ -196,14 +194,13 @@ int run_client(const char* config_path)
 
     printf("Initializing client from %s (%s:%s %s) ...\n", config_path, config.host, config.port,
            (config.protocol == PROTO_TCP ? "tcp" : "udp"));
-    
-    LOG_INFO_MSG("Connecting to %s:%s (%s)", config.host, config.port,
-                 config.protocol == PROTO_TCP ? "TCP" : "UDP");
+
+    LOG_INFO_MSG("Connecting to %s:%s (%s)", config.host, config.port, config.protocol == PROTO_TCP ? "TCP" : "UDP");
 
     if (client_init(&ctx, &config) == 0)
     {
         LOG_INFO_MSG("Connection established successfully");
-        
+
         if (authenticate(&ctx, &creds) != 0)
         {
             printf("Authentication failed.\n");
@@ -212,10 +209,10 @@ int run_client(const char* config_path)
             log_close();
             return -1;
         }
-        
+
         printf("Connection successful.\n");
         LOG_INFO_MSG("Starting client logic");
-        
+
         if (logic_init(&ctx, creds.type, creds.username) != 0)
         {
             printf("Client logic encountered an error.\n");
@@ -224,13 +221,13 @@ int run_client(const char* config_path)
             log_close();
             return -1;
         }
-        
+
         LOG_INFO_MSG("Client shutting down normally");
         client_close(&ctx);
         log_close();
         return 0;
     }
-    
+
     LOG_ERROR_MSG("Failed to initialize client connection");
     log_close();
     return 1;
