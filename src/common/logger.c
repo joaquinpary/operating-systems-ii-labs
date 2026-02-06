@@ -33,7 +33,7 @@ static void get_timestamp(char* buffer, size_t size)
     tm_info = gmtime(&tv.tv_sec);
 
     strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
-    
+
     // Append milliseconds
     snprintf(buffer + strlen(buffer), size - strlen(buffer), ".%03ldZ", tv.tv_usec / 1000);
 }
@@ -111,7 +111,7 @@ static int check_and_rotate(void)
 
     // Get current file size
     long current_size = get_file_size(g_config.log_file_path);
-    
+
     if (current_size >= (long)g_config.max_file_size)
     {
         // Close current file
@@ -280,7 +280,7 @@ void log_close(void)
         get_timestamp(timestamp, sizeof(timestamp));
         fprintf(g_log_file, "[%s] [INFO] Logger shutting down\n", timestamp);
         fflush(g_log_file);
-        
+
         fclose(g_log_file);
         g_log_file = NULL;
     }

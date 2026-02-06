@@ -15,13 +15,31 @@ static shared_data_t* shared_data = NULL;
 static sem_t* inventory_sem = NULL;
 static sem_t* message_available_sem = NULL;
 
-int ipc_init(void)
-{
-    shm_unlink("/dhl_client_shm");
-    sem_unlink("/dhl_inventory_sem");
-    sem_unlink("/dhl_msg_available_sem");
+// Store IPC names for cleanup
+static char shm_name[64];
+static char inventory_sem_name[64];
+static char message_sem_name[64];
 
-    shm_fd = shm_open("/dhl_client_shm", O_CREAT | O_EXCL | O_RDWR, 0666);
+
+int ipc_init(const char* client_id)
+{
+    if (client_id == NULL || strlen(client_id) == 0)
+    {
+        fprintf(stderr, "[IPC] Invalid client_id provided\n");
+        return -1;
+    }
+
+    // Create unique IPC names using client_id
+    snprintf(shm_name, sizeof(shm_name), "/dhl_client_shm_%s", client_id);
+    snprintf(inventory_sem_name, sizeof(inventory_sem_name), "/dhl_inventory_sem_%s", client_id);
+    snprintf(message_sem_name, sizeof(message_sem_name), "/dhl_msg_available_sem_%s", client_id);
+
+    // Cleanup any leftover resources from previous runs
+    shm_unlink(shm_name);
+    sem_unlink(inventory_sem_name);
+    sem_unlink(message_sem_name);
+
+    shm_fd = shm_open(shm_name, O_CREAT | O_EXCL | O_RDWR, 0666);
     if (shm_fd == -1)
     {
         perror("[IPC] shm_open");
@@ -43,21 +61,32 @@ int ipc_init(void)
 
     memset(shared_data, 0, sizeof(shared_data_t));
 
-    inventory_sem = sem_open("/dhl_inventory_sem", O_CREAT | O_EXCL, 0666, 1);
+    // Initialize inventory with predefined items (all starting at 0 quantity)
+    const char* item_names[QUANTITY_ITEMS] = {"FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"};
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        shared_data->inventory_item[i].item_id = i + 1; // IDs from 1 to 6
+        strncpy(shared_data->inventory_item[i].item_name, item_names[i], ITEM_NAME_SIZE - 1);
+        shared_data->inventory_item[i].item_name[ITEM_NAME_SIZE - 1] = '\0';
+        shared_data->inventory_item[i].quantity = 0; // Start with 0 quantity
+    }
+    printf("[IPC] Initialized inventory with %d items (all quantities at 0)\n", QUANTITY_ITEMS);
+
+    inventory_sem = sem_open(inventory_sem_name, O_CREAT | O_EXCL, 0666, 1);
     if (inventory_sem == SEM_FAILED)
     {
         perror("[IPC] sem_open inventory");
         return -1;
     }
 
-    message_available_sem = sem_open("/dhl_msg_available_sem", O_CREAT | O_EXCL, 0666, 0);
+    message_available_sem = sem_open(message_sem_name, O_CREAT | O_EXCL, 0666, 0);
     if (message_available_sem == SEM_FAILED)
     {
         perror("[IPC] sem_open message_available");
         return -1;
     }
 
-    printf("[IPC] Initialized successfully\n");
+    printf("[IPC] Initialized successfully for client: %s\n", client_id);
     return 0;
 }
 
@@ -71,19 +100,19 @@ void ipc_cleanup(void)
     if (shm_fd != -1)
     {
         close(shm_fd);
-        shm_unlink("/dhl_client_shm");
+        shm_unlink(shm_name);
         shm_fd = -1;
     }
     if (inventory_sem != NULL)
     {
         sem_close(inventory_sem);
-        sem_unlink("/dhl_inventory_sem");
+        sem_unlink(inventory_sem_name);
         inventory_sem = NULL;
     }
     if (message_available_sem != NULL)
     {
         sem_close(message_available_sem);
-        sem_unlink("/dhl_msg_available_sem");
+        sem_unlink(message_sem_name);
         message_available_sem = NULL;
     }
     printf("[IPC] Cleaned up\n");
@@ -166,27 +195,53 @@ int pop_pending_message(message_t* msg)
     return deserialize_message_from_json(json_buffer, msg);
 }
 
-// Estas funciones son placeholders
-int update_inventory(int item_id, int quantity)
+// Update inventory from an array of items
+int update_inventory(const inventory_item_t* items)
 {
-    sem_wait(inventory_sem);
-    if (item_id >= 0 && item_id < 100)
+    if (items == NULL)
     {
-        shared_data->inventory[item_id] += quantity;
-        printf("[INVENTORY] Item %d updated: %d units\n", item_id, shared_data->inventory[item_id]);
+        fprintf(stderr, "[IPC] Invalid parameters for update_inventory\n");
+        return -1;
     }
+
+    sem_wait(inventory_sem);
+
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        {
+            if (shared_data->inventory_item[j].item_id == items[i].item_id)
+            {
+                shared_data->inventory_item[j].quantity = items[i].quantity;
+                strncpy(shared_data->inventory_item[j].item_name, items[i].item_name, ITEM_NAME_SIZE - 1);
+                shared_data->inventory_item[j].item_name[ITEM_NAME_SIZE - 1] = '\0';
+                break;
+            }
+        }
+    }
+    
+    // Signal that inventory was updated (for consume timer reactivation)
+    shared_data->inventory_updated = 1;
+
     sem_post(inventory_sem);
     return 0;
 }
 
 int get_inventory_count(int item_id)
 {
-    int count = 0;
+    int count = -1;
     sem_wait(inventory_sem);
-    if (item_id >= 0 && item_id < 100)
+    
+    // Find item by ID
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        count = shared_data->inventory[item_id];
+        if (shared_data->inventory_item[i].item_id == item_id)
+        {
+            count = shared_data->inventory_item[i].quantity;
+            break;
+        }
     }
+    
     sem_post(inventory_sem);
     return count;
 }
