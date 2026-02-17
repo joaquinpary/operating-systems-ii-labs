@@ -36,7 +36,7 @@ typedef struct
     int ip_version; // AF_INET, AF_INET6, or AF_UNSPEC
 } client_config;
 
-/* @brief
+/** 
  * Establishes a connection to the server based on the provided configuration.
  * @param ctx Pointer to the client context to be initialized.
  * @param config Pointer to the client configuration.
@@ -44,7 +44,7 @@ typedef struct
  */
 int client_init(client_context* ctx, client_config* config);
 
-/* @brief
+/** 
  * Sends a message to the server.
  * @param ctx Pointer to the client context.
  * @param msg The message to send.
@@ -52,7 +52,7 @@ int client_init(client_context* ctx, client_config* config);
  */
 int client_send(client_context* ctx, const char* msg);
 
-/* @brief
+/** 
  * Receives a message from the server.
  * @param ctx Pointer to the client context.
  * @param buffer Buffer to store the received message.
@@ -61,7 +61,7 @@ int client_send(client_context* ctx, const char* msg);
  */
 int client_receive(client_context* ctx, char* buffer, size_t buffer_size);
 
-/* @brief
+/**
  * Closes the client connection.
  * @param ctx Pointer to the client context.
  */
