@@ -72,6 +72,11 @@ extern "C"
 #define ITEM_NAME_SIZE 32
 #define QUANTITY_ITEMS 6
 
+#define EMERGENCY_TYPE_SIZE 20
+#define EMERGENCY_INSTRUCTIONS_SIZE 100
+
+#define OK 200
+
 #define BUFFER_SIZE 1024
 
     typedef struct inventory_item
@@ -119,13 +124,13 @@ extern "C"
     typedef struct payload_client_emergency_alert
     {
         int emergency_code;
-        char emergency_type[20];
+        char emergency_type[EMERGENCY_TYPE_SIZE];
     } payload_client_emergency_alert;
 
     typedef struct payload_server_emergency_alert
     {
         int emergency_code;
-        char instructions[100];
+        char instructions[EMERGENCY_INSTRUCTIONS_SIZE];
     } payload_server_emergency_alert;
 
     typedef union payload_t {

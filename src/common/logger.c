@@ -11,6 +11,11 @@
 #include <time.h>
 #include <unistd.h>
 
+// ==================== CONSTANTS ====================
+
+#define TIMESTAMP_BUFFER_SIZE 64
+#define LOG_PATH_BUFFER_SIZE 512
+
 // ==================== PRIVATE STATE ====================
 
 static logger_config_t g_config;
@@ -56,8 +61,8 @@ static long get_file_size(const char* filename)
  */
 static int rotate_files(void)
 {
-    char old_name[512];
-    char new_name[512];
+    char old_name[LOG_PATH_BUFFER_SIZE];
+    char new_name[LOG_PATH_BUFFER_SIZE];
 
     // Delete the oldest file if it exists (e.g., app.log.5)
     if (g_config.max_backup_files > 0)
@@ -240,7 +245,7 @@ void log_write(log_level_t level, const char* format, ...)
     check_and_rotate();
 
     // Get timestamp
-    char timestamp[64];
+    char timestamp[TIMESTAMP_BUFFER_SIZE];
     get_timestamp(timestamp, sizeof(timestamp));
 
     // Get log level string
@@ -276,7 +281,7 @@ void log_close(void)
     if (g_log_file != NULL)
     {
         // Write shutdown message directly without calling log_write (avoid deadlock)
-        char timestamp[64];
+        char timestamp[TIMESTAMP_BUFFER_SIZE];
         get_timestamp(timestamp, sizeof(timestamp));
         fprintf(g_log_file, "[%s] [INFO] Logger shutting down\n", timestamp);
         fflush(g_log_file);

@@ -1,4 +1,4 @@
-#include "ipc.h"
+#include "shared_state.h"
 #include "json_manager.h"
 #include "unity.h"
 #include <string.h>
@@ -8,7 +8,7 @@
 void setUp(void)
 {
     // Initialize IPC for each test
-    ipc_init();
+    ipc_init("test_client");
 }
 
 void tearDown(void)
@@ -16,8 +16,6 @@ void tearDown(void)
     // Cleanup IPC after each test
     ipc_cleanup();
 }
-
-// ==================== MESSAGE QUEUE TESTS ====================
 
 void test_enqueue_and_pop_message(void)
 {
@@ -107,8 +105,6 @@ void test_pop_from_empty_queue(void)
     TEST_ASSERT_EQUAL(-1, pop_pending_message(&msg));
     TEST_ASSERT_EQUAL(0, has_pending_messages());
 }
-
-// ==================== ACK TRACKING TESTS ====================
 
 void test_add_and_remove_pending_ack(void)
 {
@@ -281,8 +277,6 @@ void test_check_ack_timeouts_max_retries(void)
     sem_post(inventory_sem);
 }
 
-// ==================== SHARED DATA ACCESS TESTS ====================
-
 void test_get_shared_data(void)
 {
     shared_data_t* data = get_shared_data();
@@ -309,7 +303,175 @@ void test_get_semaphores(void)
     TEST_ASSERT_EQUAL(0, sem_post(inventory_sem));
 }
 
-// ==================== MAIN ====================
+void test_inventory_initialization(void)
+{
+    // Verify inventory is initialized with 6 items in correct order
+    shared_data_t* shared_data = get_shared_data();
+
+    const char* expected_names[] = {"FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"};
+
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        TEST_ASSERT_EQUAL(i + 1, shared_data->inventory_item[i].item_id);
+        TEST_ASSERT_EQUAL_STRING(expected_names[i], shared_data->inventory_item[i].item_name);
+        TEST_ASSERT_EQUAL(0, shared_data->inventory_item[i].quantity); // Start at 0
+    }
+}
+
+void test_modify_inventory_add(void)
+{
+    // Create items to add
+    inventory_item_t items_to_add[QUANTITY_ITEMS] = {
+        {1, "FOOD", 50},     {2, "WATER", 30},    {3, "MEDICINE", 20},
+        {4, "TOOLS", 10},    {5, "GUNS", 15},     {6, "AMMO", 100}
+    };
+
+    // Add items
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_add, INVENTORY_ADD));
+
+    // Verify quantities
+    TEST_ASSERT_EQUAL(50, get_inventory_count(1));
+    TEST_ASSERT_EQUAL(30, get_inventory_count(2));
+    TEST_ASSERT_EQUAL(20, get_inventory_count(3));
+    TEST_ASSERT_EQUAL(10, get_inventory_count(4));
+    TEST_ASSERT_EQUAL(15, get_inventory_count(5));
+    TEST_ASSERT_EQUAL(100, get_inventory_count(6));
+
+    // Verify inventory_updated flag is set
+    shared_data_t* shared_data = get_shared_data();
+    TEST_ASSERT_EQUAL(1, shared_data->inventory_updated);
+}
+
+void test_modify_inventory_add_accumulates(void)
+{
+    // First addition
+    inventory_item_t items1[QUANTITY_ITEMS] = {
+        {1, "FOOD", 50},     {2, "WATER", 50},    {3, "MEDICINE", 50},
+        {4, "TOOLS", 50},    {5, "GUNS", 50},     {6, "AMMO", 50}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items1, INVENTORY_ADD));
+
+    // Second addition (should accumulate)
+    inventory_item_t items2[QUANTITY_ITEMS] = {
+        {1, "FOOD", 25},     {2, "WATER", 25},    {3, "MEDICINE", 25},
+        {4, "TOOLS", 25},    {5, "GUNS", 25},     {6, "AMMO", 25}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items2, INVENTORY_ADD));
+
+    // Verify accumulated quantities (50 + 25 = 75)
+    for (int i = 1; i <= QUANTITY_ITEMS; i++)
+    {
+        TEST_ASSERT_EQUAL(75, get_inventory_count(i));
+    }
+}
+
+void test_modify_inventory_reduce(void)
+{
+    // First, add inventory
+    inventory_item_t items_to_add[QUANTITY_ITEMS] = {
+        {1, "FOOD", 100},    {2, "WATER", 100},   {3, "MEDICINE", 100},
+        {4, "TOOLS", 100},   {5, "GUNS", 100},    {6, "AMMO", 100}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_add, INVENTORY_ADD));
+
+    // Then reduce
+    inventory_item_t items_to_reduce[QUANTITY_ITEMS] = {
+        {1, "FOOD", 30},     {2, "WATER", 20},    {3, "MEDICINE", 10},
+        {4, "TOOLS", 5},     {5, "GUNS", 50},     {6, "AMMO", 75}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_reduce, INVENTORY_REDUCE));
+
+    // Verify remaining quantities
+    TEST_ASSERT_EQUAL(70, get_inventory_count(1));   // 100 - 30
+    TEST_ASSERT_EQUAL(80, get_inventory_count(2));   // 100 - 20
+    TEST_ASSERT_EQUAL(90, get_inventory_count(3));   // 100 - 10
+    TEST_ASSERT_EQUAL(95, get_inventory_count(4));   // 100 - 5
+    TEST_ASSERT_EQUAL(50, get_inventory_count(5));   // 100 - 50
+    TEST_ASSERT_EQUAL(25, get_inventory_count(6));   // 100 - 75
+}
+
+void test_modify_inventory_reduce_partial_depletion(void)
+{
+    inventory_item_t items_to_add[QUANTITY_ITEMS] = {
+        {1, "FOOD", 20},     {2, "WATER", 10},    {3, "MEDICINE", 5},
+        {4, "TOOLS", 0},     {5, "GUNS", 100},    {6, "AMMO", 50}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_add, INVENTORY_ADD));
+
+    inventory_item_t items_to_reduce[QUANTITY_ITEMS] = {
+        {1, "FOOD", 50},     // Want 50, have 20
+        {2, "WATER", 100},   // Want 100, have 10
+        {3, "MEDICINE", 10}, // Want 10, have 5
+        {4, "TOOLS", 10},    // Want 10, have 0
+        {5, "GUNS", 50},     // Want 50, have 100 - OK
+        {6, "AMMO", 50}      // Want 50, have 50 - exactly
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_reduce, INVENTORY_REDUCE));
+
+    TEST_ASSERT_EQUAL(0, get_inventory_count(1));
+    TEST_ASSERT_EQUAL(0, get_inventory_count(2));
+    TEST_ASSERT_EQUAL(0, get_inventory_count(3));
+    TEST_ASSERT_EQUAL(0, get_inventory_count(4));
+    TEST_ASSERT_EQUAL(50, get_inventory_count(5));
+    TEST_ASSERT_EQUAL(0, get_inventory_count(6));
+}
+
+void test_modify_inventory_reduce_zero_quantity(void)
+{
+    // Add inventory
+    inventory_item_t items_to_add[QUANTITY_ITEMS] = {
+        {1, "FOOD", 100},    {2, "WATER", 100},   {3, "MEDICINE", 100},
+        {4, "TOOLS", 100},   {5, "GUNS", 100},    {6, "AMMO", 100}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_to_add, INVENTORY_ADD));
+
+    // Reduce with zero quantities (no change)
+    inventory_item_t items_zero[QUANTITY_ITEMS] = {
+        {1, "FOOD", 0},      {2, "WATER", 0},     {3, "MEDICINE", 0},
+        {4, "TOOLS", 0},     {5, "GUNS", 0},      {6, "AMMO", 0}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items_zero, INVENTORY_REDUCE));
+
+    // Verify no change
+    for (int i = 1; i <= QUANTITY_ITEMS; i++)
+    {
+        TEST_ASSERT_EQUAL(100, get_inventory_count(i));
+    }
+}
+
+void test_modify_inventory_null_items(void)
+{
+    // NULL items should fail
+    TEST_ASSERT_EQUAL(-1, modify_inventory(NULL, INVENTORY_ADD));
+    TEST_ASSERT_EQUAL(-1, modify_inventory(NULL, INVENTORY_REDUCE));
+}
+
+void test_get_inventory_count_valid(void)
+{
+    // Add known quantities
+    inventory_item_t items[QUANTITY_ITEMS] = {
+        {1, "FOOD", 10},     {2, "WATER", 20},    {3, "MEDICINE", 30},
+        {4, "TOOLS", 40},    {5, "GUNS", 50},     {6, "AMMO", 60}
+    };
+    TEST_ASSERT_EQUAL(0, modify_inventory(items, INVENTORY_ADD));
+
+    // Query each item
+    TEST_ASSERT_EQUAL(10, get_inventory_count(1));
+    TEST_ASSERT_EQUAL(20, get_inventory_count(2));
+    TEST_ASSERT_EQUAL(30, get_inventory_count(3));
+    TEST_ASSERT_EQUAL(40, get_inventory_count(4));
+    TEST_ASSERT_EQUAL(50, get_inventory_count(5));
+    TEST_ASSERT_EQUAL(60, get_inventory_count(6));
+}
+
+void test_get_inventory_count_invalid_id(void)
+{
+    // Invalid item IDs should return -1
+    TEST_ASSERT_EQUAL(-1, get_inventory_count(0));
+    TEST_ASSERT_EQUAL(-1, get_inventory_count(-1));
+    TEST_ASSERT_EQUAL(-1, get_inventory_count(7));
+    TEST_ASSERT_EQUAL(-1, get_inventory_count(100));
+}
 
 int main(void)
 {
@@ -334,6 +496,17 @@ int main(void)
     // Shared data access tests
     RUN_TEST(test_get_shared_data);
     RUN_TEST(test_get_semaphores);
+
+    // Inventory tests
+    RUN_TEST(test_inventory_initialization);
+    RUN_TEST(test_modify_inventory_add);
+    RUN_TEST(test_modify_inventory_add_accumulates);
+    RUN_TEST(test_modify_inventory_reduce);
+    RUN_TEST(test_modify_inventory_reduce_partial_depletion);
+    RUN_TEST(test_modify_inventory_reduce_zero_quantity);
+    RUN_TEST(test_modify_inventory_null_items);
+    RUN_TEST(test_get_inventory_count_valid);
+    RUN_TEST(test_get_inventory_count_invalid_id);
 
     return UNITY_END();
 }

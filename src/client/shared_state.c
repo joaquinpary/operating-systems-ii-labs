@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define ITEMS_NAME "FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"
+#define IPC_NAME_BUFFER_SIZE 64
 
 static int shm_fd = -1;
 static shared_data_t* shared_data = NULL;
@@ -18,9 +19,9 @@ static sem_t* inventory_sem = NULL;
 static sem_t* message_available_sem = NULL;
 
 // Store IPC names for cleanup
-static char shm_name[64];
-static char inventory_sem_name[64];
-static char message_sem_name[64];
+static char shm_name[IPC_NAME_BUFFER_SIZE];
+static char inventory_sem_name[IPC_NAME_BUFFER_SIZE];
+static char message_sem_name[IPC_NAME_BUFFER_SIZE];
 
 int ipc_init(const char* client_id)
 {

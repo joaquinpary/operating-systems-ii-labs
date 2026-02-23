@@ -8,6 +8,8 @@
 #include <time.h>
 #include <zlib.h>
 
+#define TIMESTAMP_BASE_BUFFER_SIZE 32
+
 static void safe_strcpy(char* dest, size_t size, const char* src)
 {
     if (dest && size > 0)
@@ -350,7 +352,7 @@ static void generate_timestamp(char* buffer, size_t size)
     struct tm* tm_info = gmtime(&tv.tv_sec);
 
     // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
-    char base[32];
+    char base[TIMESTAMP_BASE_BUFFER_SIZE];
     strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
 
     int milliseconds = tv.tv_usec / 1000;
