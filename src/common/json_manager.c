@@ -8,6 +8,8 @@
 #include <time.h>
 #include <zlib.h>
 
+#define TIMESTAMP_BASE_BUFFER_SIZE 32
+
 static void safe_strcpy(char* dest, size_t size, const char* src)
 {
     if (dest && size > 0)
@@ -35,6 +37,13 @@ static cJSON* serialize_items_list(const void* ptr)
         cJSON_AddItemToArray(items_array, item);
     }
     cJSON_AddItemToObject(root, "items", items_array);
+
+    // Add order_timestamp if present (not empty)
+    if (payload->order_timestamp[0] != '\0')
+    {
+        cJSON_AddStringToObject(root, "order_timestamp", payload->order_timestamp);
+    }
+
     return root;
 }
 
@@ -116,6 +125,17 @@ static void deserialize_items_list(const cJSON* root, void* ptr)
 
             i++;
         }
+    }
+
+    // Deserialize order_timestamp if present
+    cJSON* order_ts = cJSON_GetObjectItemCaseSensitive(root, "order_timestamp");
+    if (cJSON_IsString(order_ts))
+    {
+        safe_strcpy(payload->order_timestamp, TIMESTAMP_SIZE, order_ts->valuestring);
+    }
+    else
+    {
+        payload->order_timestamp[0] = '\0'; // Empty if not present
     }
 }
 
@@ -200,27 +220,28 @@ typedef struct
 
 static const payload_handler_t handlers[] = {
     {HUB_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
-    {WAREHOUSE_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
-    {SERVER_TO_HUB__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
-    {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {HUB_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
-    {WAREHOUSE_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {HUB_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
-    {WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
-    {SERVER_TO_HUB__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
-    {SERVER_TO_WAREHOUSE__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {HUB_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
-    {WAREHOUSE_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
     {HUB_TO_SERVER__STOCK_REQUEST, serialize_items_list, deserialize_items_list},
     {HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, serialize_items_list, deserialize_items_list},
+    {HUB_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {WAREHOUSE_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
+    {WAREHOUSE_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
+    {WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
+    {WAREHOUSE_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
     {WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE, serialize_items_list, deserialize_items_list},
     {WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, serialize_items_list, deserialize_items_list},
+    {WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, serialize_items_list, deserialize_items_list},
+    {WAREHOUSE_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {SERVER_TO_HUB__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
+    {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
+    {SERVER_TO_HUB__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
+    {SERVER_TO_WAREHOUSE__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_HUB__INCOMING_STOCK_NOTICE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, serialize_server_emergency, deserialize_server_emergency},
-    {HUB_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
-    {WAREHOUSE_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_HUB__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_WAREHOUSE__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {NULL, NULL, NULL}};
@@ -331,7 +352,7 @@ static void generate_timestamp(char* buffer, size_t size)
     struct tm* tm_info = gmtime(&tv.tv_sec);
 
     // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
-    char base[32];
+    char base[TIMESTAMP_BASE_BUFFER_SIZE];
     strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
 
     int milliseconds = tv.tv_usec / 1000;
@@ -407,7 +428,7 @@ int create_keepalive_message(message_t* out, const char* source_role, const char
 }
 
 int create_items_message(message_t* out, const char* msg_type, const char* source_id, const char* target_id,
-                        const inventory_item_t* items, int item_count)
+                         const inventory_item_t* items, int item_count, const char* order_timestamp)
 {
     if (!out || !msg_type || !source_id || !target_id || !items || item_count < 0)
         return -1;
@@ -418,6 +439,17 @@ int create_items_message(message_t* out, const char* msg_type, const char* sourc
     for (int i = 0; i < count; i++)
     {
         payload.items[i] = items[i];
+    }
+
+    // Set order_timestamp only for receipt confirmation messages
+    if (order_timestamp != NULL && (strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0 ||
+                                    strcmp(msg_type, WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0))
+    {
+        safe_strcpy(payload.order_timestamp, TIMESTAMP_SIZE, order_timestamp);
+    }
+    else
+    {
+        payload.order_timestamp[0] = '\0'; // Empty string for other message types
     }
 
     const char* source_role = NULL;

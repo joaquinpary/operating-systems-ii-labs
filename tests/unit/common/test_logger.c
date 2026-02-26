@@ -27,8 +27,6 @@ void tearDown(void)
     system(cmd);
 }
 
-// ==================== INITIALIZATION TESTS ====================
-
 void test_log_init_success(void)
 {
     logger_config_t config = {.log_file_path = TEST_LOG_FILE,
@@ -61,8 +59,6 @@ void test_log_init_double_init(void)
     // Second init should fail
     TEST_ASSERT_EQUAL(-1, log_init(&config));
 }
-
-// ==================== LOGGING TESTS ====================
 
 void test_log_write_basic(void)
 {
@@ -149,8 +145,6 @@ void test_log_level_to_string(void)
     TEST_ASSERT_EQUAL_STRING("WARNING", log_level_to_string(LOG_WARNING));
     TEST_ASSERT_EQUAL_STRING("ERROR", log_level_to_string(LOG_ERROR));
 }
-
-// ==================== ROTATION TESTS ====================
 
 void test_log_rotation_on_size(void)
 {
@@ -261,8 +255,6 @@ void test_log_max_backup_files(void)
     TEST_ASSERT_NOT_EQUAL(0, access("/tmp/test_app.log.3", F_OK));
 }
 
-// ==================== CONCURRENCY TESTS ====================
-
 typedef struct
 {
     int thread_id;
@@ -332,6 +324,89 @@ void test_concurrent_writes(void)
     TEST_ASSERT_EQUAL(num_threads * messages_per_thread, line_count);
 }
 
+void test_log_write_before_init(void)
+{
+    log_close();
+    
+    log_write(LOG_INFO, "This should not be written");
+    
+    TEST_PASS();
+}
+
+void test_log_rotate_before_init(void)
+{
+    log_close();
+    
+    TEST_ASSERT_EQUAL(-1, log_rotate());
+}
+
+void test_log_close_when_not_init(void)
+{
+    log_close();
+    
+    log_close();
+    
+    TEST_PASS();
+}
+
+void test_log_level_unknown(void)
+{
+    // Test with an invalid log level value
+    const char* result = log_level_to_string((log_level_t)999);
+    TEST_ASSERT_EQUAL_STRING("UNKNOWN", result);
+}
+
+void test_log_all_levels(void)
+{
+    logger_config_t config = {.log_file_path = TEST_LOG_FILE,
+                              .max_file_size = TEST_LOG_SIZE * 10,
+                              .max_backup_files = 3,
+                              .min_level = LOG_DEBUG};
+
+    log_init(&config);
+    
+    log_write(LOG_DEBUG, "Debug message");
+    log_write(LOG_INFO, "Info message");
+    log_write(LOG_WARNING, "Warning message");
+    log_write(LOG_ERROR, "Error message");
+    
+    log_close();
+    
+    // Verify all levels were written
+    FILE* f = fopen(TEST_LOG_FILE, "r");
+    TEST_ASSERT_NOT_NULL(f);
+    
+    char content[4096] = {0};
+    fread(content, 1, sizeof(content) - 1, f);
+    fclose(f);
+    
+    TEST_ASSERT_NOT_NULL(strstr(content, "[DEBUG]"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "[INFO]"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "[WARNING]"));
+    TEST_ASSERT_NOT_NULL(strstr(content, "[ERROR]"));
+}
+
+void test_log_init_default_values(void)
+{
+    // Test with 0 values to trigger defaults
+    logger_config_t config = {.log_file_path = TEST_LOG_FILE,
+                              .max_file_size = 0,        // Should use default 10MB
+                              .max_backup_files = -1,    // Should use default 5
+                              .min_level = LOG_DEBUG};
+
+    TEST_ASSERT_EQUAL(0, log_init(&config));
+    
+    // Write something to verify it works
+    log_write(LOG_INFO, "Test with defaults");
+    
+    log_close();
+    
+    // Verify file was created
+    FILE* f = fopen(TEST_LOG_FILE, "r");
+    TEST_ASSERT_NOT_NULL(f);
+    fclose(f);
+}
+
 // ==================== MAIN ====================
 
 int main(void)
@@ -342,11 +417,19 @@ int main(void)
     RUN_TEST(test_log_init_success);
     RUN_TEST(test_log_init_null_config);
     RUN_TEST(test_log_init_double_init);
+    RUN_TEST(test_log_init_default_values);
 
     // Logging tests
     RUN_TEST(test_log_write_basic);
     RUN_TEST(test_log_level_filtering);
     RUN_TEST(test_log_level_to_string);
+    RUN_TEST(test_log_level_unknown);
+    RUN_TEST(test_log_all_levels);
+
+    // Error handling tests
+    RUN_TEST(test_log_write_before_init);
+    RUN_TEST(test_log_rotate_before_init);
+    RUN_TEST(test_log_close_when_not_init);
 
     // Rotation tests
     RUN_TEST(test_log_rotation_on_size);

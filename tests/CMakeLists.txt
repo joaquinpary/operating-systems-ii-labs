@@ -60,10 +60,45 @@ set(test_server_file ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/test_server.c)
 foreach(test_file ${CLIENT_TEST})
     get_filename_component(test_name ${test_file} NAME_WE)
     set(exec_name test_client_${test_name})
-    add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/mock_server.c)
-    target_link_libraries(${exec_name} PRIVATE unity pthread)
-    target_compile_definitions(${exec_name} PRIVATE TESTING)
-    add_test(NAME ${exec_name} COMMAND ${exec_name})
+    
+    if(test_name STREQUAL "test_logic_static")
+        set(CLIENT_SRC_NO_LOGIC ${CLIENT_SRC})
+        list(FILTER CLIENT_SRC_NO_LOGIC EXCLUDE REGEX ".*logic\\.c$")
+        
+        add_executable(${exec_name} ${test_file} ${CLIENT_SRC_NO_LOGIC} ${COMMON_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/mock_server.c)
+        
+        target_compile_options(${exec_name} PRIVATE -Wno-missing-prototypes)
+        target_link_options(${exec_name} PRIVATE 
+            -Wl,--unresolved-symbols=ignore-all
+            -Wl,-zmuldefs
+            -no-pie
+        )
+        
+        target_link_libraries(${exec_name} PRIVATE unity pthread)
+        target_compile_definitions(${exec_name} PRIVATE TESTING)
+        add_test(NAME ${exec_name} COMMAND ${exec_name})
+    elseif(test_name STREQUAL "test_client_static")
+        set(CLIENT_SRC_NO_CLIENT ${CLIENT_SRC})
+        list(FILTER CLIENT_SRC_NO_CLIENT EXCLUDE REGEX ".*client\\.c$")
+        
+        add_executable(${exec_name} ${test_file} ${CLIENT_SRC_NO_CLIENT} ${COMMON_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/mock_server.c)
+        
+        target_compile_options(${exec_name} PRIVATE -Wno-missing-prototypes)
+        target_link_options(${exec_name} PRIVATE 
+            -Wl,--unresolved-symbols=ignore-all
+            -Wl,-zmuldefs
+            -no-pie
+        )
+        
+        target_link_libraries(${exec_name} PRIVATE unity pthread)
+        target_compile_definitions(${exec_name} PRIVATE TESTING)
+        add_test(NAME ${exec_name} COMMAND ${exec_name})
+    else()
+        add_executable(${exec_name} ${test_file} ${CLIENT_SRC} ${COMMON_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/mock_server.c)
+        target_link_libraries(${exec_name} PRIVATE unity pthread)
+        target_compile_definitions(${exec_name} PRIVATE TESTING)
+        add_test(NAME ${exec_name} COMMAND ${exec_name})
+    endif()
 endforeach()
 
 message(STATUS "Setting up multiple common test executables...")

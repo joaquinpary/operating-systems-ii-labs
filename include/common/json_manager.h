@@ -22,6 +22,7 @@ extern "C"
 #define WAREHOUSE_TO_SERVER__INVENTORY_UPDATE "WAREHOUSE_TO_SERVER__INVENTORY_UPDATE"
 #define WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE "WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE"
 #define WAREHOUSE_TO_SERVER__REPLENISH_REQUEST "WAREHOUSE_TO_SERVER__REPLENISH_REQUEST"
+#define WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION "WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION"
 #define WAREHOUSE_TO_SERVER__EMERGENCY_ALERT "WAREHOUSE_TO_SERVER__EMERGENCY_ALERT"
 #define WAREHOUSE_TO_SERVER__ACK "WAREHOUSE_TO_SERVER__ACK"
 #define SERVER_TO_HUB__AUTH_RESPONSE "SERVER_TO_HUB__AUTH_RESPONSE"
@@ -71,6 +72,11 @@ extern "C"
 #define ITEM_NAME_SIZE 32
 #define QUANTITY_ITEMS 6
 
+#define EMERGENCY_TYPE_SIZE 20
+#define EMERGENCY_INSTRUCTIONS_SIZE 100
+
+#define OK 200
+
 #define BUFFER_SIZE 1024
 
     typedef struct inventory_item
@@ -83,14 +89,15 @@ extern "C"
     typedef struct payload_items_list
     {
         inventory_item_t items[QUANTITY_ITEMS];
+        char order_timestamp[TIMESTAMP_SIZE];
     } payload_items_list;
 
-    typedef payload_items_list payload_inventory_update;
-    typedef payload_items_list payload_stock_request;
-    typedef payload_items_list payload_receipt_confirmation;
-    typedef payload_items_list payload_shipment_notice;
-    typedef payload_items_list payload_order_stock;
-    typedef payload_items_list payload_restock_notice;
+    typedef payload_items_list payload_inventory_update;     // HUB - WAREHOUSE - SERVER
+    typedef payload_items_list payload_stock_request;        // HUB
+    typedef payload_items_list payload_receipt_confirmation; // HUB - WAREHOUSE -> SERVER
+    typedef payload_items_list payload_shipment_notice;      // WAREHOUSE -> SERVER
+    typedef payload_items_list payload_order_stock;          // SERVER -> WAREHOUSE
+    typedef payload_items_list payload_restock_notice;       // SERVER -> HUB - WAREHOUSE
 
     typedef struct payload_auth_response
     {
@@ -117,13 +124,13 @@ extern "C"
     typedef struct payload_client_emergency_alert
     {
         int emergency_code;
-        char emergency_type[20];
+        char emergency_type[EMERGENCY_TYPE_SIZE];
     } payload_client_emergency_alert;
 
     typedef struct payload_server_emergency_alert
     {
         int emergency_code;
-        char instructions[100];
+        char instructions[EMERGENCY_INSTRUCTIONS_SIZE];
     } payload_server_emergency_alert;
 
     typedef union payload_t {
@@ -197,21 +204,23 @@ extern "C"
      * Uses the exact msg_type string provided (e.g., HUB_TO_SERVER__INVENTORY_UPDATE).
      * This ensures consistency between message creation and reception - you use the same
      * string constant in both client and server code.
-     * 
+     *
      * @param out Pointer to the message_t structure to populate.
      * @param msg_type Complete message type (use the #define constants like HUB_TO_SERVER__INVENTORY_UPDATE).
      * @param source_id Source identifier (e.g., "client_0001").
      * @param target_id Target identifier (e.g., "SERVER" or specific client ID).
      * @param items Array of inventory items (max QUANTITY_ITEMS).
      * @param item_count Number of items in the array.
+     * @param order_timestamp Optional timestamp for receipt confirmation messages (NULL for other message types).
      * @return 0 on success, negative value on error.
-     * 
+     *
      * Example usage:
-     *   create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, "client_0001", "SERVER", items, count);
-     *   create_items_message(&msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "client_0002", "SERVER", items, count);
+     *   create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, "client_0001", "SERVER", items, count, NULL);
+     *   create_items_message(&msg, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, "client_0001", "SERVER", items, count,
+     * original_timestamp);
      */
     int create_items_message(message_t* out, const char* msg_type, const char* source_id, const char* target_id,
-                            const inventory_item_t* items, int item_count);
+                             const inventory_item_t* items, int item_count, const char* order_timestamp);
 
     /*@brief
      * Creates an authentication response message (SERVER to client).

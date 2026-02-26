@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "ipc.h"
+#include "shared_state.h"
 #include "json_manager.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -10,16 +10,18 @@
 #include <time.h>
 #include <unistd.h>
 
+#define ITEMS_NAME "FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"
+#define IPC_NAME_BUFFER_SIZE 64
+
 static int shm_fd = -1;
 static shared_data_t* shared_data = NULL;
 static sem_t* inventory_sem = NULL;
 static sem_t* message_available_sem = NULL;
 
 // Store IPC names for cleanup
-static char shm_name[64];
-static char inventory_sem_name[64];
-static char message_sem_name[64];
-
+static char shm_name[IPC_NAME_BUFFER_SIZE];
+static char inventory_sem_name[IPC_NAME_BUFFER_SIZE];
+static char message_sem_name[IPC_NAME_BUFFER_SIZE];
 
 int ipc_init(const char* client_id)
 {
@@ -62,7 +64,7 @@ int ipc_init(const char* client_id)
     memset(shared_data, 0, sizeof(shared_data_t));
 
     // Initialize inventory with predefined items (all starting at 0 quantity)
-    const char* item_names[QUANTITY_ITEMS] = {"FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"};
+    const char* item_names[QUANTITY_ITEMS] = {ITEMS_NAME};
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         shared_data->inventory_item[i].item_id = i + 1; // IDs from 1 to 6
@@ -195,12 +197,11 @@ int pop_pending_message(message_t* msg)
     return deserialize_message_from_json(json_buffer, msg);
 }
 
-// Update inventory from an array of items
-int update_inventory(const inventory_item_t* items)
+int modify_inventory(const inventory_item_t* items, inventory_operation_t operation)
 {
     if (items == NULL)
     {
-        fprintf(stderr, "[IPC] Invalid parameters for update_inventory\n");
+        fprintf(stderr, "[SHARED_STATE] Invalid parameters for modify_inventory\n");
         return -1;
     }
 
@@ -208,19 +209,20 @@ int update_inventory(const inventory_item_t* items)
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        if (operation == INVENTORY_ADD)
         {
-            if (shared_data->inventory_item[j].item_id == items[i].item_id)
-            {
-                shared_data->inventory_item[j].quantity = items[i].quantity;
-                strncpy(shared_data->inventory_item[j].item_name, items[i].item_name, ITEM_NAME_SIZE - 1);
-                shared_data->inventory_item[j].item_name[ITEM_NAME_SIZE - 1] = '\0';
-                break;
-            }
+            shared_data->inventory_item[i].quantity += items[i].quantity;
+        }
+        else if (operation == INVENTORY_REDUCE)
+        {
+            int requested_qty = items[i].quantity;
+            int available_qty = shared_data->inventory_item[i].quantity;
+            int actual_qty = (requested_qty <= available_qty) ? requested_qty : available_qty;
+
+            shared_data->inventory_item[i].quantity -= actual_qty;
         }
     }
-    
-    // Signal that inventory was updated (for consume timer reactivation)
+
     shared_data->inventory_updated = 1;
 
     sem_post(inventory_sem);
@@ -231,8 +233,7 @@ int get_inventory_count(int item_id)
 {
     int count = -1;
     sem_wait(inventory_sem);
-    
-    // Find item by ID
+
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         if (shared_data->inventory_item[i].item_id == item_id)
@@ -241,7 +242,7 @@ int get_inventory_count(int item_id)
             break;
         }
     }
-    
+
     sem_post(inventory_sem);
     return count;
 }

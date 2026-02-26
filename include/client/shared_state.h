@@ -1,5 +1,5 @@
-#ifndef IPC_H
-#define IPC_H
+#ifndef SHARED_STATE_H
+#define SHARED_STATE_H
 
 #include "json_manager.h"
 #include <semaphore.h>
@@ -31,17 +31,14 @@ typedef struct
     char client_role[ROLE_SIZE]; // "HUB" or "WAREHOUSE"
     char client_id[ID_SIZE];     // username (e.g., "client_0001")
 
-    // Inventario (placeholder por ahora)
-    
     inventory_item_t inventory_item[QUANTITY_ITEMS];
 
-    // Message queue entre procesos
     char pending_messages[10][BUFFER_SIZE];
     int message_count;
 
     // ACK tracking
     pending_ack_t pending_acks[MAX_PENDING_ACKS];
-    int ack_timeout_occurred; // Flag set when timeout happens
+    int ack_timeout_occurred;
 
     // Inventory control flags
     volatile sig_atomic_t inventory_updated; // Flag set when inventory is updated
@@ -120,11 +117,22 @@ int check_ack_timeouts(void);
 // ==================== INVENTORY ====================
 
 /**
- * Update inventory from an array of items
- * @param items Array of inventory items to update
+ * Modify inventory by adding or reducing quantities (thread-safe)
+ *
+ * ADD mode: Adds quantities to existing inventory (for restocking).
+ * REDUCE mode: Reduces inventory, consuming available stock (handles partial depletion).
+ *
+ * @param items Array of QUANTITY_ITEMS with quantities to add/reduce
+ * @param operation INVENTORY_ADD or INVENTORY_REDUCE
  * @return 0 on success, -1 on error
  */
-int update_inventory(const inventory_item_t* items);
+typedef enum
+{
+    INVENTORY_ADD,   // Add quantities to inventory (restocking)
+    INVENTORY_REDUCE // Reduce quantities from inventory (consumption/dispatch)
+} inventory_operation_t;
+
+int modify_inventory(const inventory_item_t* items, inventory_operation_t operation);
 
 /**
  * Get inventory count for an item by ID
@@ -153,4 +161,4 @@ sem_t* get_inventory_sem(void);
  */
 sem_t* get_message_sem(void);
 
-#endif // IPC_H
+#endif
