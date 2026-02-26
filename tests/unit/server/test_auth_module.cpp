@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
+#include <pqxx/pqxx>
 #include <server/auth_module.hpp>
 #include <server/database.hpp>
-#include <pqxx/pqxx>
 
 class AuthModuleTest : public ::testing::Test
 {
@@ -17,10 +17,7 @@ class AuthModuleTest : public ::testing::Test
             GTEST_SKIP() << "Database not available, skipping auth_module tests";
         }
 
-        {
-            pqxx::work txn(*db_conn);
-            create_credentials_table(txn);
-        }
+        create_credentials_table(*db_conn);
 
         {
             pqxx::work txn(*db_conn);
@@ -147,4 +144,3 @@ TEST_F(AuthModuleTest, MultipleAuthenticationAttempts)
     auth_result result3 = auth_mod->authenticate("test_user", "correct_hash");
     EXPECT_EQ(result3.status_code, auth_result_code::SUCCESS);
 }
-

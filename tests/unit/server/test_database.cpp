@@ -79,8 +79,7 @@ TEST_F(DatabaseTest, CreateCredentialsTable)
         GTEST_SKIP() << "Database not available, skipping table creation test";
     }
 
-    pqxx::work txn(*conn);
-    int result = create_credentials_table(txn);
+    int result = create_credentials_table(*conn);
     EXPECT_EQ(result, 0);
 
     // Verify table exists (need new transaction since create_credentials_table commits)
@@ -100,12 +99,10 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameNonExistent)
     }
 
     // Ensure table exists
-    pqxx::work setup_txn(*conn);
-    create_credentials_table(setup_txn);
+    create_credentials_table(*conn);
 
     // Query for non-existent user
-    pqxx::work txn(*conn);
-    auto cred = query_credentials_by_username(txn, "nonexistent_user");
+    auto cred = query_credentials_by_username(*conn, "nonexistent_user");
     EXPECT_EQ(cred, nullptr);
 }
 
@@ -119,10 +116,7 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
     }
 
     // Ensure table exists
-    {
-        pqxx::work setup_txn(*conn);
-        create_credentials_table(setup_txn);
-    }
+    create_credentials_table(*conn);
 
     // Insert a test credential
     {
@@ -143,8 +137,7 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
 
     // Query for existing user
     {
-        pqxx::work query_txn(*conn);
-        auto cred = query_credentials_by_username(query_txn, "test_user");
+        auto cred = query_credentials_by_username(*conn, "test_user");
         ASSERT_NE(cred, nullptr);
         EXPECT_EQ(cred->username, "test_user");
         EXPECT_EQ(cred->password_hash, "test_hash");
@@ -170,10 +163,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
     }
 
     // Ensure table exists
-    {
-        pqxx::work setup_txn(*conn);
-        create_credentials_table(setup_txn);
-    }
+    create_credentials_table(*conn);
 
     // Clear table first
     {
@@ -205,8 +195,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
 
     // Verify specific credentials
     {
-        pqxx::work query_txn1(*conn);
-        auto cred1 = query_credentials_by_username(query_txn1, "test_user1");
+        auto cred1 = query_credentials_by_username(*conn, "test_user1");
         ASSERT_NE(cred1, nullptr);
         EXPECT_EQ(cred1->username, "test_user1");
         EXPECT_EQ(cred1->password_hash, "hash1");
@@ -214,8 +203,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
     }
 
     {
-        pqxx::work query_txn2(*conn);
-        auto cred2 = query_credentials_by_username(query_txn2, "test_user2");
+        auto cred2 = query_credentials_by_username(*conn, "test_user2");
         ASSERT_NE(cred2, nullptr);
         EXPECT_EQ(cred2->username, "test_user2");
         EXPECT_EQ(cred2->password_hash, "hash2");
@@ -241,10 +229,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableNonExistentFile)
     }
 
     // Ensure table exists
-    {
-        pqxx::work setup_txn(*conn);
-        create_credentials_table(setup_txn);
-    }
+    create_credentials_table(*conn);
 
     // Test with non-existent file
     int result = populate_credentials_table(*conn, "config/nonexistent_credentials.json");
@@ -307,10 +292,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableEmptyArray)
     }
 
     // Ensure table exists
-    {
-        pqxx::work setup_txn(*conn);
-        create_credentials_table(setup_txn);
-    }
+    create_credentials_table(*conn);
 
     // Create file with empty array
     const std::string test_file = "/tmp/empty_credentials.json";
@@ -336,10 +318,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableMissingFields)
     }
 
     // Ensure table exists
-    {
-        pqxx::work setup_txn(*conn);
-        create_credentials_table(setup_txn);
-    }
+    create_credentials_table(*conn);
 
     // Create file with incomplete credential (missing password)
     const std::string test_file = "/tmp/incomplete_credentials.json";
@@ -369,14 +348,14 @@ TEST_F(DatabaseTest, BuildConnectionStringWithEnvVars)
     // But we can test connect_to_database which uses it
     // This will fail to connect with fake credentials, but tests env var usage
     auto conn = connect_to_database();
-    
+
     // Cleanup environment
     unsetenv("POSTGRES_HOST");
     unsetenv("POSTGRES_DB");
     unsetenv("POSTGRES_USER");
     unsetenv("POSTGRES_PASSWORD");
     unsetenv("POSTGRES_PORT");
-    
+
     // Connection should fail (or succeed if those creds actually exist)
     // Either outcome is acceptable for this test
     SUCCEED();
@@ -388,15 +367,177 @@ TEST_F(DatabaseTest, ConnectToDatabaseErrorHandling)
     // Set invalid environment variables to force connection failure
     setenv("POSTGRES_HOST", "invalid_host_12345", 1);
     setenv("POSTGRES_PORT", "99999", 1);
-    
+
     auto conn = connect_to_database();
-    
+
     // Should return nullptr on connection failure
     EXPECT_EQ(conn, nullptr);
-    
+
     // Cleanup
     unsetenv("POSTGRES_HOST");
     unsetenv("POSTGRES_PORT");
+}
+// ==================== INVENTORY TESTS ====================
+
+TEST_F(DatabaseTest, CreateInventoryTables)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+
+    int result = create_inventory_tables(*conn);
+    EXPECT_EQ(result, 0);
+
+    pqxx::work verify_txn(*conn);
+    EXPECT_TRUE(
+        verify_txn
+            .exec("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'client_inventory')")[0][0]
+            .as<bool>());
+    EXPECT_TRUE(
+        verify_txn
+            .exec(
+                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'inventory_transactions')")[0]
+                                                                                                                    [0]
+            .as<bool>());
+}
+
+TEST_F(DatabaseTest, UpdateClientInventory)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int quantities[6] = {10, 20, 30, 40, 50, 60};
+    int result = update_client_inventory(*conn, "test_client", "HUB", quantities, "2026-02-26T14:00:00Z");
+    EXPECT_EQ(result, 0);
+
+    pqxx::work verify_txn(*conn);
+    pqxx::result db_res = verify_txn.exec_params(
+        "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1", "test_client");
+    ASSERT_EQ(db_res.size(), 1);
+    EXPECT_EQ(db_res[0][0].as<int>(), 10);
+    EXPECT_EQ(db_res[0][1].as<int>(), 20);
+    EXPECT_EQ(db_res[0][2].as<int>(), 30);
+    EXPECT_EQ(db_res[0][3].as<int>(), 40);
+    EXPECT_EQ(db_res[0][4].as<int>(), 50);
+    EXPECT_EQ(db_res[0][5].as<int>(), 60);
+}
+
+TEST_F(DatabaseTest, GetWarehouseWithAllStock)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    // Setup warehouse with stock
+    int stock[6] = {100, 100, 100, 100, 100, 100};
+    update_client_inventory(*conn, "wh_full", "WAREHOUSE", stock, "2026-02-26T14:00:00Z");
+
+    int partial_stock[6] = {50, 0, 0, 0, 0, 0};
+    update_client_inventory(*conn, "wh_partial", "WAREHOUSE", partial_stock, "2026-02-26T14:00:00Z");
+
+    int needed[6] = {10, 10, 10, 10, 10, 10};
+    std::string wh = get_warehouse_with_all_stock(*conn, needed);
+    EXPECT_EQ(wh, "wh_full");
+
+    int impossible[6] = {1000, 0, 0, 0, 0, 0};
+    wh = get_warehouse_with_all_stock(*conn, impossible);
+    EXPECT_EQ(wh, "");
+
+    // Test invalid needed (all zeros) should return first warehouse
+    int zeros[6] = {0, 0, 0, 0, 0, 0};
+    wh = get_warehouse_with_all_stock(*conn, zeros);
+    EXPECT_FALSE(wh.empty());
+}
+
+TEST_F(DatabaseTest, SetTransactionDestination)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int q[6] = {1, 1, 1, 1, 1, 1};
+    int tid = create_transaction(*conn, "STOCK_REQUEST", "hub_1", "HUB", q, "2026-02-26T15:00:00Z");
+
+    int result = set_transaction_destination(*conn, tid, "hub_2", "HUB");
+    EXPECT_EQ(result, 0);
+
+    pqxx::work verify_txn(*conn);
+    pqxx::result res =
+        verify_txn.exec_params("SELECT destination_id FROM inventory_transactions WHERE transaction_id = $1", tid);
+    EXPECT_EQ(res[0][0].as<std::string>(), "hub_2");
+}
+
+TEST_F(DatabaseTest, InvalidParameters)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+
+    int quantities[6] = {0};
+    // Line 324: check empty client_id
+    EXPECT_EQ(update_client_inventory(*conn, "", "HUB", quantities, "2026-02-26T14:00:00Z"), -1);
+
+    // Line 410: check empty destination_id in create_transaction
+    EXPECT_EQ(create_transaction(*conn, "STOCK_REQUEST", "", "HUB", quantities, "2026-02-26T14:00:00Z"), -1);
+
+    // Line 571 check nullptr transactions
+    EXPECT_EQ(get_pending_transactions(*conn, nullptr, 10), 0);
+    // Line 571 check max_count <= 0
+    transaction_record tr;
+    EXPECT_EQ(get_pending_transactions(*conn, &tr, 0), 0);
+}
+
+TEST_F(DatabaseTest, TransactionStateWorkflow)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int q[6] = {5, 5, 5, 0, 0, 0};
+    int tid = create_transaction(*conn, "STOCK_REQUEST", "hub_1", "HUB", q, "2026-02-26T15:00:00Z");
+    ASSERT_GT(tid, 0);
+
+    // Initially PENDING
+    {
+        transaction_record pending[10];
+        int count = get_pending_transactions(*conn, pending, 10);
+        EXPECT_GE(count, 1);
+        bool found = false;
+        for (int i = 0; i < count; i++)
+            if (pending[i].transaction_id == tid)
+            {
+                found = true;
+                break;
+            }
+        EXPECT_TRUE(found);
+    }
+
+    // Set source
+    set_transaction_source(*conn, tid, "wh_1", "WAREHOUSE");
+
+    // Mark ASSIGNED
+    mark_transaction_assigned(*conn, tid);
+
+    // Find it
+    int found_tid = find_transaction_id(*conn, "wh_1", "hub_1", "ASSIGNED");
+    EXPECT_EQ(found_tid, tid);
+
+    // Mark DISPATCHED
+    mark_transaction_dispatched(*conn, tid, "2026-02-26T15:30:00Z");
+
+    // Complete
+    complete_transaction(*conn, tid, "2026-02-26T16:00:00Z");
+
+    pqxx::work verify_txn(*conn);
+    pqxx::result res = verify_txn.exec_params(
+        "SELECT status, reception_timestamp FROM inventory_transactions WHERE transaction_id = $1", tid);
+    EXPECT_EQ(res[0][0].as<std::string>(), "COMPLETED");
+    EXPECT_FALSE(res[0][1].is_null());
 }
 
 int main(int argc, char** argv)

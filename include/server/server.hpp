@@ -3,6 +3,7 @@
 
 #include "auth_module.hpp"
 #include "config.hpp"
+#include "inventory_manager.hpp"
 #include "message_handler.hpp"
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
@@ -69,7 +70,7 @@ class server
   public:
     server(asio::io_context& io_context, const config::server_config& config,
            std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-           std::unique_ptr<timer_manager> timer_mgr);
+           std::unique_ptr<timer_manager> timer_mgr, std::unique_ptr<inventory_manager> inv_mgr);
     ~server();
     void start();
     void stop();
@@ -90,6 +91,7 @@ class server
     std::unique_ptr<session_manager> m_session_manager;
     std::unique_ptr<auth_module> m_auth_module;
     std::unique_ptr<timer_manager> m_timer_manager;
+    std::unique_ptr<inventory_manager> m_inventory_manager;
     std::unique_ptr<message_handler> m_message_handler;
 };
 

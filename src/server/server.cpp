@@ -319,10 +319,10 @@ void udp_server::send_to_session(const std::string& session_id, const std::strin
 
 server::server(asio::io_context& io_context, const config::server_config& config,
                std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-               std::unique_ptr<timer_manager> timer_mgr)
+               std::unique_ptr<timer_manager> timer_mgr, std::unique_ptr<inventory_manager> inv_mgr)
     : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
       m_session_manager(std::move(session_mgr)), m_auth_module(std::move(auth_mod)),
-      m_timer_manager(std::move(timer_mgr))
+      m_timer_manager(std::move(timer_mgr)), m_inventory_manager(std::move(inv_mgr))
 {
     // Create message_handler with generic send callback
     // The callback resolves whether to send via TCP or UDP
@@ -330,6 +330,7 @@ server::server(asio::io_context& io_context, const config::server_config& config
         *m_auth_module,
         *m_session_manager,
         *m_timer_manager,
+        *m_inventory_manager,
         [this](const std::string& session_id, const std::string& data) {
             // Generic send callback - determines TCP vs UDP and sends appropriately
             auto session_info = m_session_manager->get_session_info(session_id);

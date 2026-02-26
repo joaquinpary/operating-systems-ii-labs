@@ -2,6 +2,7 @@
 #define MESSAGE_HANDLER_HPP
 
 #include "auth_module.hpp"
+#include "inventory_manager.hpp"
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
 #include <common/json_manager.h>
@@ -23,6 +24,11 @@ enum class message_category
 {
     AUTH_REQUEST,
     ACK_MESSAGE,
+    INV_UPDATE,
+    STOCK_REQ,
+    RECEIPT_CONFIRM,
+    DISPATCH_NOTICE,
+    REPLENISH_REQ,
     OTHER
 };
 
@@ -32,7 +38,7 @@ class message_handler
     using send_callback_t = std::function<void(const std::string& session_id, const std::string& data)>;
     
     message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
-                    send_callback_t send_callback);
+                    inventory_manager& inv_mgr, send_callback_t send_callback);
     ~message_handler();
 
     // Generate ACK if the message requires it (called before processing for immediate response)
@@ -51,7 +57,7 @@ class message_handler
     message_processing_result handle_ack_message(const message_t& msg, const std::string& session_id);
 
     // Handle other message types (for now, reject if not authenticated)
-    message_processing_result handle_other_message(const message_t& msg, const std::string& session_id);
+    message_processing_result handle_other_message(const message_t& msg, const std::string& session_id, message_category category);
 
     // Categorize message type for routing
     message_category categorize_message(const char* msg_type) const;
@@ -66,6 +72,7 @@ class message_handler
     auth_module& m_auth_module;
     session_manager& m_session_manager;
     timer_manager& m_timer_manager;
+    inventory_manager& m_inventory_manager;
     send_callback_t m_send_callback;
 };
 

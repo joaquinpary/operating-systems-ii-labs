@@ -14,22 +14,28 @@ class tcp_session;
 
 struct session_info
 {
-    enum class connection_type { TCP, UDP };
-    
+    enum class connection_type
+    {
+        TCP,
+        UDP
+    };
+
     std::string session_id;
     bool is_authenticated;
     bool is_blacklisted;
     std::string client_type; // "HUB" or "WAREHOUSE"
     std::string username;
     connection_type type;
-    
+
     // UDP-specific: endpoint for sending responses and retries
     std::optional<asio::ip::udp::endpoint> udp_endpoint;
-    
+
     // TCP-specific: weak reference to tcp_session for message resending
     std::weak_ptr<tcp_session> tcp_session_ref;
-    
-    session_info() : is_authenticated(false), is_blacklisted(false), type(connection_type::TCP) {}
+
+    session_info() : is_authenticated(false), is_blacklisted(false), type(connection_type::TCP)
+    {
+    }
 };
 
 class session_manager
@@ -40,7 +46,7 @@ class session_manager
 
     // Generate a unique session ID for a new TCP connection
     std::string create_session();
-    
+
     // Create or get UDP session from endpoint (deterministic session_id)
     std::string get_or_create_udp_session(const asio::ip::udp::endpoint& endpoint);
 
@@ -49,10 +55,10 @@ class session_manager
 
     // Check if a session is authenticated
     bool is_authenticated(const std::string& session_id) const;
-    
+
     // Check if a session is blacklisted (should ignore all messages)
     bool is_blacklisted(const std::string& session_id) const;
-    
+
     // Blacklist a session (mark it to ignore all future messages)
     void blacklist_session(const std::string& session_id);
 
@@ -64,12 +70,16 @@ class session_manager
 
     // Get client type for a session
     std::string get_client_type(const std::string& session_id) const;
-    
+
+    // Find session_id by username (for routing messages to specific connected clients)
+    // Returns empty string if no authenticated session found for this username
+    std::string find_session_by_username(const std::string& username) const;
+
     // UDP-specific methods
-    
+
     // Get UDP endpoint for a session (for sending responses/retries)
     std::optional<asio::ip::udp::endpoint> get_udp_endpoint(const std::string& session_id) const;
-    
+
     // Set TCP session reference for message resending (stores weak_ptr)
     void set_tcp_session(const std::string& session_id, std::weak_ptr<tcp_session> session);
 
