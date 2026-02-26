@@ -36,7 +36,7 @@ class message_handler
 {
   public:
     using send_callback_t = std::function<void(const std::string& session_id, const std::string& data)>;
-    
+
     message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
                     inventory_manager& inv_mgr, send_callback_t send_callback);
     ~message_handler();
@@ -57,7 +57,8 @@ class message_handler
     message_processing_result handle_ack_message(const message_t& msg, const std::string& session_id);
 
     // Handle other message types (for now, reject if not authenticated)
-    message_processing_result handle_other_message(const message_t& msg, const std::string& session_id, message_category category);
+    message_processing_result handle_other_message(const message_t& msg, const std::string& session_id,
+                                                   message_category category);
 
     // Categorize message type for routing
     message_category categorize_message(const char* msg_type) const;

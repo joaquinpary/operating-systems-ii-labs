@@ -28,7 +28,7 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
   public:
     tcp_session(asio::ip::tcp::socket socket, message_handler& msg_handler, session_manager& session_mgr);
     void start();
-    
+
     // Public method for sending data (used for retries)
     void send(const std::string& data);
 
@@ -49,7 +49,7 @@ class udp_server
   public:
     udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, message_handler& msg_handler,
                session_manager& session_mgr);
-    
+
     // Send message to a session (looks up endpoint from session_manager)
     void send_to_session(const std::string& session_id, const std::string& data);
 

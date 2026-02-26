@@ -35,8 +35,9 @@ int main()
         auto timer_mgr = std::make_unique<timer_manager>(io_context);
         auto inv_mgr = std::make_unique<inventory_manager>(*db_connection);
         // Note: message_handler is created by server with send callback configured
-        
-        server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(timer_mgr), std::move(inv_mgr));
+
+        server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(timer_mgr),
+                   std::move(inv_mgr));
 
         asio::signal_set signals(io_context, SIGINT, SIGTERM);
         signals.async_wait([&](const asio::error_code&, int) {
