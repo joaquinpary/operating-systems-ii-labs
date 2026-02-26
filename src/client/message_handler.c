@@ -5,6 +5,35 @@
 #include <stdio.h>
 #include <string.h>
 
+/**
+ * @brief Helper function to create and enqueue an ACK message
+ * @param msg_timestamp The timestamp of the message being acknowledged
+ * @return 0 on success, -1 on failure
+ */
+static int send_ack_to_server(const char* msg_timestamp)
+{
+    shared_data_t* shared_data = get_shared_data();
+    message_t ack_msg;
+
+    if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
+                                      msg_timestamp, 200) != 0)
+    {
+        LOG_ERROR_MSG("Failed to create ACK message");
+        fprintf(stderr, "[RECEIVER] Failed to create ACK message\n");
+        return -1;
+    }
+
+    if (enqueue_pending_message(&ack_msg) != 0)
+    {
+        LOG_ERROR_MSG("Failed to enqueue ACK");
+        fprintf(stderr, "[RECEIVER] Failed to enqueue ACK\n");
+        return -1;
+    }
+
+    LOG_DEBUG_MSG("ACK enqueued successfully");
+    return 0;
+}
+
 int handle_server_message(const message_t* msg)
 {
     if (!msg)
@@ -28,20 +57,8 @@ int handle_server_message(const message_t* msg)
     if (strcmp(msg->msg_type, SERVER_TO_WAREHOUSE__AUTH_RESPONSE) == 0 ||
         strcmp(msg->msg_type, SERVER_TO_HUB__AUTH_RESPONSE) == 0)
     {
-        message_t ack_msg;
-
-        if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                          msg->timestamp, 200) != 0)
+        if (send_ack_to_server(msg->timestamp) != 0)
         {
-            LOG_ERROR_MSG("Failed to create ACK message");
-            fprintf(stderr, "[RECEIVER] Failed to create ACK message\n");
-            return -1;
-        }
-
-        if (enqueue_pending_message(&ack_msg) != 0)
-        {
-            LOG_ERROR_MSG("Failed to enqueue ACK");
-            fprintf(stderr, "[RECEIVER] Failed to enqueue ACK\n");
             return -1;
         }
 
@@ -60,19 +77,8 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
-        message_t ack_msg;
-        if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                          msg->timestamp, 200) != 0)
+        if (send_ack_to_server(msg->timestamp) != 0)
         {
-            LOG_ERROR_MSG("Failed to create ACK message for INVENTORY_UPDATE");
-            fprintf(stderr, "[RECEIVER] Failed to create ACK message for INVENTORY_UPDATE\n");
-            return -1;
-        }
-
-        if (enqueue_pending_message(&ack_msg) != 0)
-        {
-            LOG_ERROR_MSG("Failed to enqueue ACK for INVENTORY_UPDATE");
-            fprintf(stderr, "[RECEIVER] Failed to enqueue ACK for INVENTORY_UPDATE\n");
             return -1;
         }
 
@@ -86,17 +92,8 @@ int handle_server_message(const message_t* msg)
         LOG_INFO_MSG("Received dispatch order to HUB: %s", msg->target_id);
 
         // Send ACK to server
-        message_t ack_msg;
-        if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                          msg->timestamp, 200) != 0)
+        if (send_ack_to_server(msg->timestamp) != 0)
         {
-            LOG_ERROR_MSG("Failed to create ACK message for dispatch order");
-            return -1;
-        }
-
-        if (enqueue_pending_message(&ack_msg) != 0)
-        {
-            LOG_ERROR_MSG("Failed to enqueue ACK for dispatch order");
             return -1;
         }
         LOG_DEBUG_MSG("ACK sent for dispatch order");
@@ -135,17 +132,8 @@ int handle_server_message(const message_t* msg)
         LOG_INFO_MSG("Received stock delivery from server");
 
         // Send ACK to server
-        message_t ack_msg;
-        if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                          msg->timestamp, 200) != 0)
+        if (send_ack_to_server(msg->timestamp) != 0)
         {
-            LOG_ERROR_MSG("Failed to create ACK message for stock delivery");
-            return -1;
-        }
-
-        if (enqueue_pending_message(&ack_msg) != 0)
-        {
-            LOG_ERROR_MSG("Failed to enqueue ACK for stock delivery");
             return -1;
         }
         LOG_DEBUG_MSG("ACK sent for stock delivery");
@@ -180,7 +168,6 @@ int handle_server_message(const message_t* msg)
         return 0;
     }
 
-    // Unknown message type
     LOG_WARNING_MSG("Unknown message type: %s", msg->msg_type);
     return 0;
 }
