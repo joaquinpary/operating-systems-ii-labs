@@ -36,10 +36,10 @@ std::string session_manager::create_session()
 std::string session_manager::get_or_create_udp_session(const asio::ip::udp::endpoint& endpoint)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     // Generate deterministic session_id from endpoint
     std::string session_id = make_udp_session_id(endpoint);
-    
+
     // Check if session already exists
     auto it = m_sessions.find(session_id);
     if (it != m_sessions.end())
@@ -48,7 +48,7 @@ std::string session_manager::get_or_create_udp_session(const asio::ip::udp::endp
         it->second.udp_endpoint = endpoint;
         return session_id;
     }
-    
+
     // Create new UDP session
     session_info info;
     info.session_id = session_id;
@@ -57,7 +57,7 @@ std::string session_manager::get_or_create_udp_session(const asio::ip::udp::endp
     info.username = "";
     info.type = session_info::connection_type::UDP;
     info.udp_endpoint = endpoint;
-    
+
     m_sessions[session_id] = info;
     return session_id;
 }
@@ -138,6 +138,19 @@ std::string session_manager::get_client_type(const std::string& session_id) cons
     return "";
 }
 
+std::string session_manager::find_session_by_username(const std::string& username) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const auto& [session_id, info] : m_sessions)
+    {
+        if (info.is_authenticated && !info.is_blacklisted && info.username == username)
+        {
+            return session_id;
+        }
+    }
+    return "";
+}
+
 // ==================== UDP-SPECIFIC METHODS ====================
 
 std::optional<asio::ip::udp::endpoint> session_manager::get_udp_endpoint(const std::string& session_id) const
@@ -161,7 +174,7 @@ std::string session_manager::make_udp_session_id(const asio::ip::udp::endpoint& 
 void session_manager::set_tcp_session(const std::string& session_id, std::weak_ptr<tcp_session> session)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    
+
     auto it = m_sessions.find(session_id);
     if (it != m_sessions.end())
     {

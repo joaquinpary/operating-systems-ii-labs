@@ -21,8 +21,7 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
 
     try
     {
-        pqxx::work txn(m_db_connection);
-        auto cred = query_credentials_by_username(txn, username);
+        auto cred = query_credentials_by_username(m_db_connection, username);
 
         if (!cred)
         {
