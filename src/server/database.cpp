@@ -645,3 +645,47 @@ int find_transaction_id(pqxx::connection& conn, const std::string& source_id, co
         return -1;
     }
 }
+
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, int quantities_out[6])
+{
+    if (client_id.empty() || !quantities_out)
+    {
+        std::cerr << "Invalid parameters for get_client_inventory" << std::endl;
+        return -1;
+    }
+
+    // Initialize to zeros (default for clients with no inventory row)
+    for (int i = 0; i < 6; i++)
+    {
+        quantities_out[i] = 0;
+    }
+
+    try
+    {
+        pqxx::work txn(conn);
+        std::string sql = "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1";
+
+        pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{client_id});
+
+        if (result.empty())
+        {
+            std::cout << "No inventory found for client " << client_id << ", returning zeros" << std::endl;
+            return 0;
+        }
+
+        quantities_out[0] = result[0][0].as<int>();
+        quantities_out[1] = result[0][1].as<int>();
+        quantities_out[2] = result[0][2].as<int>();
+        quantities_out[3] = result[0][3].as<int>();
+        quantities_out[4] = result[0][4].as<int>();
+        quantities_out[5] = result[0][5].as<int>();
+
+        std::cout << "Retrieved inventory for client " << client_id << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error getting client inventory: " << ex.what() << std::endl;
+        return -1;
+    }
+}

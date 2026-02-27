@@ -52,6 +52,10 @@ class inventory_manager
     // Returns fulfilled orders so message_handler can send dispatch messages
     std::vector<stock_request_result> process_pending_orders(const std::string& warehouse_id);
 
+    // Build an INVENTORY_UPDATE message from the client's stored inventory in the database
+    // Returns true on success (out_msg populated), false on error
+    bool get_client_inventory_message(const std::string& client_id, const std::string& client_type, message_t& out_msg);
+
   private:
     pqxx::connection& m_db_connection;
 

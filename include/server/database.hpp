@@ -56,4 +56,9 @@ int get_pending_transactions(pqxx::connection& conn, transaction_record* out_tra
 int find_transaction_id(pqxx::connection& conn, const std::string& source_id, const std::string& destination_id,
                         const std::string& status);
 
+// Query a client's current inventory from the database
+// Returns 0 on success (quantities_out populated), -1 on error
+// If client has no inventory row, quantities_out is filled with zeros
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, int quantities_out[6]);
+
 #endif

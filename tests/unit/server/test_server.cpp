@@ -280,17 +280,29 @@ TEST_F(ServerTest, UDPEchoResponse)
     std::size_t bytes_sent = client.send_to(asio::buffer(test_message), server_endpoint);
     EXPECT_GT(bytes_sent, 0);
 
-    std::array<char, 1024> response;
-    udp::endpoint sender_endpoint;
-    asio::error_code ec;
-    std::size_t bytes_received = client.receive_from(asio::buffer(response), sender_endpoint, 0, ec);
-    EXPECT_GT(bytes_received, 0);
-    EXPECT_FALSE(ec);
+    // After successful auth, server sends both auth response and inventory update
+    // Read both messages and verify auth response
+    bool found_auth_response = false;
+    for (int i = 0; i < 2; i++)
+    {
+        std::array<char, 1024> response;
+        udp::endpoint sender_endpoint;
+        asio::error_code ec;
+        std::size_t bytes_received = client.receive_from(asio::buffer(response), sender_endpoint, 0, ec);
+        EXPECT_GT(bytes_received, 0);
+        EXPECT_FALSE(ec);
 
-    message_t response_msg;
-    result = deserialize_message_from_json(std::string(response.data(), bytes_received).c_str(), &response_msg);
-    EXPECT_EQ(result, 0);
-    EXPECT_EQ(response_msg.payload.server_auth_response.status_code, 200);
+        message_t response_msg;
+        result = deserialize_message_from_json(std::string(response.data(), bytes_received).c_str(), &response_msg);
+        EXPECT_EQ(result, 0);
+
+        if (strcmp(response_msg.msg_type, SERVER_TO_HUB__AUTH_RESPONSE) == 0)
+        {
+            EXPECT_EQ(response_msg.payload.server_auth_response.status_code, 200);
+            found_auth_response = true;
+        }
+    }
+    EXPECT_TRUE(found_auth_response);
 }
 
 int main(int argc, char** argv)

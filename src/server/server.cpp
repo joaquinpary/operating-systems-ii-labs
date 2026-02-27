@@ -112,7 +112,10 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
     if (!result.success)
     {
         std::cerr << "\n\n[TCP] ERROR: Message processing failed - " << result.error_message << std::endl;
-        do_read();
+        if (!m_writing)
+        {
+            do_read();
+        }
         return;
     }
 
@@ -128,10 +131,11 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
         else
         {
             std::cerr << "\n\n[TCP] ERROR: Failed to serialize response message" << std::endl;
-            do_read();
         }
     }
-    else
+
+    // If nothing was queued, go back to reading
+    if (!m_writing)
     {
         do_read();
     }
@@ -139,7 +143,26 @@ void tcp_session::process_received_data(std::size_t bytes_transferred)
 
 void tcp_session::do_write(const std::string& data)
 {
+    m_write_queue.push_back(data);
+    if (!m_writing)
+    {
+        m_writing = true;
+        do_write_next();
+    }
+}
+
+void tcp_session::do_write_next()
+{
+    if (m_write_queue.empty())
+    {
+        m_writing = false;
+        do_read();
+        return;
+    }
+
     auto self = shared_from_this();
+    std::string data = m_write_queue.front();
+    m_write_queue.pop_front();
 
     auto fixed_buffer = std::make_shared<std::array<char, server_constants::DEFAULT_BUFFER_SIZE>>();
     std::fill(fixed_buffer->begin(), fixed_buffer->end(), 0);
@@ -160,13 +183,14 @@ void tcp_session::do_write(const std::string& data)
                           if (!ec)
                           {
                               std::cout << "\n\n[TCP] -> " << data << std::endl;
-                              do_read();
+                              do_write_next(); // Process next message in queue
                               return;
                           }
                           if (ec != asio::error::operation_aborted)
                           {
                               std::cerr << "\n\n[TCP] ERROR: " << ec.message() << std::endl;
                           }
+                          m_writing = false;
                       });
 }
 
