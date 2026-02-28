@@ -171,11 +171,26 @@ int run_client(const char* config_path)
     client_context ctx;
     client_credentials creds;
 
-    // Initialize logger
-    logger_config_t log_config = {.log_file_path = "/tmp/dhl_client.log",
-                                  .max_file_size = 10 * 1024 * 1024, // 10 MB
+    if (parse_conf(config_path, &config, &creds) != 0)
+    {
+        fprintf(stderr, "Failed to parse config file '%s'\n", config_path);
+        return 1;
+    }
+
+    // Initialize logger with per-client log file
+    const char* log_dir = getenv("LOG_DIR");
+    if (!log_dir)
+        log_dir = "/tmp";
+
+    char log_path[FILE_PATH];
+    snprintf(log_path, sizeof(log_path), "%s/%s.log", log_dir, creds.username);
+
+    logger_config_t log_config = {.max_file_size = 10 * 1024 * 1024, // 10 MB
                                   .max_backup_files = 5,
                                   .min_level = LOG_DEBUG};
+    
+    strncpy(log_config.log_file_path, log_path, FILE_PATH - 1);
+    log_config.log_file_path[FILE_PATH - 1] = '\0';
 
     if (log_init(&log_config) != 0)
     {
@@ -184,13 +199,7 @@ int run_client(const char* config_path)
     }
 
     LOG_INFO_MSG("=== DHL Client Starting ===");
-    LOG_INFO_MSG("Loading configuration from: %s", config_path);
-
-    if (parse_conf(config_path, &config, &creds) != 0)
-    {
-        log_close();
-        return 1;
-    }
+    LOG_INFO_MSG("Configuration loaded from: %s", config_path);
 
     printf("Initializing client from %s (%s:%s %s) ...\n", config_path, config.host, config.port,
            (config.protocol == PROTO_TCP ? "tcp" : "udp"));

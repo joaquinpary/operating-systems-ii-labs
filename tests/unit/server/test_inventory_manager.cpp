@@ -76,8 +76,8 @@ TEST_F(InventoryManagerTest, HandleStockRequestDirectFullfillment)
 
     // Check DB status
     pqxx::work txn(*db_conn);
-    pqxx::result db_res =
-        txn.exec_params("SELECT status FROM inventory_transactions WHERE transaction_id = $1", result.transaction_id);
+    pqxx::result db_res = txn.exec(pqxx::zview("SELECT status FROM inventory_transactions WHERE transaction_id = $1"),
+                                   pqxx::params{result.transaction_id});
     EXPECT_EQ(db_res[0][0].as<std::string>(), "ASSIGNED");
 }
 
@@ -108,8 +108,8 @@ TEST_F(InventoryManagerTest, HandleStockRequestPendingState)
 
     // Check DB status
     pqxx::work txn(*db_conn);
-    pqxx::result db_res =
-        txn.exec_params("SELECT status FROM inventory_transactions WHERE transaction_id = $1", result.transaction_id);
+    pqxx::result db_res = txn.exec(pqxx::zview("SELECT status FROM inventory_transactions WHERE transaction_id = $1"),
+                                   pqxx::params{result.transaction_id});
     EXPECT_EQ(db_res[0][0].as<std::string>(), "PENDING");
 }
 
@@ -133,8 +133,8 @@ TEST_F(InventoryManagerTest, HandleReplenishRequest)
 
     // Replenish requests should mark as ASSIGNED immediately
     pqxx::work txn(*db_conn);
-    pqxx::result db_res =
-        txn.exec_params("SELECT status FROM inventory_transactions WHERE transaction_id = $1", result.transaction_id);
+    pqxx::result db_res = txn.exec(pqxx::zview("SELECT status FROM inventory_transactions WHERE transaction_id = $1"),
+                                   pqxx::params{result.transaction_id});
     EXPECT_EQ(db_res[0][0].as<std::string>(), "ASSIGNED");
 }
 
@@ -144,11 +144,12 @@ TEST_F(InventoryManagerTest, HandleShipmentNotice)
     int tid;
     {
         pqxx::work txn(*db_conn);
-        tid =
-            txn.exec_params1("INSERT INTO inventory_transactions (transaction_type, source_id, source_type, "
-                             "destination_id, destination_type, status, food) VALUES ('STOCK_REQUEST', 'warehouse_1', "
-                             "'WAREHOUSE', 'hub_1', 'HUB', 'ASSIGNED', 10) RETURNING transaction_id")[0]
-                .as<int>();
+        tid = txn.exec(pqxx::zview(
+                           "INSERT INTO inventory_transactions (transaction_type, source_id, source_type, "
+                           "destination_id, destination_type, status, food) VALUES ('STOCK_REQUEST', 'warehouse_1', "
+                           "'WAREHOUSE', 'hub_1', 'HUB', 'ASSIGNED', 10) RETURNING transaction_id"))
+                  .one_row()[0]
+                  .as<int>();
         txn.commit();
     }
 
@@ -164,7 +165,8 @@ TEST_F(InventoryManagerTest, HandleShipmentNotice)
     // Verify status changed to DISPATCHED
     pqxx::work txn(*db_conn);
     pqxx::result db_res =
-        txn.exec_params("SELECT status, dispatch_timestamp FROM inventory_transactions WHERE transaction_id = $1", tid);
+        txn.exec(pqxx::zview("SELECT status, dispatch_timestamp FROM inventory_transactions WHERE transaction_id = $1"),
+                 pqxx::params{tid});
     EXPECT_EQ(db_res[0][0].as<std::string>(), "DISPATCHED");
     // Database format might be YYYY-MM-DD HH:MM:SS instead of ISO-8601
     std::string db_ts = db_res[0][1].as<std::string>();
@@ -204,8 +206,9 @@ TEST_F(InventoryManagerTest, ProcessPendingOrders)
 
     // 5. Verify DB status is now ASSIGNED
     pqxx::work txn(*db_conn);
-    pqxx::result db_res = txn.exec_params(
-        "SELECT status, source_id FROM inventory_transactions WHERE transaction_id = $1", results[0].transaction_id);
+    pqxx::result db_res =
+        txn.exec(pqxx::zview("SELECT status, source_id FROM inventory_transactions WHERE transaction_id = $1"),
+                 pqxx::params{results[0].transaction_id});
     EXPECT_EQ(db_res[0][0].as<std::string>(), "ASSIGNED");
     EXPECT_EQ(db_res[0][1].as<std::string>(), "warehouse_1");
 }

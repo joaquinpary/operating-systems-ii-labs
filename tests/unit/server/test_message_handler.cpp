@@ -48,9 +48,11 @@ class MessageHandlerTest : public ::testing::Test
         session_mgr = std::make_unique<session_manager>();
         timer_mgr = std::make_unique<timer_manager>(io_context);
         inv_mgr = std::make_unique<inventory_manager>(*db_conn);
-        // Dummy send callback for tests
-        auto send_callback = [](const std::string& session_id, const std::string& data) {
+        // Send callback that captures sent data for test assertions
+        auto send_callback = [this](const std::string& session_id, const std::string& data) {
             std::cout << "[TEST] Send callback called for session: " << session_id << std::endl;
+            last_sent_session = session_id;
+            last_sent_data = data;
         };
         msg_handler = std::make_unique<message_handler>(*auth_mod, *session_mgr, *timer_mgr, *inv_mgr, send_callback);
     }
@@ -69,6 +71,10 @@ class MessageHandlerTest : public ::testing::Test
         }
         db_conn.reset();
     }
+
+    // Captured data from send_callback
+    std::string last_sent_session;
+    std::string last_sent_data;
 };
 
 TEST_F(MessageHandlerTest, ProcessAuthRequestSuccess)
@@ -89,9 +95,17 @@ TEST_F(MessageHandlerTest, ProcessAuthRequestSuccess)
     message_processing_result result = msg_handler->process_message(json_input, session_id);
 
     EXPECT_TRUE(result.success);
-    EXPECT_TRUE(result.should_send_response);
-    EXPECT_EQ(result.response_message.payload.server_auth_response.status_code, 200);
     EXPECT_TRUE(session_mgr->is_authenticated(session_id));
+
+    // Auth response was sent via send_callback (first in queue)
+    ASSERT_FALSE(last_sent_data.empty());
+    message_t sent_auth_response;
+    ASSERT_EQ(deserialize_message_from_json(last_sent_data.c_str(), &sent_auth_response), 0);
+    EXPECT_EQ(sent_auth_response.payload.server_auth_response.status_code, 200);
+
+    // Inventory update is returned as result.response_message (second in queue)
+    EXPECT_TRUE(result.should_send_response);
+    EXPECT_STREQ(result.response_message.msg_type, SERVER_TO_HUB__INVENTORY_UPDATE);
 }
 
 TEST_F(MessageHandlerTest, ProcessAuthRequestInvalidCredentials)
@@ -135,9 +149,17 @@ TEST_F(MessageHandlerTest, ProcessAuthRequestWarehouseUser)
     message_processing_result result = msg_handler->process_message(json_input, session_id);
 
     EXPECT_TRUE(result.success);
+
+    // Auth response was sent via send_callback (first in queue)
+    ASSERT_FALSE(last_sent_data.empty());
+    message_t sent_auth_response;
+    ASSERT_EQ(deserialize_message_from_json(last_sent_data.c_str(), &sent_auth_response), 0);
+    EXPECT_EQ(sent_auth_response.payload.server_auth_response.status_code, 200);
+    EXPECT_STREQ(sent_auth_response.msg_type, SERVER_TO_WAREHOUSE__AUTH_RESPONSE);
+
+    // Inventory update is returned as result.response_message (second in queue)
     EXPECT_TRUE(result.should_send_response);
-    EXPECT_EQ(result.response_message.payload.server_auth_response.status_code, 200);
-    EXPECT_STREQ(result.response_message.msg_type, SERVER_TO_WAREHOUSE__AUTH_RESPONSE);
+    EXPECT_STREQ(result.response_message.msg_type, SERVER_TO_WAREHOUSE__INVENTORY_UPDATE);
 }
 
 TEST_F(MessageHandlerTest, ProcessInvalidJsonInput)
@@ -261,7 +283,8 @@ TEST_F(MessageHandlerTest, GenerateAckForAuthenticatedInventoryUpdate)
 
     inventory_item_t items[1] = {{1, "Test Item", 10}};
     message_t inventory_msg;
-    create_items_message(&inventory_msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_001", SERVER, items, 1);
+    create_items_message(&inventory_msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_001", SERVER, items, 1,
+                         NULL);
 
     message_t ack_msg;
     bool ack_generated = msg_handler->generate_ack_if_needed(inventory_msg, session_id, &ack_msg);
@@ -387,7 +410,7 @@ TEST_F(MessageHandlerTest, RejectUnauthenticatedInventoryUpdate)
 
     inventory_item_t items[1] = {{1, "Test Item", 10}};
     message_t inventory_msg;
-    create_items_message(&inventory_msg, HUB_TO_SERVER__INVENTORY_UPDATE, "hub_001", SERVER, items, 1);
+    create_items_message(&inventory_msg, HUB_TO_SERVER__INVENTORY_UPDATE, "hub_001", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&inventory_msg, json_input);
@@ -411,7 +434,7 @@ TEST_F(MessageHandlerTest, AcceptAuthenticatedInventoryUpdate)
 
     inventory_item_t items[1] = {{1, "Test Item", 10}};
     message_t inventory_msg;
-    create_items_message(&inventory_msg, HUB_TO_SERVER__INVENTORY_UPDATE, "hub_user", SERVER, items, 1);
+    create_items_message(&inventory_msg, HUB_TO_SERVER__INVENTORY_UPDATE, "hub_user", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&inventory_msg, json_input);
@@ -432,7 +455,7 @@ TEST_F(MessageHandlerTest, ProcessStockRequestHubToServer)
 
     inventory_item_t items[1] = {{1, "Food", 5}};
     message_t stock_msg;
-    create_items_message(&stock_msg, HUB_TO_SERVER__STOCK_REQUEST, "hub_1", SERVER, items, 1);
+    create_items_message(&stock_msg, HUB_TO_SERVER__STOCK_REQUEST, "hub_1", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&stock_msg, json_input);
@@ -454,7 +477,7 @@ TEST_F(MessageHandlerTest, ProcessReplenishRequestWarehouseToServer)
 
     inventory_item_t items[1] = {{1, "Food", 100}};
     message_t replenish_msg;
-    create_items_message(&replenish_msg, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, "warehouse_1", SERVER, items, 1);
+    create_items_message(&replenish_msg, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, "warehouse_1", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&replenish_msg, json_input);
@@ -484,7 +507,7 @@ TEST_F(MessageHandlerTest, ProcessShipmentNoticeWarehouseToServer)
 
     inventory_item_t items[1] = {{1, "Food", 10}};
     message_t shipment_msg;
-    create_items_message(&shipment_msg, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE, "warehouse_1", SERVER, items, 1);
+    create_items_message(&shipment_msg, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE, "warehouse_1", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&shipment_msg, json_input);
@@ -515,7 +538,7 @@ TEST_F(MessageHandlerTest, InventoryUpdateTriggersPendingFulfillment)
     // 3. Send INV_UPDATE from warehouse that has stock
     inventory_item_t items[1] = {{1, "Food", 100}};
     message_t update_msg;
-    create_items_message(&update_msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_1", SERVER, items, 1);
+    create_items_message(&update_msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_1", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&update_msg, json_input);
@@ -581,7 +604,7 @@ TEST_F(MessageHandlerTest, ProcessReceiptConfirmationHubToServer)
 
     inventory_item_t items[1] = {{1, "Food", 10}};
     message_t receipt_msg;
-    create_items_message(&receipt_msg, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, "hub_1", SERVER, items, 1);
+    create_items_message(&receipt_msg, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, "hub_1", SERVER, items, 1, NULL);
 
     char json_input[1024];
     serialize_message_to_json(&receipt_msg, json_input);

@@ -285,3 +285,54 @@ int inventory_manager::find_transaction_id(const std::string& source_id, const s
     // Implementation uses DB to find the latest ASSIGNED transaction for this source/destination
     return ::find_transaction_id(m_db_connection, source_id, destination_id, "ASSIGNED");
 }
+
+bool inventory_manager::get_client_inventory_message(const std::string& client_id, const std::string& client_type,
+                                                     message_t& out_msg)
+{
+    int quantities[6] = {0};
+    if (get_client_inventory(m_db_connection, client_id, quantities) != 0)
+    {
+        std::cerr << "[INVENTORY_MANAGER] Failed to get inventory for client " << client_id << std::endl;
+        return false;
+    }
+
+    // Determine message type based on client type
+    const char* msg_type = nullptr;
+    if (client_type == HUB)
+    {
+        msg_type = SERVER_TO_HUB__INVENTORY_UPDATE;
+    }
+    else if (client_type == WAREHOUSE)
+    {
+        msg_type = SERVER_TO_WAREHOUSE__INVENTORY_UPDATE;
+    }
+    else
+    {
+        std::cerr << "[INVENTORY_MANAGER] Unknown client_type: " << client_type << std::endl;
+        return false;
+    }
+
+    // Build inventory items from quantities
+    const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+    inventory_item_t items[QUANTITY_ITEMS];
+    memset(items, 0, sizeof(items));
+
+    int item_count = 0;
+    for (int i = 0; i < 6; i++)
+    {
+        items[item_count].item_id = i + 1;
+        strncpy(items[item_count].item_name, item_names[i], ITEM_NAME_SIZE - 1);
+        items[item_count].quantity = quantities[i];
+        item_count++;
+    }
+
+    memset(&out_msg, 0, sizeof(message_t));
+    if (create_items_message(&out_msg, msg_type, SERVER, client_id.c_str(), items, item_count, nullptr) != 0)
+    {
+        std::cerr << "[INVENTORY_MANAGER] Failed to create inventory message for " << client_id << std::endl;
+        return false;
+    }
+
+    std::cout << "[INVENTORY_MANAGER] Built inventory message for client " << client_id << std::endl;
+    return true;
+}

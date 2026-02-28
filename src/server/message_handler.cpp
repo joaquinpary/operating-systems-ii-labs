@@ -145,8 +145,27 @@ message_processing_result message_handler::handle_auth_request(const message_t& 
     {
         m_session_manager.mark_authenticated(session_id, auth_res.client_type, auth_res.username);
 
-        // Track AUTH_RESPONSE for ACK (only for successful auth)
-        track_message_for_ack(session_id, response_msg);
+        // Send AUTH_RESPONSE via callback first (goes into write queue first)
+        char auth_json[BUFFER_SIZE];
+        if (serialize_message_to_json(&response_msg, auth_json) == 0)
+        {
+            m_send_callback(session_id, std::string(auth_json));
+            track_message_for_ack(session_id, response_msg);
+        }
+
+        // Build inventory message — returned as result.response_message (enqueued second)
+        message_t inv_msg;
+        if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
+        {
+            result.response_message = inv_msg; // Replaces auth response in result
+            track_message_for_ack(session_id, inv_msg);
+            std::cout << "[MSG_HANDLER] Auth response sent, inventory queued for " << auth_res.username << std::endl;
+        }
+        else
+        {
+            // No inventory to send, don't send the auth response twice
+            result.should_send_response = false;
+        }
     }
 
     return result;
@@ -171,9 +190,9 @@ message_processing_result message_handler::handle_other_message(const message_t&
         {
             // Create dispatch message for the assigned warehouse
             message_t dispatch_msg;
-            int create_result =
-                create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB, SERVER,
-                                     fulfilled.assigned_warehouse_id.c_str(), fulfilled.items, fulfilled.item_count);
+            int create_result = create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB,
+                                                     SERVER, fulfilled.assigned_warehouse_id.c_str(), fulfilled.items,
+                                                     fulfilled.item_count, NULL);
 
             if (create_result != 0)
             {
@@ -221,7 +240,7 @@ message_processing_result message_handler::handle_other_message(const message_t&
                 create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB,
                                      SERVER,                                     // source_id = SERVER
                                      stock_result.assigned_warehouse_id.c_str(), // target_id = warehouse
-                                     stock_result.items, stock_result.item_count);
+                                     stock_result.items, stock_result.item_count, NULL);
 
             if (create_result != 0)
             {
@@ -280,7 +299,7 @@ message_processing_result message_handler::handle_other_message(const message_t&
         message_t restock_msg;
         int create_result = create_items_message(&restock_msg, SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, SERVER,
                                                  replenish_result.assigned_warehouse_id.c_str(), replenish_result.items,
-                                                 replenish_result.item_count);
+                                                 replenish_result.item_count, NULL);
 
         if (create_result != 0)
         {

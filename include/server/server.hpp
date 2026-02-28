@@ -10,6 +10,7 @@
 #include <array>
 #include <asio.hpp>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
 
@@ -35,6 +36,7 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
   private:
     void do_read();
     void do_write(const std::string& data);
+    void do_write_next();
     void process_received_data(std::size_t bytes_transferred);
 
     asio::ip::tcp::socket m_socket;
@@ -42,6 +44,10 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
     message_handler& m_message_handler;
     session_manager& m_session_manager;
     std::string m_session_id;
+
+    // Write queue to prevent concurrent async_write
+    std::deque<std::string> m_write_queue;
+    bool m_writing = false;
 };
 
 class udp_server

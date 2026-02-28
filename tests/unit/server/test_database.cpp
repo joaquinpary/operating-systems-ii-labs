@@ -413,8 +413,9 @@ TEST_F(DatabaseTest, UpdateClientInventory)
     EXPECT_EQ(result, 0);
 
     pqxx::work verify_txn(*conn);
-    pqxx::result db_res = verify_txn.exec_params(
-        "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1", "test_client");
+    pqxx::result db_res = verify_txn.exec(
+        pqxx::zview("SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1"),
+        pqxx::params{"test_client"});
     ASSERT_EQ(db_res.size(), 1);
     EXPECT_EQ(db_res[0][0].as<int>(), 10);
     EXPECT_EQ(db_res[0][1].as<int>(), 20);
@@ -466,8 +467,8 @@ TEST_F(DatabaseTest, SetTransactionDestination)
     EXPECT_EQ(result, 0);
 
     pqxx::work verify_txn(*conn);
-    pqxx::result res =
-        verify_txn.exec_params("SELECT destination_id FROM inventory_transactions WHERE transaction_id = $1", tid);
+    pqxx::result res = verify_txn.exec(
+        pqxx::zview("SELECT destination_id FROM inventory_transactions WHERE transaction_id = $1"), pqxx::params{tid});
     EXPECT_EQ(res[0][0].as<std::string>(), "hub_2");
 }
 
@@ -534,8 +535,9 @@ TEST_F(DatabaseTest, TransactionStateWorkflow)
     complete_transaction(*conn, tid, "2026-02-26T16:00:00Z");
 
     pqxx::work verify_txn(*conn);
-    pqxx::result res = verify_txn.exec_params(
-        "SELECT status, reception_timestamp FROM inventory_transactions WHERE transaction_id = $1", tid);
+    pqxx::result res = verify_txn.exec(
+        pqxx::zview("SELECT status, reception_timestamp FROM inventory_transactions WHERE transaction_id = $1"),
+        pqxx::params{tid});
     EXPECT_EQ(res[0][0].as<std::string>(), "COMPLETED");
     EXPECT_FALSE(res[0][1].is_null());
 }

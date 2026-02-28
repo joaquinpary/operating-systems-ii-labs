@@ -44,8 +44,16 @@ ARG BUILD_TARGET=server
 # Executable
 COPY --from=builder /app/build/dhl_${BUILD_TARGET} /app/dhl_${BUILD_TARGET}
 
-# Libs
-COPY --from=builder /app/build/_deps/pqxx-build/src/libpqxx*.so* /usr/local/lib/
+# Copy cjson library (needed by both client and server)
 COPY --from=builder /app/build/_deps/cjson-build/libcjson*.so* /usr/local/lib/
+
+# Create log directory following FHS
+RUN mkdir -p /var/log/dhl
+
+# Copy pqxx library only if it exists (server only)
+RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
+    if [ -d /tmp/build/_deps/pqxx-build/src ]; then \
+        cp /tmp/build/_deps/pqxx-build/src/libpqxx*.so* /usr/local/lib/ || true; \
+    fi
 
 RUN ldconfig
