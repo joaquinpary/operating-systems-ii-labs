@@ -97,6 +97,19 @@ if(BUILD_TARGET STREQUAL "server")
 elseif(BUILD_TARGET STREQUAL "client")
     add_definitions(-DTARGET_CLIENT)
     include_directories(include/client)
+    include_directories(include/client/emergency)
+
+    # Shared library: libemergency.so
+    add_library(emergency SHARED
+        src/client/emergency/emergency_detector.c
+    )
+    target_include_directories(emergency PUBLIC include/client/emergency)
+    set_target_properties(emergency PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        SOVERSION 1
+        VERSION 1.0.0
+    )
+
     file(GLOB SOURCES
         src/client/*.c
         src/common/*.c
@@ -104,6 +117,15 @@ elseif(BUILD_TARGET STREQUAL "client")
     )
     set(TARGET_EXEC dhl_client)
     add_executable(${TARGET_EXEC} ${SOURCES})
+    target_link_libraries(${TARGET_EXEC} dl)
+
+    # Embed the build-tree location of libemergency.so into the executable RPATH
+    # so that dlopen("libemergency.so") resolves correctly when running locally
+    # (outside Docker). In Docker, ldconfig makes it available system-wide.
+    set_target_properties(${TARGET_EXEC} PROPERTIES
+        BUILD_RPATH  "${CMAKE_BINARY_DIR}"
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+    )
 
 else()
     message(FATAL_ERROR "Invalid TARGET. Use -DTARGET=server or -DTARGET=client")

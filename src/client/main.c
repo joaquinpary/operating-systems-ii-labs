@@ -1,7 +1,17 @@
 #include "client.h"
+#include "logger.h"
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+
+static void handle_shutdown(int sig)
+{
+    (void)sig;
+    log_close();
+    _exit(0);
+}
 
 #define CONFIG_PATH_DEFAULT "config/clients/client_%s.conf"
 
@@ -9,6 +19,9 @@
 
 int main(int argc, char* argv[])
 {
+    signal(SIGINT, handle_shutdown);
+    signal(SIGTERM, handle_shutdown);
+
     if (argc >= 3 && strcmp(argv[1], "--config") == 0)
     {
         char path[MAX_PATH_LENGTH];

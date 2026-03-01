@@ -19,10 +19,10 @@ runs:
         ctest --output-on-failure
         cd ../..
 
-        # Run Coverage with gcovr
-        gcovr -r $PROJECT_PATH build > $PROJECT_PATH/coverage.txt
+        # Run Coverage with gcovr (only src/ directory)
+        gcovr -r $PROJECT_PATH --filter $PROJECT_PATH/src build > $PROJECT_PATH/coverage.txt
 
-        echo "Running: gcovr -r $PROJECT_PATH build"
+        echo "Running: gcovr -r $PROJECT_PATH --filter $PROJECT_PATH/src build"
 
         cat $PROJECT_PATH/coverage.txt
 

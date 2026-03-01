@@ -1,10 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "logic.h"
 #include "connection.h"
+#include "emergency_detector.h"
 #include "json_manager.h"
 #include "logger.h"
 #include "message_handler.h"
 #include "shared_state.h"
+#include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -28,8 +30,102 @@
 #define CRITICAL_STOCK_THRESHOLD 5       // Threshold to disable consumption
 #define MAX_STOCK_PER_ITEM 100           // Maximum inventory capacity per item
 #define REORDER_QUANTITY 50              // Amount requested when low stock
+#define EMERGENCY_CHECK_INTERVAL_SEC 30  // Interval for emergency evaluation
 
 static client_context* logic_ctx = NULL;
+
+// ==================== EMERGENCY LIBRARY (dlopen) ====================
+
+typedef emergency_result_t (*evaluate_fn_t)(const emergency_config_t*);
+
+static void* emergency_lib_handle = NULL;
+static evaluate_fn_t evaluate_fn = NULL;
+
+/**
+ * @brief Load libemergency.so at runtime via dlopen
+ * @return 0 on success, -1 if the library or symbol could not be loaded
+ */
+static int load_emergency_library(void)
+{
+    emergency_lib_handle = dlopen("libemergency.so", RTLD_LAZY);
+    if (!emergency_lib_handle)
+    {
+        LOG_ERROR_MSG("dlopen(libemergency.so) failed: %s", dlerror());
+        return -1;
+    }
+
+    dlerror(); /* clear any existing error */
+
+    evaluate_fn = (evaluate_fn_t)dlsym(emergency_lib_handle, "evaluate_emergency");
+    const char* dl_err = dlerror();
+    if (dl_err)
+    {
+        LOG_ERROR_MSG("dlsym(evaluate_emergency) failed: %s", dl_err);
+        dlclose(emergency_lib_handle);
+        emergency_lib_handle = NULL;
+        return -1;
+    }
+
+    /* Log library version if symbol is available */
+    typedef const char* (*version_fn_t)(void);
+    version_fn_t version_fn = (version_fn_t)dlsym(emergency_lib_handle, "emergency_lib_version");
+    if (!dlerror() && version_fn)
+    {
+        LOG_INFO_MSG("libemergency.so loaded (version %s)", version_fn());
+    }
+
+    return 0;
+}
+
+/**
+ * @brief Evaluate emergency probability and enqueue alert if triggered
+ *
+ * Uses the dynamically-loaded evaluate_emergency() function. If an emergency
+ * is detected and no emergency is already active, constructs and enqueues a
+ * CLIENT_EMERGENCY_ALERT message.
+ */
+static void do_emergency_check(void)
+{
+    if (!evaluate_fn)
+    {
+        return;
+    }
+
+    shared_data_t* shared_data = get_shared_data();
+
+    if (shared_data->emergency_active)
+    {
+        LOG_DEBUG_MSG("Emergency already active, skipping evaluation");
+        return;
+    }
+
+    emergency_result_t result = evaluate_fn(NULL); /* NULL → use default 2% probability */
+
+    if (result.emergency_code == EMERGENCY_CODE_NONE)
+    {
+        return;
+    }
+
+    LOG_WARNING_MSG("Emergency detected: code=%d type=%s severity=%d", result.emergency_code, result.emergency_type,
+                    result.severity);
+
+    message_t msg;
+    if (create_client_emergency_message(&msg, shared_data->client_role, shared_data->client_id, result.emergency_code,
+                                        result.emergency_type) != 0)
+    {
+        LOG_ERROR_MSG("Failed to create emergency alert message");
+        return;
+    }
+
+    if (enqueue_pending_message(&msg) != 0)
+    {
+        LOG_ERROR_MSG("Failed to enqueue emergency alert message");
+        return;
+    }
+
+    shared_data->emergency_active = 1;
+    LOG_INFO_MSG("Emergency alert enqueued: %s (code %d)", result.emergency_type, result.emergency_code);
+}
 
 /**
  * @brief Generate random interval for stock consumption
@@ -432,6 +528,12 @@ static int child_logic_process(void)
 
     LOG_INFO_MSG("Business logic process started (PID: %d)", getpid());
 
+    /* Load emergency detection library */
+    if (load_emergency_library() != 0)
+    {
+        LOG_WARNING_MSG("Emergency library unavailable — emergency alerts disabled");
+    }
+
     // Create timer file descriptors
     int inventory_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     if (inventory_timer_fd == -1)
@@ -445,6 +547,15 @@ static int child_logic_process(void)
     {
         LOG_ERROR_MSG("Failed to create consume timer: %s", strerror(errno));
         close(inventory_timer_fd);
+        return -1;
+    }
+
+    int emergency_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (emergency_timer_fd == -1)
+    {
+        LOG_ERROR_MSG("Failed to create emergency timer: %s", strerror(errno));
+        close(inventory_timer_fd);
+        close(consume_timer_fd);
         return -1;
     }
 
@@ -468,14 +579,32 @@ static int child_logic_process(void)
         LOG_ERROR_MSG("Failed to set consume timer: %s", strerror(errno));
         close(inventory_timer_fd);
         close(consume_timer_fd);
+        close(emergency_timer_fd);
         return -1;
     }
 
-    LOG_INFO_MSG("Timers configured: inventory=%ds, consume=random(%d-%ds), first=%ds", INVENTORY_UPDATE_INTERVAL_SEC,
-                 CONSUME_STOCK_MIN_SEC, CONSUME_STOCK_MAX_SEC, consume_interval);
+    // Configure emergency check timer (30 seconds, repeating)
+    struct itimerspec emergency_spec = {.it_interval = {.tv_sec = EMERGENCY_CHECK_INTERVAL_SEC, .tv_nsec = 0},
+                                        .it_value = {.tv_sec = EMERGENCY_CHECK_INTERVAL_SEC, .tv_nsec = 0}};
+    if (timerfd_settime(emergency_timer_fd, 0, &emergency_spec, NULL) == -1)
+    {
+        LOG_ERROR_MSG("Failed to set emergency timer: %s", strerror(errno));
+        close(inventory_timer_fd);
+        close(consume_timer_fd);
+        close(emergency_timer_fd);
+        return -1;
+    }
+
+    LOG_INFO_MSG("Timers configured: inventory=%ds, consume=random(%d-%ds), first=%ds, emergency=%ds",
+                 INVENTORY_UPDATE_INTERVAL_SEC, CONSUME_STOCK_MIN_SEC, CONSUME_STOCK_MAX_SEC, consume_interval,
+                 EMERGENCY_CHECK_INTERVAL_SEC);
 
     // Event loop with select()
-    int maxfd = (inventory_timer_fd > consume_timer_fd) ? inventory_timer_fd : consume_timer_fd;
+    int maxfd = inventory_timer_fd;
+    if (consume_timer_fd > maxfd)
+        maxfd = consume_timer_fd;
+    if (emergency_timer_fd > maxfd)
+        maxfd = emergency_timer_fd;
     fd_set readfds;
     int consume_timer_active = 1; // Track if consume timer is active
 
@@ -517,6 +646,7 @@ static int child_logic_process(void)
         FD_ZERO(&readfds);
         FD_SET(inventory_timer_fd, &readfds);
         FD_SET(consume_timer_fd, &readfds);
+        FD_SET(emergency_timer_fd, &readfds);
 
         // Use timeout to check should_exit periodically
         struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
@@ -602,11 +732,28 @@ static int child_logic_process(void)
                     }
                 }
             }
+
+            // Check emergency evaluation timer
+            if (FD_ISSET(emergency_timer_fd, &readfds))
+            {
+                if (read(emergency_timer_fd, &expirations, sizeof(expirations)) > 0)
+                {
+                    LOG_DEBUG_MSG("Emergency timer expired (%lu times)", expirations);
+                    do_emergency_check();
+                }
+            }
         }
     }
 
     close(inventory_timer_fd);
     close(consume_timer_fd);
+    close(emergency_timer_fd);
+
+    if (emergency_lib_handle)
+    {
+        dlclose(emergency_lib_handle);
+        emergency_lib_handle = NULL;
+    }
 
     LOG_INFO_MSG("Business logic process exiting");
     return 0;

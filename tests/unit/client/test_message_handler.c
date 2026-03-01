@@ -516,6 +516,45 @@ void test_handle_restock_notice_when_queue_full_on_receipt(void)
     shared_data->inventory_item[1].quantity = initial_qty;
 }
 
+void test_handle_server_emergency_alert(void)
+{
+    message_t msg;
+    memset(&msg, 0, sizeof(message_t));
+    strncpy(msg.msg_type, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, MESSAGE_TYPE_SIZE - 1);
+    strncpy(msg.timestamp, "2025-11-25T20:00:00.000Z", TIMESTAMP_SIZE - 1);
+    msg.payload.server_emergency.emergency_code = 2001;
+    strncpy(msg.payload.server_emergency.instructions, "Evacuate immediately", EMERGENCY_INSTRUCTIONS_SIZE - 1);
+
+    int result = handle_server_message(&msg);
+    TEST_ASSERT_EQUAL_INT(0, result);
+
+    // Verify ACK was enqueued
+    message_t ack_msg;
+    TEST_ASSERT_EQUAL_INT(0, pop_pending_message(&ack_msg));
+    TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__ACK, ack_msg.msg_type);
+    TEST_ASSERT_EQUAL_STRING("2025-11-25T20:00:00.000Z", ack_msg.payload.acknowledgment.ack_for_timestamp);
+    TEST_ASSERT_EQUAL_INT(200, ack_msg.payload.acknowledgment.status_code);
+}
+
+void test_handle_server_emergency_alert_when_queue_full(void)
+{
+    shared_data_t* shared_data = get_shared_data();
+    shared_data->message_count = 10;
+
+    message_t msg;
+    memset(&msg, 0, sizeof(message_t));
+    strncpy(msg.msg_type, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, MESSAGE_TYPE_SIZE - 1);
+    strncpy(msg.timestamp, "2025-11-25T20:01:00.000Z", TIMESTAMP_SIZE - 1);
+    msg.payload.server_emergency.emergency_code = 2003;
+    strncpy(msg.payload.server_emergency.instructions, "Lockdown", EMERGENCY_INSTRUCTIONS_SIZE - 1);
+
+    // Should fail because queue is full and ACK cannot be enqueued
+    int result = handle_server_message(&msg);
+    TEST_ASSERT_EQUAL_INT(-1, result);
+
+    shared_data->message_count = 0;
+}
+
 // ==================== MAIN ====================
 
 int main(void)
@@ -555,6 +594,10 @@ int main(void)
     RUN_TEST(test_handle_dispatch_order_when_queue_full_on_ack);
     RUN_TEST(test_handle_dispatch_order_when_queue_full_on_shipment);
     RUN_TEST(test_handle_restock_notice_when_queue_full_on_receipt);
+
+    // SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT messages
+    RUN_TEST(test_handle_server_emergency_alert);
+    RUN_TEST(test_handle_server_emergency_alert_when_queue_full);
 
     return UNITY_END();
 }
