@@ -6,11 +6,8 @@
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
 #include <common/json_manager.h>
+#include <cstdint>
 #include <string>
-
-// Configuration constants for ACK tracking
-#define SERVER_ACK_TIMEOUT_SECONDS 5
-#define SERVER_MAX_RETRIES 3
 
 struct message_processing_result
 {
@@ -38,7 +35,8 @@ class message_handler
     using send_callback_t = std::function<void(const std::string& session_id, const std::string& data)>;
 
     message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
-                    inventory_manager& inv_mgr, send_callback_t send_callback);
+                    inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
+                    std::uint32_t max_retries, send_callback_t send_callback);
     ~message_handler();
 
     // Generate ACK if the message requires it (called before processing for immediate response)
@@ -74,6 +72,8 @@ class message_handler
     session_manager& m_session_manager;
     timer_manager& m_timer_manager;
     inventory_manager& m_inventory_manager;
+    std::uint32_t m_ack_timeout_seconds;
+    std::uint32_t m_max_retries;
     send_callback_t m_send_callback;
 };
 

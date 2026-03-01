@@ -1,9 +1,10 @@
 #include "auth_module.hpp"
+#include "connection_pool.hpp"
 
 #include <iostream>
 
 // AUTH MODULE CONSTRUCTOR
-auth_module::auth_module(pqxx::connection& db_connection) : m_db_connection(db_connection)
+auth_module::auth_module(connection_pool& pool) : m_pool(pool)
 {
 }
 
@@ -21,7 +22,8 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
 
     try
     {
-        auto cred = query_credentials_by_username(m_db_connection, username);
+        auto guard = m_pool.acquire();
+        auto cred = query_credentials_by_username(guard.get(), username);
 
         if (!cred)
         {

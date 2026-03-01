@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <memory>
 #include <pqxx/pqxx>
+#include <server/connection_pool.hpp>
 #include <server/database.hpp>
 #include <server/inventory_manager.hpp>
 
@@ -9,6 +10,7 @@ class InventoryManagerTest : public ::testing::Test
 {
   protected:
     std::unique_ptr<pqxx::connection> db_conn;
+    std::shared_ptr<connection_pool> db_pool;
     std::unique_ptr<inventory_manager> inv_mgr;
 
     void SetUp() override
@@ -45,12 +47,14 @@ class InventoryManagerTest : public ::testing::Test
 
         txn.commit();
 
-        inv_mgr = std::make_unique<inventory_manager>(*db_conn);
+        db_pool = std::make_shared<connection_pool>(build_connection_string(), 1);
+        inv_mgr = std::make_unique<inventory_manager>(*db_pool);
     }
 
     void TearDown() override
     {
         inv_mgr.reset();
+        db_pool.reset();
         db_conn.reset();
     }
 };

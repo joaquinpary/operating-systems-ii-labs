@@ -40,7 +40,10 @@ class ConfigTest : public ::testing::Test
              << "  \"ip_v6\": \"::1\",\n"
              << "  \"network_port\": 9999,\n"
              << "  \"ack_timeout\": 5000,\n"
-             << "  \"max_auth_attempts\": 3\n"
+             << "  \"max_auth_attempts\": 3,\n"
+             << "  \"max_retries\": 3,\n"
+             << "  \"pool_size\": 8,\n"
+             << "  \"credentials_path\": \"config/clients\"\n"
              << "}";
         file.close();
     }
@@ -75,6 +78,9 @@ TEST_F(ConfigTest, LoadValidConfig)
     EXPECT_EQ(cfg.network_port, 9999);
     EXPECT_EQ(cfg.ack_timeout, 5000);
     EXPECT_EQ(cfg.max_auth_attempts, 3);
+    EXPECT_EQ(cfg.max_retries, 3);
+    EXPECT_EQ(cfg.pool_size, 8);
+    EXPECT_EQ(cfg.credentials_path, "config/clients");
 }
 
 // Test load_config_from_file with non-existent file
@@ -103,7 +109,10 @@ TEST_F(ConfigTest, LoadConfigMissingIpV4)
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
          << "  \"ack_timeout\": 5000,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -119,7 +128,10 @@ TEST_F(ConfigTest, LoadConfigMissingIpV6)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"network_port\": 9999,\n"
          << "  \"ack_timeout\": 5000,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -135,7 +147,10 @@ TEST_F(ConfigTest, LoadConfigMissingPort)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"ack_timeout\": 5000,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -151,7 +166,10 @@ TEST_F(ConfigTest, LoadConfigMissingAckTimeout)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -167,7 +185,10 @@ TEST_F(ConfigTest, LoadConfigMissingMaxAuthAttempts)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
-         << "  \"ack_timeout\": 5000\n"
+         << "  \"ack_timeout\": 5000,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -184,7 +205,10 @@ TEST_F(ConfigTest, LoadConfigInvalidIpV4Type)
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
          << "  \"ack_timeout\": 5000,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -201,7 +225,10 @@ TEST_F(ConfigTest, LoadConfigInvalidPortType)
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": \"not_a_number\",\n"
          << "  \"ack_timeout\": 5000,\n"
-         << "  \"max_auth_attempts\": 3\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
     
@@ -225,6 +252,60 @@ TEST_F(ConfigTest, LoadConfigFromEnvVariable)
     
     unsetenv("CONFIG_PATH");
     std::filesystem::remove(env_config_path);
+}
+
+TEST_F(ConfigTest, LoadConfigMissingMaxRetries)
+{
+    std::ofstream file(test_config_path);
+    file << "{\n"
+         << "  \"ip_v4\": \"127.0.0.1\",\n"
+         << "  \"ip_v6\": \"::1\",\n"
+         << "  \"network_port\": 9999,\n"
+         << "  \"ack_timeout\": 5000,\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
+         << "}";
+    file.close();
+
+    config::server_config cfg;
+    EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
+}
+
+TEST_F(ConfigTest, LoadConfigMissingPoolSize)
+{
+    std::ofstream file(test_config_path);
+    file << "{\n"
+         << "  \"ip_v4\": \"127.0.0.1\",\n"
+         << "  \"ip_v6\": \"::1\",\n"
+         << "  \"network_port\": 9999,\n"
+         << "  \"ack_timeout\": 5000,\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
+         << "}";
+    file.close();
+
+    config::server_config cfg;
+    EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
+}
+
+TEST_F(ConfigTest, LoadConfigMissingCredentialsPath)
+{
+    std::ofstream file(test_config_path);
+    file << "{\n"
+         << "  \"ip_v4\": \"127.0.0.1\",\n"
+         << "  \"ip_v6\": \"::1\",\n"
+         << "  \"network_port\": 9999,\n"
+         << "  \"ack_timeout\": 5000,\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8\n"
+         << "}";
+    file.close();
+
+    config::server_config cfg;
+    EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
 
 int main(int argc, char** argv)

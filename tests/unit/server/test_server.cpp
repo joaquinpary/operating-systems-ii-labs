@@ -1,4 +1,5 @@
 #include "auth_module.hpp"
+#include "connection_pool.hpp"
 #include "database.hpp"
 #include "inventory_manager.hpp"
 #include "message_handler.hpp"
@@ -14,6 +15,23 @@
 #include <thread>
 
 using namespace asio::ip;
+
+namespace
+{
+config::server_config make_test_server_config()
+{
+    return config::server_config{
+        .ip_v4 = "127.0.0.1",
+        .ip_v6 = "::1",
+        .network_port = 9999,
+        .ack_timeout = 3,
+        .max_auth_attempts = 3,
+        .max_retries = 3,
+        .pool_size = 1,
+        .credentials_path = "config/clients",
+    };
+}
+} // namespace
 
 class ServerTest : public ::testing::Test
 {
@@ -35,14 +53,15 @@ class ServerTest : public ::testing::Test
         auto db_connection = connect_to_database();
         if (db_connection)
         {
+            m_db_pool = std::make_shared<connection_pool>(build_connection_string(), 1);
             m_session_mgr = std::make_unique<session_manager>();
-            m_auth_mod = std::make_unique<auth_module>(*db_connection);
+            m_auth_mod = std::make_unique<auth_module>(*m_db_pool);
             m_timer_mgr = std::make_unique<timer_manager>(*m_io_context);
-            m_inv_mgr = std::make_unique<inventory_manager>(*db_connection);
+            m_inv_mgr = std::make_unique<inventory_manager>(*m_db_pool);
             // Dummy send callback for tests
             auto send_callback = [](const std::string&, const std::string&) {};
-            m_msg_handler =
-                std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr, *m_timer_mgr, *m_inv_mgr, send_callback);
+            m_msg_handler = std::make_unique<message_handler>(*m_auth_mod, *m_session_mgr, *m_timer_mgr, *m_inv_mgr,
+                                                              3, 3, send_callback);
             m_db_connection = std::move(db_connection);
         }
     }
@@ -63,6 +82,7 @@ class ServerTest : public ::testing::Test
         m_inv_mgr.reset();
         m_auth_mod.reset();
         m_session_mgr.reset();
+        m_db_pool.reset();
         m_db_connection.reset();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -76,6 +96,7 @@ class ServerTest : public ::testing::Test
     std::unique_ptr<server> m_server;
     std::unique_ptr<std::thread> m_io_thread;
     std::unique_ptr<pqxx::connection> m_db_connection;
+    std::shared_ptr<connection_pool> m_db_pool;
     std::unique_ptr<session_manager> m_session_mgr;
     std::unique_ptr<auth_module> m_auth_mod;
     std::unique_ptr<timer_manager> m_timer_mgr;
@@ -88,11 +109,11 @@ std::atomic<uint16_t> ServerTest::s_next_port{10000};
 // Test default configuration values
 TEST_F(ServerTest, DefaultConfigValues)
 {
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
 
-    EXPECT_EQ(config.ip_v4, server_constants::DEFAULT_IPV4_ADDRESS);
-    EXPECT_EQ(config.ip_v6, server_constants::DEFAULT_IPV6_ADDRESS);
-    EXPECT_EQ(config.network_port, server_constants::DEFAULT_PORT);
+    EXPECT_EQ(config.ip_v4, "127.0.0.1");
+    EXPECT_EQ(config.ip_v6, "::1");
+    EXPECT_EQ(config.network_port, 9999);
 }
 
 // Test server initialization with default configuration
@@ -103,12 +124,12 @@ TEST_F(ServerTest, ServerInitialization)
         GTEST_SKIP() << "Database not available, skipping server initialization test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
     ASSERT_NO_THROW({
         m_server = std::make_unique<server>(
-            *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-            std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+            *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+            std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     });
     ASSERT_NE(m_server, nullptr);
 }
@@ -121,11 +142,11 @@ TEST_F(ServerTest, ServerStart)
         GTEST_SKIP() << "Database not available, skipping server start test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     ASSERT_NO_THROW(m_server->start());
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -139,11 +160,11 @@ TEST_F(ServerTest, ServerStop)
         GTEST_SKIP() << "Database not available, skipping server stop test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     m_server->start();
     start_io_context();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -158,12 +179,12 @@ TEST_F(ServerTest, TCPIPv4Connection)
         GTEST_SKIP() << "Database not available, skipping TCP connection test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     m_server->start();
     start_io_context();
 
@@ -188,12 +209,12 @@ TEST_F(ServerTest, TCPIPv6Connection)
         GTEST_SKIP() << "Database not available, skipping TCP IPv6 connection test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     m_server->start();
     start_io_context();
 
@@ -218,12 +239,12 @@ TEST_F(ServerTest, TCPMessageProcessing)
         GTEST_SKIP() << "Database not available, skipping message processing test";
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     m_server->start();
     start_io_context();
 
@@ -255,12 +276,12 @@ TEST_F(ServerTest, UDPEchoResponse)
         txn.commit();
     }
 
-    config::server_config config = make_default_server_config();
+    config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
     m_server = std::make_unique<server>(
-        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_connection),
-        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_connection));
+        *m_io_context, config, std::make_unique<session_manager>(), std::make_unique<auth_module>(*m_db_pool),
+        std::make_unique<timer_manager>(*m_io_context), std::make_unique<inventory_manager>(*m_db_pool));
     m_server->start();
     start_io_context();
 

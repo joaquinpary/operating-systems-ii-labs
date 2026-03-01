@@ -13,9 +13,11 @@ struct server_config
     std::uint16_t network_port;
     std::uint32_t ack_timeout;
     std::uint32_t max_auth_attempts;
+    std::uint32_t max_retries;
+    std::uint32_t pool_size;
+    std::string credentials_path;
 };
 
-// Get environment variable or return default value
 std::string get_env_var(const char* env_var, const char* default_value);
 
 void load_config_from_file(const std::string& config_path, server_config& config);

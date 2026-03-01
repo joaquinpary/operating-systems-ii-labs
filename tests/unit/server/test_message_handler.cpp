@@ -2,6 +2,7 @@
 #include <common/json_manager.h>
 #include <gtest/gtest.h>
 #include <server/auth_module.hpp>
+#include <server/connection_pool.hpp>
 #include <server/database.hpp>
 #include <server/inventory_manager.hpp>
 #include <server/message_handler.hpp>
@@ -13,6 +14,7 @@ class MessageHandlerTest : public ::testing::Test
   protected:
     asio::io_context io_context;
     std::unique_ptr<pqxx::connection> db_conn;
+    std::shared_ptr<connection_pool> db_pool;
     std::unique_ptr<auth_module> auth_mod;
     std::unique_ptr<session_manager> session_mgr;
     std::unique_ptr<timer_manager> timer_mgr;
@@ -44,17 +46,19 @@ class MessageHandlerTest : public ::testing::Test
             txn.commit();
         }
 
-        auth_mod = std::make_unique<auth_module>(*db_conn);
+        db_pool = std::make_shared<connection_pool>(build_connection_string(), 1);
+        auth_mod = std::make_unique<auth_module>(*db_pool);
         session_mgr = std::make_unique<session_manager>();
         timer_mgr = std::make_unique<timer_manager>(io_context);
-        inv_mgr = std::make_unique<inventory_manager>(*db_conn);
+        inv_mgr = std::make_unique<inventory_manager>(*db_pool);
         // Send callback that captures sent data for test assertions
         auto send_callback = [this](const std::string& session_id, const std::string& data) {
             std::cout << "[TEST] Send callback called for session: " << session_id << std::endl;
             last_sent_session = session_id;
             last_sent_data = data;
         };
-        msg_handler = std::make_unique<message_handler>(*auth_mod, *session_mgr, *timer_mgr, *inv_mgr, send_callback);
+        msg_handler =
+            std::make_unique<message_handler>(*auth_mod, *session_mgr, *timer_mgr, *inv_mgr, 5, 3, send_callback);
     }
 
     void TearDown() override
@@ -63,6 +67,7 @@ class MessageHandlerTest : public ::testing::Test
         inv_mgr.reset();
         session_mgr.reset();
         auth_mod.reset();
+        db_pool.reset();
         if (db_conn)
         {
             pqxx::work txn(*db_conn);

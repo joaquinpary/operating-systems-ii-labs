@@ -1,6 +1,7 @@
 #ifndef AUTH_MODULE_HPP
 #define AUTH_MODULE_HPP
 
+#include "connection_pool.hpp"
 #include "database.hpp"
 #include <memory>
 #include <string>
@@ -25,7 +26,7 @@ struct auth_result
 class auth_module
 {
   public:
-    explicit auth_module(pqxx::connection& db_connection);
+    explicit auth_module(connection_pool& pool);
     ~auth_module();
 
     // Authenticate a user with username and password
@@ -33,7 +34,7 @@ class auth_module
     auth_result authenticate(const std::string& username, const std::string& password);
 
   private:
-    pqxx::connection& m_db_connection;
+    connection_pool& m_pool;
 };
 
 #endif // AUTH_MODULE_HPP

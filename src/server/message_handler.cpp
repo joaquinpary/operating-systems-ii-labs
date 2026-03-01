@@ -4,9 +4,10 @@
 #include <iostream>
 
 message_handler::message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
-                                 inventory_manager& inv_mgr, send_callback_t send_callback)
+                       inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
+                       std::uint32_t max_retries, send_callback_t send_callback)
     : m_auth_module(auth), m_session_manager(session_mgr), m_timer_manager(timer_mgr), m_inventory_manager(inv_mgr),
-      m_send_callback(send_callback)
+    m_ack_timeout_seconds(ack_timeout_seconds), m_max_retries(max_retries), m_send_callback(send_callback)
 {
 }
 
@@ -440,13 +441,13 @@ void message_handler::track_message_for_ack(const std::string& session_id, const
 void message_handler::start_ack_timer_recursive(const std::string& session_id, const message_t& msg, int retry_count)
 {
     // Lambda captures all necessary data: session_id, msg, retry_count
-    m_timer_manager.start_ack_timer(
-        session_id, msg.timestamp, SERVER_ACK_TIMEOUT_SECONDS, [this, session_id, msg, retry_count]() {
+    m_timer_manager.start_ack_timer(session_id, msg.timestamp, m_ack_timeout_seconds,
+                                    [this, session_id, msg, retry_count]() {
             // Timer expired - check if we should retry or give up
-            if (retry_count >= SERVER_MAX_RETRIES - 1)
+            if (retry_count >= static_cast<int>(m_max_retries) - 1)
             {
                 // Max retries reached - close session
-                std::cout << "[ACK_TIMEOUT] Max retries (" << SERVER_MAX_RETRIES
+                std::cout << "[ACK_TIMEOUT] Max retries (" << m_max_retries
                           << ") reached for session: " << session_id << ", message: " << msg.timestamp
                           << " - closing session" << std::endl;
 
@@ -460,7 +461,7 @@ void message_handler::start_ack_timer_recursive(const std::string& session_id, c
             {
                 // Retry: resend message and restart timer
                 std::cout << "[ACK_TIMEOUT] Timeout for message " << msg.timestamp << " (retry " << (retry_count + 1)
-                          << "/" << SERVER_MAX_RETRIES << ")" << std::endl;
+                          << "/" << m_max_retries << ")" << std::endl;
 
                 // Serialize and resend the message
                 char json[BUFFER_SIZE];

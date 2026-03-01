@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
 #include <pqxx/pqxx>
 #include <server/auth_module.hpp>
+#include <server/connection_pool.hpp>
 #include <server/database.hpp>
 
 class AuthModuleTest : public ::testing::Test
 {
   protected:
     std::unique_ptr<pqxx::connection> db_conn;
+    std::shared_ptr<connection_pool> db_pool;
     std::unique_ptr<auth_module> auth_mod;
 
     void SetUp() override
@@ -34,12 +36,14 @@ class AuthModuleTest : public ::testing::Test
             txn.commit();
         }
 
-        auth_mod = std::make_unique<auth_module>(*db_conn);
+        db_pool = std::make_shared<connection_pool>(build_connection_string(), 1);
+        auth_mod = std::make_unique<auth_module>(*db_pool);
     }
 
     void TearDown() override
     {
         auth_mod.reset();
+        db_pool.reset();
         if (db_conn)
         {
             pqxx::work txn(*db_conn);

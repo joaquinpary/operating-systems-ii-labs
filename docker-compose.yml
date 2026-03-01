@@ -35,12 +35,11 @@ services:
       POSTGRES_USER: dhl_user
       POSTGRES_PASSWORD: dhl_pass
       CONFIG_PATH: /etc/server/config.json
-      CLIENT_CREDENTIALS_PATH: /etc/server/credentials.json
     ports:
       - "9999:9999"
     volumes:
       - ./config/server_config.json:/etc/server/config.json
-      - ./config/credentials.json:/etc/server/credentials.json
+      - ./config/clients:/etc/server/clients
     networks:
       - dhl_net
     command: ["/app/dhl_server"]

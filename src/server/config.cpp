@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <cJSON.h>
+#include <cstdlib>
 #include <fstream>
 #include <stdexcept>
 
@@ -79,6 +80,33 @@ void load_config_from_file(const std::string& config_path, server_config& config
         throw std::runtime_error("Missing or invalid 'max_auth_attempts' field in config file");
     }
     config.max_auth_attempts = static_cast<std::uint32_t>(max_auth_attempts->valueint);
+
+    // Validate and parse max_retries
+    cJSON* max_retries = cJSON_GetObjectItemCaseSensitive(json, "max_retries");
+    if (!max_retries || !cJSON_IsNumber(max_retries))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'max_retries' field in config file");
+    }
+    config.max_retries = static_cast<std::uint32_t>(max_retries->valueint);
+
+    // Validate and parse pool_size
+    cJSON* pool_size = cJSON_GetObjectItemCaseSensitive(json, "pool_size");
+    if (!pool_size || !cJSON_IsNumber(pool_size))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'pool_size' field in config file");
+    }
+    config.pool_size = static_cast<std::uint32_t>(pool_size->valueint);
+
+    // Validate and parse credentials_path
+    cJSON* credentials_path = cJSON_GetObjectItemCaseSensitive(json, "credentials_path");
+    if (!credentials_path || !cJSON_IsString(credentials_path))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'credentials_path' field in config file");
+    }
+    config.credentials_path = credentials_path->valuestring;
 
     cJSON_Delete(json);
 }
