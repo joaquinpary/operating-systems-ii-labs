@@ -1,37 +1,83 @@
 #include "database.hpp"
 
-#include <cJSON.h>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 
-#define CREDENTIALS_PATH "config/credentials.json"
-#define CLIENT_CREDENTIALS_PATH "CLIENT_CREDENTIALS_PATH"
+#define DEFAULT_DB_PORT 5432
 
-// Anonymous namespace - everything here has internal linkage (visible only in this file)
 namespace
 {
-constexpr const char* DEFAULT_DB_HOST = "localhost";
-constexpr const char* DEFAULT_DB_NAME = "dhl_db";
-constexpr const char* DEFAULT_DB_USER = "dhl_user";
-constexpr const char* DEFAULT_DB_PASSWORD = "dhl_pass";
-constexpr int DEFAULT_DB_PORT = 5432;
-
-std::string get_env_var(const char* env_var, const char* default_value)
+std::string require_env_var(const char* env_var)
 {
     const char* value = std::getenv(env_var);
-    return value ? std::string(value) : std::string(default_value);
+    if (value == nullptr || value[0] == '\0')
+    {
+        throw std::runtime_error(std::string("Missing required environment variable: ") + env_var);
+    }
+    return std::string(value);
 }
+
+std::string trim_copy(const std::string& value)
+{
+    const std::string whitespace = " \t\n\r";
+    const auto first = value.find_first_not_of(whitespace);
+    if (first == std::string::npos)
+    {
+        return "";
+    }
+    const auto last = value.find_last_not_of(whitespace);
+    return value.substr(first, last - first + 1);
+}
+
+bool parse_client_conf_credentials(const std::string& conf_path, std::string& username, std::string& password,
+                                   std::string& client_type)
+{
+    std::ifstream file(conf_path);
+    if (!file.is_open())
+    {
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(file, line))
+    {
+        const std::size_t eq = line.find('=');
+        if (eq == std::string::npos)
+        {
+            continue;
+        }
+
+        const std::string key = trim_copy(line.substr(0, eq));
+        const std::string value = trim_copy(line.substr(eq + 1));
+
+        if (key == "username")
+        {
+            username = value;
+        }
+        else if (key == "password")
+        {
+            password = value;
+        }
+        else if (key == "type")
+        {
+            client_type = value;
+        }
+    }
+
+    return !username.empty() && !password.empty() && !client_type.empty();
+}
+} // namespace
 
 std::string build_connection_string()
 {
-    // Environment variables take precedence (used in Docker)
-    // Fallback to default values (used for local development)
-    std::string host = get_env_var("POSTGRES_HOST", DEFAULT_DB_HOST);
-    std::string db = get_env_var("POSTGRES_DB", DEFAULT_DB_NAME);
-    std::string user = get_env_var("POSTGRES_USER", DEFAULT_DB_USER);
-    std::string password = get_env_var("POSTGRES_PASSWORD", DEFAULT_DB_PASSWORD);
+    std::string host = require_env_var("POSTGRES_HOST");
+    std::string db = require_env_var("POSTGRES_DB");
+    std::string user = require_env_var("POSTGRES_USER");
+    std::string password = require_env_var("POSTGRES_PASSWORD");
 
     // Port can also be overridden by environment variable
     int port = DEFAULT_DB_PORT;
@@ -44,14 +90,13 @@ std::string build_connection_string()
         }
         catch (const std::exception&)
         {
-            // Invalid port in env var, use default value
+            std::cerr << "Invalid POSTGRES_PORT value. Falling back to " << DEFAULT_DB_PORT << std::endl;
         }
     }
 
     return "host=" + host + " dbname=" + db + " user=" + user + " password=" + password +
            " port=" + std::to_string(port);
 }
-} // namespace
 
 std::unique_ptr<pqxx::connection> connect_to_database()
 {
@@ -78,44 +123,34 @@ std::unique_ptr<pqxx::connection> connect_to_database()
     }
 }
 
-std::unique_ptr<pqxx::connection> initialize_database()
+int initialize_database(pqxx::connection& conn, const std::string& credentials_dir_path)
 {
-    auto conn = connect_to_database();
-    if (!conn)
-    {
-        return nullptr;
-    }
-
     try
     {
-        if (create_credentials_table(*conn) != 0)
+        if (create_credentials_table(conn) != 0)
         {
             std::cerr << "Failed to initialize database tables." << std::endl;
-            return nullptr;
+            return -1;
         }
 
-        // Create inventory tables
-        if (create_inventory_tables(*conn) != 0)
+        if (create_inventory_tables(conn) != 0)
         {
             std::cerr << "Failed to initialize inventory tables." << std::endl;
-            return nullptr;
+            return -1;
         }
 
-        // Populate credentials table from JSON file if it exists
-        const std::string credentials_file = get_env_var(CLIENT_CREDENTIALS_PATH, CREDENTIALS_PATH);
-        if (populate_credentials_table(*conn, credentials_file) != 0)
+        if (populate_credentials_table(conn, credentials_dir_path) != 0)
         {
-            // Non-fatal: credentials file might not exist or might be empty
-            std::cout << "Note: Could not populate credentials table from " << credentials_file << std::endl;
+            std::cout << "Note: Could not populate credentials table from " << credentials_dir_path << std::endl;
         }
 
         std::cout << "Database initialized successfully." << std::endl;
-        return conn;
+        return 0;
     }
     catch (const std::exception& ex)
     {
         std::cerr << "Database initialization error: " << ex.what() << std::endl;
-        return nullptr;
+        return -1;
     }
 }
 
@@ -174,58 +209,39 @@ std::unique_ptr<credential> query_credentials_by_username(pqxx::connection& conn
     }
 }
 
-int populate_credentials_table(pqxx::connection& conn, const std::string& json_file_path)
+int populate_credentials_table(pqxx::connection& conn, const std::string& credentials_dir_path)
 {
     try
     {
-        std::ifstream file(json_file_path);
-        if (!file.is_open())
-        {
-            std::cerr << "Error: Cannot open credentials file: " << json_file_path << std::endl;
-            return 1;
-        }
+        namespace fs = std::filesystem;
+        fs::path credentials_dir(credentials_dir_path);
 
-        std::string json_content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        file.close();
-
-        cJSON* json = cJSON_Parse(json_content.c_str());
-        if (!json)
+        if (!fs::exists(credentials_dir) || !fs::is_directory(credentials_dir))
         {
-            std::cerr << "Error: Failed to parse JSON file" << std::endl;
-            return 1;
-        }
-
-        if (!cJSON_IsArray(json))
-        {
-            std::cerr << "Error: JSON file must contain an array" << std::endl;
-            cJSON_Delete(json);
+            std::cerr << "Error: Credentials path is not a valid directory: " << credentials_dir_path << std::endl;
             return 1;
         }
 
         pqxx::work txn(conn);
         int count = 0;
-        int array_size = cJSON_GetArraySize(json);
+        int conf_count = 0;
 
-        for (int i = 0; i < array_size; i++)
+        for (const auto& entry : fs::directory_iterator(credentials_dir))
         {
-            cJSON* item = cJSON_GetArrayItem(json, i);
-            if (!item || !cJSON_IsObject(item))
+            if (!entry.is_regular_file() || entry.path().extension() != ".conf")
             {
                 continue;
             }
+            conf_count++;
 
-            cJSON* username_json = cJSON_GetObjectItemCaseSensitive(item, "username");
-            cJSON* password_json = cJSON_GetObjectItemCaseSensitive(item, "password");
-            cJSON* type_json = cJSON_GetObjectItemCaseSensitive(item, "type");
-
-            if (!cJSON_IsString(username_json) || !cJSON_IsString(password_json) || !cJSON_IsString(type_json))
+            std::string username;
+            std::string password;
+            std::string client_type;
+            if (!parse_client_conf_credentials(entry.path().string(), username, password, client_type))
             {
+                std::cerr << "Error: Invalid client credentials in file: " << entry.path() << std::endl;
                 continue;
             }
-
-            std::string username = username_json->valuestring;
-            std::string password = password_json->valuestring;
-            std::string client_type = type_json->valuestring;
 
             try
             {
@@ -242,17 +258,15 @@ int populate_credentials_table(pqxx::connection& conn, const std::string& json_f
             }
         }
 
-        cJSON_Delete(json);
-
-        // If array has items but none were valid, return error
-        if (array_size > 0 && count == 0)
+        if (conf_count > 0 && count == 0)
         {
-            std::cerr << "Error: No valid credentials found in file" << std::endl;
+            std::cerr << "Error: No valid credentials found in credentials directory" << std::endl;
             return 1;
         }
 
         txn.commit();
-        std::cout << "Populated " << count << " credentials into database." << std::endl;
+        std::cout << "Populated " << count << " credentials into database from " << conf_count
+                  << " .conf files." << std::endl;
         return 0;
     }
     catch (const std::exception& ex)

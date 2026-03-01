@@ -7,22 +7,13 @@
 #include "message_handler.hpp"
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
+#include <common/json_manager.h>
 #include <array>
 #include <asio.hpp>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
-
-namespace server_constants
-{
-inline constexpr std::uint16_t DEFAULT_PORT = 9999;
-inline constexpr std::size_t DEFAULT_BUFFER_SIZE = 1024;
-inline constexpr const char* DEFAULT_IPV4_ADDRESS = "127.0.0.1";
-inline constexpr const char* DEFAULT_IPV6_ADDRESS = "::1";
-} // namespace server_constants
-
-config::server_config make_default_server_config(); // revisar, no deberiamos tener configuracion default
 
 class tcp_session : public std::enable_shared_from_this<tcp_session>
 {
@@ -40,7 +31,7 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
     void process_received_data(std::size_t bytes_transferred);
 
     asio::ip::tcp::socket m_socket;
-    std::array<char, server_constants::DEFAULT_BUFFER_SIZE> m_data;
+    std::array<char, BUFFER_SIZE> m_data;
     message_handler& m_message_handler;
     session_manager& m_session_manager;
     std::string m_session_id;
@@ -66,7 +57,7 @@ class udp_server
 
     asio::ip::udp::socket m_socket;
     asio::ip::udp::endpoint m_sender_endpoint;
-    std::array<char, server_constants::DEFAULT_BUFFER_SIZE> m_data;
+    std::array<char, BUFFER_SIZE> m_data;
     message_handler& m_message_handler;
     session_manager& m_session_manager;
 };

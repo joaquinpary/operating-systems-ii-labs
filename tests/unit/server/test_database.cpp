@@ -43,11 +43,10 @@ TEST_F(DatabaseTest, ConnectToDatabaseReturnsNullWhenNotAvailable)
 // Test initialize_database function
 TEST_F(DatabaseTest, InitializeDatabase)
 {
-    auto conn = initialize_database();
+    auto conn = connect_to_database();
     if (conn)
     {
-        EXPECT_NE(conn, nullptr);
-        EXPECT_TRUE(conn->is_open());
+        EXPECT_EQ(initialize_database(*conn, "config/clients"), 0);
 
         // Verify that credentials table exists
         pqxx::work txn(*conn);
@@ -153,7 +152,7 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
     }
 }
 
-// Test populate_credentials_table with valid JSON file
+// Test populate_credentials_table with valid .conf directory
 TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
 {
     auto conn = connect_to_database();
@@ -172,17 +171,33 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         clear_txn.commit();
     }
 
-    // Create a temporary JSON file for testing
-    const std::string test_file = "/tmp/test_credentials.json";
+    // Create a temporary credentials directory with .conf files for testing
+    const std::string test_dir = "/tmp/test_credentials_dir";
+    std::filesystem::create_directories(test_dir);
     {
-        std::ofstream file(test_file);
-        file << "[" << "{\"username\":\"test_user1\",\"password\":\"hash1\",\"type\":\"HUB\"},"
-             << "{\"username\":\"test_user2\",\"password\":\"hash2\",\"type\":\"WAREHOUSE\"}" << "]";
-        file.close();
+        std::ofstream file1(test_dir + "/client_0001.conf");
+        file1 << "host = server\n"
+              << "ipversion = v4\n"
+              << "protocol = udp\n"
+              << "port = 9999\n"
+              << "type = HUB\n"
+              << "username = test_user1\n"
+              << "password = hash1\n";
+        file1.close();
+
+        std::ofstream file2(test_dir + "/client_0002.conf");
+        file2 << "host = server\n"
+              << "ipversion = v4\n"
+              << "protocol = udp\n"
+              << "port = 9999\n"
+              << "type = WAREHOUSE\n"
+              << "username = test_user2\n"
+              << "password = hash2\n";
+        file2.close();
     }
 
-    // Test with valid credentials file
-    int result = populate_credentials_table(*conn, test_file);
+    // Test with valid credentials directory
+    int result = populate_credentials_table(*conn, test_dir);
     EXPECT_EQ(result, 0);
 
     // Verify credentials were inserted (populate_credentials_table commits internally)
@@ -216,7 +231,7 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         cleanup_txn.exec("DELETE FROM credentials WHERE username IN ('test_user1', 'test_user2')");
         cleanup_txn.commit();
     }
-    std::filesystem::remove(test_file);
+    std::filesystem::remove_all(test_dir);
 }
 
 // Test populate_credentials_table with non-existent file
@@ -232,18 +247,20 @@ TEST_F(DatabaseTest, PopulateCredentialsTableNonExistentFile)
     create_credentials_table(*conn);
 
     // Test with non-existent file
-    int result = populate_credentials_table(*conn, "config/nonexistent_credentials.json");
+    int result = populate_credentials_table(*conn, "config/nonexistent_credentials_dir");
     EXPECT_EQ(result, 1); // Should return error
 }
 
 // Test initialize_database populates credentials if file exists
 TEST_F(DatabaseTest, InitializeDatabasePopulatesCredentials)
 {
-    auto conn = initialize_database();
+    auto conn = connect_to_database();
     if (!conn)
     {
         GTEST_SKIP() << "Database not available, skipping initialization test";
     }
+
+    ASSERT_EQ(initialize_database(*conn, "config/clients"), 0);
 
     // Check if credentials were populated (if file exists)
     pqxx::work txn(*conn);
@@ -259,7 +276,7 @@ TEST_F(DatabaseTest, InitializeDatabasePopulatesCredentials)
     EXPECT_TRUE(table_check[0][0].as<bool>());
 }
 
-// Test populate_credentials_table with invalid JSON
+// Test populate_credentials_table with invalid .conf credentials
 TEST_F(DatabaseTest, PopulateCredentialsTableInvalidJSON)
 {
     auto conn = connect_to_database();
@@ -268,21 +285,24 @@ TEST_F(DatabaseTest, PopulateCredentialsTableInvalidJSON)
         GTEST_SKIP() << "Database not available, skipping populate test";
     }
 
-    // Create file with invalid JSON
-    const std::string test_file = "/tmp/invalid_credentials.json";
+    const std::string test_dir = "/tmp/invalid_credentials_dir";
+    std::filesystem::create_directories(test_dir);
+    const std::string test_file = test_dir + "/client_invalid.conf";
     {
         std::ofstream file(test_file);
-        file << "{ invalid json }";
+        file << "host = server\n"
+             << "type = HUB\n"
+             << "username = only_user_without_password\n";
         file.close();
     }
 
-    int result = populate_credentials_table(*conn, test_file);
+    int result = populate_credentials_table(*conn, test_dir);
     EXPECT_EQ(result, 1); // Should return error
 
-    std::filesystem::remove(test_file);
+    std::filesystem::remove_all(test_dir);
 }
 
-// Test populate_credentials_table with empty array
+// Test populate_credentials_table with empty directory
 TEST_F(DatabaseTest, PopulateCredentialsTableEmptyArray)
 {
     auto conn = connect_to_database();
@@ -294,18 +314,13 @@ TEST_F(DatabaseTest, PopulateCredentialsTableEmptyArray)
     // Ensure table exists
     create_credentials_table(*conn);
 
-    // Create file with empty array
-    const std::string test_file = "/tmp/empty_credentials.json";
-    {
-        std::ofstream file(test_file);
-        file << "[]";
-        file.close();
-    }
+    const std::string test_dir = "/tmp/empty_credentials_dir";
+    std::filesystem::create_directories(test_dir);
 
-    int result = populate_credentials_table(*conn, test_file);
+    int result = populate_credentials_table(*conn, test_dir);
     EXPECT_EQ(result, 0); // Should succeed (no credentials to insert)
 
-    std::filesystem::remove(test_file);
+    std::filesystem::remove_all(test_dir);
 }
 
 // Test populate_credentials_table with malformed credential (missing fields)
@@ -321,17 +336,21 @@ TEST_F(DatabaseTest, PopulateCredentialsTableMissingFields)
     create_credentials_table(*conn);
 
     // Create file with incomplete credential (missing password)
-    const std::string test_file = "/tmp/incomplete_credentials.json";
+    const std::string test_dir = "/tmp/incomplete_credentials_dir";
+    std::filesystem::create_directories(test_dir);
+    const std::string test_file = test_dir + "/client_incomplete.conf";
     {
         std::ofstream file(test_file);
-        file << "[{\"username\":\"incomplete_user\",\"type\":\"HUB\"}]";
+        file << "host = server\n"
+             << "type = HUB\n"
+             << "username = incomplete_user\n";
         file.close();
     }
 
-    int result = populate_credentials_table(*conn, test_file);
+    int result = populate_credentials_table(*conn, test_dir);
     EXPECT_EQ(result, 1); // Should return error
 
-    std::filesystem::remove(test_file);
+    std::filesystem::remove_all(test_dir);
 }
 
 // Test build_connection_string with environment variables

@@ -1,5 +1,6 @@
 #include "auth_module.hpp"
 #include "config.hpp"
+#include "connection_pool.hpp"
 #include "database.hpp"
 #include "inventory_manager.hpp"
 #include "message_handler.hpp"
@@ -21,19 +22,24 @@ int main()
         config::server_config cfg;
         config::load_config_from_file(SERVER_CONFIG_DEFAULT, cfg);
 
-        // Initialize database (connect and create tables)
-        auto db_connection = initialize_database();
-        if (!db_connection)
+        // Create connection pool
+        auto pool = std::make_shared<connection_pool>(build_connection_string(), cfg.pool_size);
+
+        // Initialize database schema using one connection from the pool
         {
-            throw std::runtime_error("Failed to initialize database. Server cannot start.");
+            auto guard = pool->acquire();
+            if (initialize_database(guard.get(), cfg.credentials_path) != 0)
+            {
+                throw std::runtime_error("Failed to initialize database. Server cannot start.");
+            }
         }
 
         // Create core modules
         asio::io_context io_context;
         auto session_mgr = std::make_unique<session_manager>();
-        auto auth_mod = std::make_unique<auth_module>(*db_connection);
+        auto auth_mod = std::make_unique<auth_module>(*pool);
         auto timer_mgr = std::make_unique<timer_manager>(io_context);
-        auto inv_mgr = std::make_unique<inventory_manager>(*db_connection);
+        auto inv_mgr = std::make_unique<inventory_manager>(*pool);
         // Note: message_handler is created by server with send callback configured
 
         server srv(io_context, cfg, std::move(session_mgr), std::move(auth_mod), std::move(timer_mgr),

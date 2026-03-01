@@ -1,10 +1,11 @@
 #include "inventory_manager.hpp"
+#include "connection_pool.hpp"
 #include "database.hpp"
 
 #include <cstring>
 #include <iostream>
 
-inventory_manager::inventory_manager(pqxx::connection& db_conn) : m_db_connection(db_conn)
+inventory_manager::inventory_manager(connection_pool& pool) : m_pool(pool)
 {
 }
 
@@ -22,14 +23,19 @@ std::vector<stock_request_result> inventory_manager::handle_inventory_update(con
     int quantities[6] = {0};
     extract_quantities_from_payload(msg.payload.inventory_update, quantities);
 
-    // Update client inventory in database
-    int result = update_client_inventory(m_db_connection, msg.source_id, msg.source_role, quantities, msg.timestamp);
-
-    if (result != 0)
+    // Acquire a connection from the pool for this operation
     {
-        std::cerr << "[INVENTORY_MANAGER] Failed to update inventory for " << msg.source_id << std::endl;
-        return fulfilled_orders;
-    }
+        auto guard = m_pool.acquire();
+
+        // Update client inventory in database
+        int result = update_client_inventory(guard.get(), msg.source_id, msg.source_role, quantities, msg.timestamp);
+
+        if (result != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to update inventory for " << msg.source_id << std::endl;
+            return fulfilled_orders;
+        }
+    } // Release connection before calling process_pending_orders (which acquires its own)
 
     // If warehouse updated inventory, try to fulfill ONE pending order
     if (strcmp(msg.source_role, WAREHOUSE) == 0)
@@ -69,9 +75,12 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
         }
     }
 
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     // Create transaction with hub as destination (stock will be sent TO the hub)
     int transaction_id =
-        create_transaction(m_db_connection, "STOCK_REQUEST", msg.source_id, msg.source_role, quantities, msg.timestamp);
+        create_transaction(guard.get(), "STOCK_REQUEST", msg.source_id, msg.source_role, quantities, msg.timestamp);
 
     if (transaction_id < 0)
     {
@@ -84,7 +93,7 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     result.success = true;
 
     // Try to find a warehouse with sufficient stock
-    std::string warehouse_id = get_warehouse_with_all_stock(m_db_connection, quantities);
+    std::string warehouse_id = get_warehouse_with_all_stock(guard.get(), quantities);
 
     if (warehouse_id.empty())
     {
@@ -94,8 +103,8 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     }
 
     // Warehouse found — assign it as the source and mark as ASSIGNED (not dispatched yet)
-    set_transaction_source(m_db_connection, transaction_id, warehouse_id, "WAREHOUSE");
-    mark_transaction_assigned(m_db_connection, transaction_id);
+    set_transaction_source(guard.get(), transaction_id, warehouse_id, "WAREHOUSE");
+    mark_transaction_assigned(guard.get(), transaction_id);
 
     result.warehouse_assigned = true;
     result.assigned_warehouse_id = warehouse_id;
@@ -130,9 +139,12 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
         }
     }
 
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     // Create transaction
     int transaction_id =
-        create_transaction(m_db_connection, "REPLENISH", msg.source_id, msg.source_role, quantities, msg.timestamp);
+        create_transaction(guard.get(), "REPLENISH", msg.source_id, msg.source_role, quantities, msg.timestamp);
 
     if (transaction_id < 0)
     {
@@ -141,7 +153,7 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
     }
 
     // Immediately mark as ASSIGNED (warehouse will confirm with a dispatch/restock notice)
-    mark_transaction_assigned(m_db_connection, transaction_id);
+    mark_transaction_assigned(guard.get(), transaction_id);
 
     result.transaction_id = transaction_id;
     result.success = true;
@@ -180,8 +192,11 @@ int inventory_manager::handle_shipment_notice(const message_t& msg)
         return -1;
     }
 
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     // Mark as DISPATCHED with the warehouse's timestamp
-    mark_transaction_dispatched(m_db_connection, transaction_id, msg.timestamp);
+    mark_transaction_dispatched(guard.get(), transaction_id, msg.timestamp);
 
     std::cout << "[INVENTORY_MANAGER] Marked transaction " << transaction_id << " as DISPATCHED (from warehouse "
               << msg.source_id << ")" << std::endl;
@@ -196,9 +211,12 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
     std::cout << "[INVENTORY_MANAGER] Processing pending orders after warehouse " << warehouse_id << " inventory update"
               << std::endl;
 
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     // Get pending transactions
-    transaction_record pending[100];
-    int count = get_pending_transactions(m_db_connection, pending, 100);
+    transaction_record pending[MAX_PENDING_TRANSACTIONS];
+    int count = get_pending_transactions(guard.get(), pending, MAX_PENDING_TRANSACTIONS);
 
     if (count == 0)
     {
@@ -216,13 +234,13 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
         int quantities[6] = {pending[i].food,  pending[i].water, pending[i].medicine,
                              pending[i].tools, pending[i].guns,  pending[i].ammo};
 
-        std::string available_warehouse = get_warehouse_with_all_stock(m_db_connection, quantities);
+        std::string available_warehouse = get_warehouse_with_all_stock(guard.get(), quantities);
 
         if (!available_warehouse.empty())
         {
             // Assign warehouse as the SOURCE and mark as ASSIGNED
-            set_transaction_source(m_db_connection, pending[i].transaction_id, available_warehouse, "WAREHOUSE");
-            mark_transaction_assigned(m_db_connection, pending[i].transaction_id);
+            set_transaction_source(guard.get(), pending[i].transaction_id, available_warehouse, "WAREHOUSE");
+            mark_transaction_assigned(guard.get(), pending[i].transaction_id);
 
             // Build stock_request_result for message_handler to send dispatch
             stock_request_result result;
@@ -282,15 +300,21 @@ void inventory_manager::extract_quantities_from_payload(const payload_items_list
 
 int inventory_manager::find_transaction_id(const std::string& source_id, const std::string& destination_id)
 {
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     // Implementation uses DB to find the latest ASSIGNED transaction for this source/destination
-    return ::find_transaction_id(m_db_connection, source_id, destination_id, "ASSIGNED");
+    return ::find_transaction_id(guard.get(), source_id, destination_id, "ASSIGNED");
 }
 
 bool inventory_manager::get_client_inventory_message(const std::string& client_id, const std::string& client_type,
                                                      message_t& out_msg)
 {
+    // Acquire a connection from the pool
+    auto guard = m_pool.acquire();
+
     int quantities[6] = {0};
-    if (get_client_inventory(m_db_connection, client_id, quantities) != 0)
+    if (get_client_inventory(guard.get(), client_id, quantities) != 0)
     {
         std::cerr << "[INVENTORY_MANAGER] Failed to get inventory for client " << client_id << std::endl;
         return false;

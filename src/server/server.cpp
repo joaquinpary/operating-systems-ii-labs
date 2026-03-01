@@ -6,17 +6,6 @@
 #include <stdexcept>
 #include <utility>
 
-config::server_config make_default_server_config() // revisar, no deberiamos tener configuracion default
-{
-    return config::server_config{
-        .ip_v4 = server_constants::DEFAULT_IPV4_ADDRESS,
-        .ip_v6 = server_constants::DEFAULT_IPV6_ADDRESS,
-        .network_port = server_constants::DEFAULT_PORT,
-        .ack_timeout = 3,
-        .max_auth_attempts = 3,
-    };
-}
-
 asio::ip::address server::parse_address(const std::string& address_literal)
 {
     try
@@ -53,17 +42,17 @@ void tcp_session::send(const std::string& data)
 void tcp_session::do_read()
 {
     auto self = shared_from_this();
-    asio::async_read(m_socket, asio::buffer(m_data, server_constants::DEFAULT_BUFFER_SIZE),
+    asio::async_read(m_socket, asio::buffer(m_data, BUFFER_SIZE),
                      [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
                          if (!ec)
                          {
-                             if (bytes_transferred != server_constants::DEFAULT_BUFFER_SIZE)
+                             if (bytes_transferred != BUFFER_SIZE)
                              {
-                                 std::cerr << "\n\n[TCP] ERROR: Expected " << server_constants::DEFAULT_BUFFER_SIZE
+                                 std::cerr << "\n\n[TCP] ERROR: Expected " << BUFFER_SIZE
                                            << " bytes but received " << bytes_transferred << std::endl;
                              }
 
-                             m_data[server_constants::DEFAULT_BUFFER_SIZE - 1] = '\0';
+                             m_data[BUFFER_SIZE - 1] = '\0';
                              std::cout << "\n\n[TCP] <- " << m_data.data() << std::endl;
 
                              process_received_data(bytes_transferred);
@@ -164,21 +153,21 @@ void tcp_session::do_write_next()
     std::string data = m_write_queue.front();
     m_write_queue.pop_front();
 
-    auto fixed_buffer = std::make_shared<std::array<char, server_constants::DEFAULT_BUFFER_SIZE>>();
+    auto fixed_buffer = std::make_shared<std::array<char, BUFFER_SIZE>>();
     std::fill(fixed_buffer->begin(), fixed_buffer->end(), 0);
 
-    if (data.length() >= server_constants::DEFAULT_BUFFER_SIZE)
+    if (data.length() >= BUFFER_SIZE)
     {
         std::cerr << "\n\n[TCP] ERROR: Message too large (" << data.length() << " bytes), truncating to "
-                  << (server_constants::DEFAULT_BUFFER_SIZE - 1) << " bytes" << std::endl;
-        std::copy_n(data.begin(), server_constants::DEFAULT_BUFFER_SIZE - 1, fixed_buffer->begin());
+                  << (BUFFER_SIZE - 1) << " bytes" << std::endl;
+        std::copy_n(data.begin(), BUFFER_SIZE - 1, fixed_buffer->begin());
     }
     else
     {
         std::copy(data.begin(), data.end(), fixed_buffer->begin());
     }
 
-    asio::async_write(m_socket, asio::buffer(*fixed_buffer, server_constants::DEFAULT_BUFFER_SIZE),
+    asio::async_write(m_socket, asio::buffer(*fixed_buffer, BUFFER_SIZE),
                       [this, self, fixed_buffer, data](const asio::error_code& ec, std::size_t bytes_transferred) {
                           if (!ec)
                           {
@@ -215,10 +204,10 @@ void udp_server::do_receive()
         asio::buffer(m_data), m_sender_endpoint, [this](const asio::error_code& ec, std::size_t bytes_transferred) {
             if (!ec)
             {
-                if (bytes_transferred >= server_constants::DEFAULT_BUFFER_SIZE)
+                if (bytes_transferred >= BUFFER_SIZE)
                 {
                     std::cerr << "\n\n[UDP] ERROR: Message too large! Received " << bytes_transferred
-                              << " bytes, buffer is " << server_constants::DEFAULT_BUFFER_SIZE << " bytes" << std::endl;
+                              << " bytes, buffer is " << BUFFER_SIZE << " bytes" << std::endl;
                     do_receive();
                     return;
                 }
@@ -353,6 +342,7 @@ server::server(asio::io_context& io_context, const config::server_config& config
     // The callback resolves whether to send via TCP or UDP
     m_message_handler =
         std::make_unique<message_handler>(*m_auth_module, *m_session_manager, *m_timer_manager, *m_inventory_manager,
+                                          m_config.ack_timeout, m_config.max_retries,
                                           [this](const std::string& session_id, const std::string& data) {
                                               // Generic send callback - determines TCP vs UDP and sends appropriately
                                               auto session_info = m_session_manager->get_session_info(session_id);

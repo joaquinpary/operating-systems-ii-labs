@@ -2,9 +2,13 @@
 #define INVENTORY_MANAGER_HPP
 
 #include <common/json_manager.h>
-#include <pqxx/pqxx>
 #include <string>
 #include <vector>
+
+#define MAX_PENDING_TRANSACTIONS 100
+
+// Forward declaration
+class connection_pool;
 
 // Result of handle_stock_request — tells message_handler what happened and what to send
 struct stock_request_result
@@ -27,7 +31,7 @@ struct stock_request_result
 class inventory_manager
 {
   public:
-    inventory_manager(pqxx::connection& db_conn);
+    inventory_manager(connection_pool& pool);
     ~inventory_manager();
 
     // Handle inventory update from hub or warehouse
@@ -57,7 +61,7 @@ class inventory_manager
     bool get_client_inventory_message(const std::string& client_id, const std::string& client_type, message_t& out_msg);
 
   private:
-    pqxx::connection& m_db_connection;
+    connection_pool& m_pool;
 
     // Helper: Extract quantities from message payload
     void extract_quantities_from_payload(const payload_items_list& payload, int quantities[6]);

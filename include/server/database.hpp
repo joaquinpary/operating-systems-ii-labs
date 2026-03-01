@@ -31,11 +31,12 @@ struct transaction_record
     int ammo;
 };
 
+std::string build_connection_string();
 std::unique_ptr<pqxx::connection> connect_to_database();
-std::unique_ptr<pqxx::connection> initialize_database();
+int initialize_database(pqxx::connection& conn, const std::string& credentials_dir_path);
 int create_credentials_table(pqxx::connection& conn);
 std::unique_ptr<credential> query_credentials_by_username(pqxx::connection& conn, const std::string& username);
-int populate_credentials_table(pqxx::connection& conn, const std::string& json_file_path);
+int populate_credentials_table(pqxx::connection& conn, const std::string& credentials_dir_path);
 
 // Inventory management functions
 int create_inventory_tables(pqxx::connection& conn);
