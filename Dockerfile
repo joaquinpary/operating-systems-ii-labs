@@ -47,6 +47,12 @@ COPY --from=builder /app/build/dhl_${BUILD_TARGET} /app/dhl_${BUILD_TARGET}
 # Copy cjson library (needed by both client and server)
 COPY --from=builder /app/build/_deps/cjson-build/libcjson*.so* /usr/local/lib/
 
+# Copy emergency detection shared library (client only — harmless if absent on server)
+RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
+    if ls /tmp/build/libemergency*.so* 2>/dev/null | grep -q .; then \
+        cp /tmp/build/libemergency*.so* /usr/local/lib/; \
+    fi
+
 # Create log directory following FHS
 RUN mkdir -p /var/log/dhl
 

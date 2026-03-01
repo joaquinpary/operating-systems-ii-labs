@@ -21,6 +21,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/common)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/server)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/client)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../include/client/emergency)
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../external/common/cjson) 
 
@@ -135,6 +136,27 @@ foreach(test_file ${SERVER_TEST})
         pqxx
         ${PostgreSQL_LIBRARIES}
     )
+    target_compile_definitions(${exec_name} PRIVATE TESTING)
+
+    add_test(NAME ${exec_name} COMMAND ${exec_name})
+endforeach()
+
+message(STATUS "Setting up emergency detector test executables...")
+
+file(GLOB EMERGENCY_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/emergency/*.c)
+file(GLOB EMERGENCY_SRC  ${CMAKE_CURRENT_SOURCE_DIR}/../src/client/emergency/*.c)
+
+foreach(test_file ${EMERGENCY_TEST})
+    get_filename_component(test_name ${test_file} NAME_WE)
+    set(exec_name test_emergency_${test_name})
+
+    add_executable(${exec_name} ${test_file} ${EMERGENCY_SRC})
+
+    target_include_directories(${exec_name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include/client/emergency
+    )
+    target_compile_options(${exec_name} PRIVATE -fPIC)
+    target_link_libraries(${exec_name} PRIVATE unity)
     target_compile_definitions(${exec_name} PRIVATE TESTING)
 
     add_test(NAME ${exec_name} COMMAND ${exec_name})

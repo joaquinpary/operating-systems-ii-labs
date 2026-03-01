@@ -43,6 +43,9 @@ typedef struct
     // Inventory control flags
     volatile sig_atomic_t inventory_updated; // Flag set when inventory is updated
 
+    // Emergency control flags
+    volatile sig_atomic_t emergency_active; // Flag set while an emergency alert is pending ACK
+
     // Control flags
     volatile sig_atomic_t should_exit;
 } shared_data_t;
