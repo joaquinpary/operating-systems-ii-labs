@@ -99,6 +99,15 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.pool_size = static_cast<std::uint32_t>(pool_size->valueint);
 
+    // Validate and parse worker_threads
+    cJSON* worker_threads = cJSON_GetObjectItemCaseSensitive(json, "worker_threads");
+    if (!worker_threads || !cJSON_IsNumber(worker_threads))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'worker_threads' field in config file");
+    }
+    config.worker_threads = static_cast<std::uint32_t>(worker_threads->valueint);
+
     // Validate and parse credentials_path
     cJSON* credentials_path = cJSON_GetObjectItemCaseSensitive(json, "credentials_path");
     if (!credentials_path || !cJSON_IsString(credentials_path))

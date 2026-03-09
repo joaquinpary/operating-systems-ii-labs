@@ -126,13 +126,13 @@ foreach(test_file ${SERVER_TEST})
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
         ${PROJECT_SOURCE_DIR}/include/common
-        ${CMAKE_CURRENT_SOURCE_DIR}/../external/server/asio/asio/include
         ${PostgreSQL_INCLUDE_DIRS}
     )
     target_link_libraries(${exec_name} PRIVATE
         gtest
         gtest_main
         pthread
+        rt
         pqxx
         ${PostgreSQL_LIBRARIES}
     )

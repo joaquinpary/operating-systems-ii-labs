@@ -6,6 +6,7 @@
     "max_auth_attempts": 3,
     "max_retries": 3,
     "pool_size": 8,
+    "worker_threads": 4,
     "credentials_path": "/etc/server/clients"
 }
 

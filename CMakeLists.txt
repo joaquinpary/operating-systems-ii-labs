@@ -55,17 +55,6 @@ include_directories(include/common)
 
 if(BUILD_TARGET STREQUAL "server")
 
-    # ASIO
-    set(ASIO_GIT_URL "https://github.com/chriskohlhoff/asio.git")
-    FetchContent_Declare(
-        asio
-        GIT_REPOSITORY ${ASIO_GIT_URL}
-        GIT_TAG        master
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio
-        UPDATE_COMMAND ""
-    )
-    FetchContent_MakeAvailable(asio)
-
     set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
     FetchContent_Declare(
         pqxx
@@ -77,8 +66,7 @@ if(BUILD_TARGET STREQUAL "server")
     FetchContent_MakeAvailable(pqxx)
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
-    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/server/asio/asio/include)
-    
+
     find_package(PostgreSQL REQUIRED)
     include_directories(${PostgreSQL_INCLUDE_DIRS})
     
@@ -90,7 +78,7 @@ if(BUILD_TARGET STREQUAL "server")
     )
     set(TARGET_EXEC dhl_server)
     add_executable(${TARGET_EXEC} ${SOURCES})
-    target_link_libraries(${TARGET_EXEC} pthread)
+    target_link_libraries(${TARGET_EXEC} pthread rt)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
 
 

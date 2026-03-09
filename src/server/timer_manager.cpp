@@ -1,34 +1,31 @@
 #include "timer_manager.hpp"
-#include <iostream>
 
-timer_manager::timer_manager(asio::io_context& io_context) : m_io_context(io_context)
+#include <cstring>
+#include <iostream>
+#include <sys/timerfd.h>
+#include <unistd.h>
+
+timer_manager::timer_manager(event_loop& loop) : m_loop(loop)
 {
     std::cout << "[TIMER_MANAGER] Initialized" << std::endl;
 }
 
 timer_manager::~timer_manager()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    // Cancel all timers
-    for (auto& session_pair : m_ack_timers)
+    // Cancel all ACK timers
+    for (auto& [session_id, timer_map] : m_ack_timers)
     {
-        for (auto& timer_pair : session_pair.second)
+        for (auto& [msg_ts, tfd] : timer_map)
         {
-            if (timer_pair.second)
-            {
-                timer_pair.second->cancel();
-            }
+            close_timerfd(tfd);
         }
     }
     m_ack_timers.clear();
 
-    for (auto& timer_pair : m_keepalive_timers)
+    // Cancel all keepalive timers
+    for (auto& [session_id, tfd] : m_keepalive_timers)
     {
-        if (timer_pair.second)
-        {
-            timer_pair.second->cancel();
-        }
+        close_timerfd(tfd);
     }
     m_keepalive_timers.clear();
 
@@ -40,29 +37,59 @@ timer_manager::~timer_manager()
 void timer_manager::start_ack_timer(const std::string& session_id, const std::string& msg_timestamp,
                                     int timeout_seconds, std::function<void()> on_timeout)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Cancel existing timer for this session/timestamp if any
+    cancel_ack_timer(session_id, msg_timestamp);
 
-    // Create timer
-    auto timer = std::make_shared<asio::steady_timer>(m_io_context);
-    timer->expires_after(std::chrono::seconds(timeout_seconds));
+    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (tfd == -1)
+    {
+        std::cerr << "[TIMER] timerfd_create failed: " << strerror(errno) << std::endl;
+        return;
+    }
 
-    // Set async wait with callback
-    timer->async_wait([on_timeout, session_id, msg_timestamp](const asio::error_code& ec) {
-        if (!ec) // Timer expired (not cancelled)
+    struct itimerspec ts
+    {
+    };
+    ts.it_value.tv_sec = timeout_seconds;
+    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
+    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
+    ts.it_interval.tv_sec = 0; // One-shot
+    ts.it_interval.tv_nsec = 0;
+
+    if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
+    {
+        std::cerr << "[TIMER] timerfd_settime failed: " << strerror(errno) << std::endl;
+        ::close(tfd);
+        return;
+    }
+
+    // Register with event loop (level-triggered for timerfd)
+    m_loop.add_fd(tfd, EPOLLIN, [this, tfd, session_id, msg_timestamp, on_timeout](std::uint32_t /*events*/) {
+        // Read the timerfd to acknowledge expiry
+        std::uint64_t expirations;
+        ssize_t n = read(tfd, &expirations, sizeof(expirations));
+        (void)n; // We don't need the count
+
+        std::cout << "[TIMER] ACK timeout for session: " << session_id << ", message: " << msg_timestamp << std::endl;
+
+        // Clean up this timerfd from our map and epoll before calling callback
+        close_timerfd(tfd);
+
+        auto session_it = m_ack_timers.find(session_id);
+        if (session_it != m_ack_timers.end())
         {
-            std::cout << "[TIMER] ACK timeout for session: " << session_id << ", message: " << msg_timestamp
-                      << std::endl;
-            on_timeout();
+            session_it->second.erase(msg_timestamp);
+            if (session_it->second.empty())
+            {
+                m_ack_timers.erase(session_it);
+            }
         }
-        else if (ec == asio::error::operation_aborted)
-        {
-            std::cout << "[TIMER] ACK timer cancelled for session: " << session_id << ", message: " << msg_timestamp
-                      << std::endl;
-        }
+
+        // Execute timeout callback
+        on_timeout();
     });
 
-    // Store timer
-    m_ack_timers[session_id][msg_timestamp] = timer;
+    m_ack_timers[session_id][msg_timestamp] = tfd;
 
     std::cout << "[TIMER] Started ACK timer for session: " << session_id << ", message: " << msg_timestamp
               << " (timeout: " << timeout_seconds << "s)" << std::endl;
@@ -70,8 +97,6 @@ void timer_manager::start_ack_timer(const std::string& session_id, const std::st
 
 bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::string& msg_timestamp)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
     auto session_it = m_ack_timers.find(session_id);
     if (session_it == m_ack_timers.end())
     {
@@ -84,14 +109,9 @@ bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::s
         return false;
     }
 
-    if (timer_it->second)
-    {
-        timer_it->second->cancel();
-    }
-
+    close_timerfd(timer_it->second);
     session_it->second.erase(timer_it);
 
-    // Clean up session map if empty
     if (session_it->second.empty())
     {
         m_ack_timers.erase(session_it);
@@ -107,32 +127,46 @@ bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::s
 void timer_manager::start_keepalive_timer(const std::string& session_id, int timeout_seconds,
                                           std::function<void()> on_timeout)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // Cancel existing
+    cancel_keepalive_timer(session_id);
 
-    // Cancel existing timer if any
-    auto it = m_keepalive_timers.find(session_id);
-    if (it != m_keepalive_timers.end() && it->second)
+    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (tfd == -1)
     {
-        it->second->cancel();
+        std::cerr << "[TIMER] timerfd_create failed: " << strerror(errno) << std::endl;
+        return;
     }
 
-    // Create new timer
-    auto timer = std::make_shared<asio::steady_timer>(m_io_context);
-    timer->expires_after(std::chrono::seconds(timeout_seconds));
+    struct itimerspec ts
+    {
+    };
+    ts.it_value.tv_sec = timeout_seconds;
+    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
+    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
+    ts.it_interval.tv_sec = 0;
+    ts.it_interval.tv_nsec = 0;
 
-    timer->async_wait([on_timeout, session_id](const asio::error_code& ec) {
-        if (!ec) // Timer expired
-        {
-            std::cout << "[TIMER] Keepalive timeout for session: " << session_id << std::endl;
-            on_timeout();
-        }
-        else if (ec == asio::error::operation_aborted)
-        {
-            std::cout << "[TIMER] Keepalive timer cancelled for session: " << session_id << std::endl;
-        }
+    if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
+    {
+        std::cerr << "[TIMER] timerfd_settime failed: " << strerror(errno) << std::endl;
+        ::close(tfd);
+        return;
+    }
+
+    m_loop.add_fd(tfd, EPOLLIN, [this, tfd, session_id, on_timeout](std::uint32_t /*events*/) {
+        std::uint64_t expirations;
+        ssize_t n = read(tfd, &expirations, sizeof(expirations));
+        (void)n;
+
+        std::cout << "[TIMER] Keepalive timeout for session: " << session_id << std::endl;
+
+        close_timerfd(tfd);
+        m_keepalive_timers.erase(session_id);
+
+        on_timeout();
     });
 
-    m_keepalive_timers[session_id] = timer;
+    m_keepalive_timers[session_id] = tfd;
 
     std::cout << "[TIMER] Started keepalive timer for session: " << session_id << " (timeout: " << timeout_seconds
               << "s)" << std::endl;
@@ -140,28 +174,19 @@ void timer_manager::start_keepalive_timer(const std::string& session_id, int tim
 
 void timer_manager::reset_keepalive_timer(const std::string& session_id)
 {
-    // PLACEHOLDER: To be fully implemented when keepalive feature is added
-    std::lock_guard<std::mutex> lock(m_mutex);
-
     auto it = m_keepalive_timers.find(session_id);
-    if (it != m_keepalive_timers.end() && it->second)
+    if (it != m_keepalive_timers.end())
     {
         std::cout << "[TIMER] Reset keepalive timer for session: " << session_id << " (PLACEHOLDER)" << std::endl;
-        // Note: Full implementation will need to store callback or use a different approach
     }
 }
 
 void timer_manager::cancel_keepalive_timer(const std::string& session_id)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
     auto it = m_keepalive_timers.find(session_id);
     if (it != m_keepalive_timers.end())
     {
-        if (it->second)
-        {
-            it->second->cancel();
-        }
+        close_timerfd(it->second);
         m_keepalive_timers.erase(it);
         std::cout << "[TIMER] Cancelled keepalive timer for session: " << session_id << std::endl;
     }
@@ -171,33 +196,23 @@ void timer_manager::cancel_keepalive_timer(const std::string& session_id)
 
 void timer_manager::clear_session_timers(const std::string& session_id)
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
-
-    // Cancel all ACK timers for this session
     auto ack_it = m_ack_timers.find(session_id);
     if (ack_it != m_ack_timers.end())
     {
-        for (auto& timer_pair : ack_it->second)
+        for (auto& [msg_ts, tfd] : ack_it->second)
         {
-            if (timer_pair.second)
-            {
-                timer_pair.second->cancel();
-            }
+            close_timerfd(tfd);
         }
         m_ack_timers.erase(ack_it);
     }
 
-    // Cancel keepalive timer (inline to avoid deadlock)
-    auto ka_it = m_keepalive_timers.find(session_id);
-    if (ka_it != m_keepalive_timers.end())
-    {
-        if (ka_it->second)
-        {
-            ka_it->second->cancel();
-        }
-        m_keepalive_timers.erase(ka_it);
-        std::cout << "[TIMER] Cancelled keepalive timer for session: " << session_id << std::endl;
-    }
+    cancel_keepalive_timer(session_id);
+}
 
-    std::cout << "[TIMER] Cleared all timers for session: " << session_id << std::endl;
+// ==================== Helper ====================
+
+void timer_manager::close_timerfd(int fd)
+{
+    m_loop.remove_fd(fd);
+    ::close(fd);
 }

@@ -265,8 +265,8 @@ int populate_credentials_table(pqxx::connection& conn, const std::string& creden
         }
 
         txn.commit();
-        std::cout << "Populated " << count << " credentials into database from " << conf_count
-                  << " .conf files." << std::endl;
+        std::cout << "Populated " << count << " credentials into database from " << conf_count << " .conf files."
+                  << std::endl;
         return 0;
     }
     catch (const std::exception& ex)

@@ -3,11 +3,12 @@
 #include <cstring>
 #include <iostream>
 
-message_handler::message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
-                       inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                       std::uint32_t max_retries, send_callback_t send_callback)
-    : m_auth_module(auth), m_session_manager(session_mgr), m_timer_manager(timer_mgr), m_inventory_manager(inv_mgr),
-    m_ack_timeout_seconds(ack_timeout_seconds), m_max_retries(max_retries), m_send_callback(send_callback)
+// ==================== CONSTRUCTOR / DESTRUCTOR ====================
+
+message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
+                                 std::uint32_t max_retries)
+    : m_auth_module(auth), m_inventory_manager(inv_mgr), m_ack_timeout_seconds(ack_timeout_seconds),
+      m_max_retries(max_retries)
 {
 }
 
@@ -15,97 +16,201 @@ message_handler::~message_handler()
 {
 }
 
-bool message_handler::generate_ack_if_needed(const message_t& msg, const std::string& session_id, message_t* ack_out)
-{
-    if (!ack_out)
-    {
-        return false;
-    }
+// ==================== RESPONSE SLOT HELPERS ====================
 
-    // Categorize message
+response_slot_t message_handler::make_send_response(const char* session_id, const message_t& msg)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::SEND);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+
+    char json_buf[BUFFER_SIZE];
+    if (serialize_message_to_json(&msg, json_buf) == 0)
+    {
+        std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
+        std::memcpy(slot.payload, json_buf, len);
+        slot.payload_len = len;
+    }
+    return slot;
+}
+
+response_slot_t message_handler::make_send_to_username(const char* username, const message_t& msg)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::SEND);
+    // session_id left empty — reactor resolves via target_username
+    std::strncpy(slot.target_username, username, CREDENTIALS_SIZE - 1);
+
+    char json_buf[BUFFER_SIZE];
+    if (serialize_message_to_json(&msg, json_buf) == 0)
+    {
+        std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
+        std::memcpy(slot.payload, json_buf, len);
+        slot.payload_len = len;
+    }
+    return slot;
+}
+
+response_slot_t message_handler::make_start_timer(const char* session_id, const message_t& msg)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::START_ACK_TIMER);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    std::strncpy(slot.timer_key, msg.timestamp, TIMESTAMP_SIZE - 1);
+    slot.timer_timeout = m_ack_timeout_seconds;
+    slot.retry_count = 0;
+    slot.max_retries = m_max_retries;
+
+    // Store serialized message in payload so reactor can resend on timeout
+    char json_buf[BUFFER_SIZE];
+    if (serialize_message_to_json(&msg, json_buf) == 0)
+    {
+        std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
+        std::memcpy(slot.payload, json_buf, len);
+        slot.payload_len = len;
+    }
+    return slot;
+}
+
+response_slot_t message_handler::make_cancel_timer(const char* session_id, const char* timestamp)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::CANCEL_ACK_TIMER);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    std::strncpy(slot.timer_key, timestamp, TIMESTAMP_SIZE - 1);
+    return slot;
+}
+
+response_slot_t message_handler::make_clear_timers(const char* session_id)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::CLEAR_TIMERS);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    return slot;
+}
+
+response_slot_t message_handler::make_blacklist(const char* session_id)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::BLACKLIST);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    return slot;
+}
+
+response_slot_t message_handler::make_mark_authenticated(const char* session_id, const char* client_type,
+                                                         const char* username)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    std::strncpy(slot.client_type, client_type, ROLE_SIZE - 1);
+    std::strncpy(slot.username, username, CREDENTIALS_SIZE - 1);
+    return slot;
+}
+
+// ==================== ACK GENERATION ====================
+
+bool message_handler::generate_ack_if_needed(const message_t& msg, const request_slot_t& req, response_slot_t& ack_out)
+{
     message_category category = categorize_message(msg.msg_type);
 
-    // Only authenticated sessions can receive ACKs (except for their AUTH_REQUEST)
+    // AUTH_REQUEST and ACK messages don't get ACKed
     if (category == message_category::AUTH_REQUEST || category == message_category::ACK_MESSAGE)
     {
         return false;
     }
-    // As the message is not an AUTH_REQUEST or ACK_MESSAGE, it must be an authenticated session
-    // if not, return false
-    if (!m_session_manager.is_authenticated(session_id))
+
+    // Only authenticated sessions receive ACKs
+    if (!req.is_authenticated)
     {
         return false;
     }
-    // Given that the session is authenticated and the message is not an AUTH_REQUEST or ACK_MESSAGE,
-    // we can generate an ACK for the message
+
+    message_t ack_msg;
     int create_result =
-        create_acknowledgment_message(ack_out, SERVER, SERVER, msg.source_role, msg.source_id, msg.timestamp, 200);
-    // if the ACK message was not created successfully, return false
+        create_acknowledgment_message(&ack_msg, SERVER, SERVER, msg.source_role, msg.source_id, msg.timestamp, 200);
     if (create_result != 0)
     {
         return false;
     }
+
+    ack_out = make_send_response(req.session_id, ack_msg);
     return true;
 }
 
-message_processing_result message_handler::process_message(const std::string& json_input, const std::string& session_id)
+// ==================== MAIN ENTRY POINT ====================
+
+std::vector<response_slot_t> message_handler::process_request(const request_slot_t& request)
 {
-    message_processing_result result;
-    result.success = false;
-    result.should_send_response = false;
-    result.error_message = "";
+    std::vector<response_slot_t> responses;
 
     // Reject messages from blacklisted sessions
-    if (m_session_manager.is_blacklisted(session_id))
+    if (request.is_blacklisted)
     {
-        result.error_message = "Session is blacklisted";
-        return result;
+        std::cout << "[WORKER] Ignoring message from blacklisted session: " << request.session_id << std::endl;
+        return responses;
     }
 
     // Deserialize the incoming message
     message_t incoming_msg;
-    int deserialize_result = deserialize_message_from_json(json_input.c_str(), &incoming_msg);
+    int deserialize_result = deserialize_message_from_json(request.raw_json, &incoming_msg);
     if (deserialize_result != 0)
     {
-        result.error_message = "Failed to deserialize message";
-        return result;
+        std::cerr << "[WORKER] Failed to deserialize message from " << request.session_id << std::endl;
+        return responses;
     }
 
     // Categorize message for routing
     message_category category = categorize_message(incoming_msg.msg_type);
 
     // SECURITY: Only AUTH_REQUEST is allowed from unauthenticated sessions
-    if (category != message_category::AUTH_REQUEST && !m_session_manager.is_authenticated(session_id))
+    if (category != message_category::AUTH_REQUEST && !request.is_authenticated)
     {
-        result.error_message = "Message rejected: session not authenticated";
-        std::cout << "[SECURITY] Rejected unauthenticated message of type: " << incoming_msg.msg_type << std::endl;
-        return result;
+        std::cout << "[SECURITY] Rejected unauthenticated message type: " << incoming_msg.msg_type << " from "
+                  << request.session_id << std::endl;
+        return responses;
+    }
+
+    // Generate ACK first (so it's sent before the processing response)
+    response_slot_t ack_slot;
+    if (generate_ack_if_needed(incoming_msg, request, ack_slot))
+    {
+        responses.push_back(ack_slot);
     }
 
     // Route message to appropriate handler
+    std::vector<response_slot_t> handler_responses;
     switch (category)
     {
     case message_category::AUTH_REQUEST:
-        return handle_auth_request(incoming_msg, session_id);
-
+        handler_responses = handle_auth_request(incoming_msg, request);
+        break;
     case message_category::ACK_MESSAGE:
-        return handle_ack_message(incoming_msg, session_id);
-
-    case message_category::OTHER:
+        handler_responses = handle_ack_message(incoming_msg, request);
+        break;
     default:
-
-        return handle_other_message(incoming_msg, session_id, category);
+        handler_responses = handle_other_message(incoming_msg, request, category);
+        break;
     }
+
+    responses.insert(responses.end(), handler_responses.begin(), handler_responses.end());
+    return responses;
 }
 
-message_processing_result message_handler::handle_auth_request(const message_t& msg, const std::string& session_id)
-{
-    message_processing_result result;
-    result.success = false;
-    result.should_send_response = true;
-    result.error_message = "";
+// ==================== AUTH REQUEST ====================
 
-    // Extract username and password from payload
+std::vector<response_slot_t> message_handler::handle_auth_request(const message_t& msg, const request_slot_t& req)
+{
+    std::vector<response_slot_t> responses;
+
+    // Extract credentials
     std::string username(msg.payload.client_auth_request.username);
     std::string password(msg.payload.client_auth_request.password);
 
@@ -114,71 +219,78 @@ message_processing_result message_handler::handle_auth_request(const message_t& 
 
     // Create response message
     message_t response_msg;
-    memset(&response_msg, 0, sizeof(response_msg));
+    std::memset(&response_msg, 0, sizeof(response_msg));
 
-    // Determine response message type based on source role
     const char* response_type = get_auth_response_type(msg.source_role);
     if (!response_type)
     {
-        result.error_message = "Invalid source role for auth request";
-        return result;
+        std::cerr << "[WORKER] Invalid source role for auth request" << std::endl;
+        return responses;
     }
 
-    // Create AUTH_RESPONSE message
     int create_result = create_auth_response_message(&response_msg, msg.source_role, msg.source_id,
                                                      static_cast<int>(auth_res.status_code));
-
     if (create_result != 0)
     {
-        result.error_message = "Failed to create auth response message";
-        return result;
+        std::cerr << "[WORKER] Failed to create auth response" << std::endl;
+        return responses;
     }
 
-    // Override msg_type with the correct response type
-    strncpy(response_msg.msg_type, response_type, MESSAGE_TYPE_SIZE - 1);
+    std::strncpy(response_msg.msg_type, response_type, MESSAGE_TYPE_SIZE - 1);
     response_msg.msg_type[MESSAGE_TYPE_SIZE - 1] = '\0';
 
-    result.response_message = response_msg;
-    result.success = true;
-
-    // If authentication successful, mark session as authenticated
     if (auth_res.status_code == auth_result_code::SUCCESS)
     {
-        m_session_manager.mark_authenticated(session_id, auth_res.client_type, auth_res.username);
+        // 1. Mark session as authenticated (reactor will update session_manager)
+        responses.push_back(
+            make_mark_authenticated(req.session_id, auth_res.client_type.c_str(), auth_res.username.c_str()));
 
-        // Send AUTH_RESPONSE via callback first (goes into write queue first)
-        char auth_json[BUFFER_SIZE];
-        if (serialize_message_to_json(&response_msg, auth_json) == 0)
-        {
-            m_send_callback(session_id, std::string(auth_json));
-            track_message_for_ack(session_id, response_msg);
-        }
+        // 2. Send AUTH_RESPONSE
+        responses.push_back(make_send_response(req.session_id, response_msg));
+        responses.push_back(make_start_timer(req.session_id, response_msg));
 
-        // Build inventory message — returned as result.response_message (enqueued second)
+        // 3. Build and send inventory message
         message_t inv_msg;
         if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
         {
-            result.response_message = inv_msg; // Replaces auth response in result
-            track_message_for_ack(session_id, inv_msg);
-            std::cout << "[MSG_HANDLER] Auth response sent, inventory queued for " << auth_res.username << std::endl;
-        }
-        else
-        {
-            // No inventory to send, don't send the auth response twice
-            result.should_send_response = false;
+            responses.push_back(make_send_response(req.session_id, inv_msg));
+            responses.push_back(make_start_timer(req.session_id, inv_msg));
+            std::cout << "[WORKER] Auth success + inventory queued for " << auth_res.username << std::endl;
         }
     }
+    else
+    {
+        // Auth failed — just send the response (no timer tracking needed)
+        responses.push_back(make_send_response(req.session_id, response_msg));
+    }
 
-    return result;
+    return responses;
 }
 
-message_processing_result message_handler::handle_other_message(const message_t& msg, const std::string& session_id,
-                                                                message_category category)
+// ==================== ACK MESSAGE ====================
+
+std::vector<response_slot_t> message_handler::handle_ack_message(const message_t& msg, const request_slot_t& req)
 {
-    message_processing_result result;
-    result.success = true;
-    result.should_send_response = false;
-    result.error_message = "";
+    std::vector<response_slot_t> responses;
+
+    std::string ack_for_timestamp(msg.payload.acknowledgment.ack_for_timestamp);
+    int status_code = msg.payload.acknowledgment.status_code;
+
+    std::cout << "[ACK] Received ACK from " << msg.source_id << " for timestamp: " << ack_for_timestamp
+              << " (status: " << status_code << ")" << std::endl;
+
+    // Tell reactor to cancel the ACK timer
+    responses.push_back(make_cancel_timer(req.session_id, ack_for_timestamp.c_str()));
+
+    return responses;
+}
+
+// ==================== OTHER MESSAGES ====================
+
+std::vector<response_slot_t> message_handler::handle_other_message(const message_t& msg, const request_slot_t& req,
+                                                                   message_category category)
+{
+    std::vector<response_slot_t> responses;
 
     std::cout << "[MSG] Processing message type: " << msg.msg_type << " from " << msg.source_id << std::endl;
 
@@ -186,15 +298,12 @@ message_processing_result message_handler::handle_other_message(const message_t&
     {
         std::vector<stock_request_result> fulfilled_orders = m_inventory_manager.handle_inventory_update(msg);
 
-        // Send dispatch messages for any pending orders that were just fulfilled
         for (const auto& fulfilled : fulfilled_orders)
         {
-            // Create dispatch message for the assigned warehouse
             message_t dispatch_msg;
             int create_result = create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB,
                                                      SERVER, fulfilled.assigned_warehouse_id.c_str(), fulfilled.items,
                                                      fulfilled.item_count, NULL);
-
             if (create_result != 0)
             {
                 std::cerr << "[MSG] ERROR: Failed to create dispatch message for pending order "
@@ -202,23 +311,13 @@ message_processing_result message_handler::handle_other_message(const message_t&
                 continue;
             }
 
-            std::string warehouse_session = m_session_manager.find_session_by_username(fulfilled.assigned_warehouse_id);
-
-            if (warehouse_session.empty())
-            {
-                std::cerr << "[MSG] WARNING: Warehouse " << fulfilled.assigned_warehouse_id
-                          << " not connected, pending order dispatch deferred" << std::endl;
-                continue;
-            }
-
-            char dispatch_json[BUFFER_SIZE];
-            if (serialize_message_to_json(&dispatch_msg, dispatch_json) == 0)
-            {
-                m_send_callback(warehouse_session, std::string(dispatch_json));
-                track_message_for_ack(warehouse_session, dispatch_msg);
-                std::cout << "[MSG] Sent dispatch for fulfilled pending order " << fulfilled.transaction_id
-                          << " to warehouse " << fulfilled.assigned_warehouse_id << std::endl;
-            }
+            // Send to warehouse by username (reactor resolves session)
+            responses.push_back(make_send_to_username(fulfilled.assigned_warehouse_id.c_str(), dispatch_msg));
+            // Timer tracking: we need the warehouse session_id, but we don't have it.
+            // Timer will be started when reactor resolves the username to session_id.
+            // For now, we skip timer tracking for dispatches by username — reactor handles it.
+            // Alternative: add a START_ACK_TIMER_BY_USERNAME command.
+            std::cout << "[MSG] Dispatch queued for warehouse " << fulfilled.assigned_warehouse_id << std::endl;
         }
     }
     else if (category == message_category::STOCK_REQ)
@@ -227,54 +326,26 @@ message_processing_result message_handler::handle_other_message(const message_t&
 
         if (!stock_result.success)
         {
-            result.success = false;
-            result.error_message = "Failed to process stock request";
-            return result;
+            std::cerr << "[MSG] Failed to process stock request" << std::endl;
+            return responses;
         }
 
-        // If a warehouse was assigned for a HUB request, send dispatch order to warehouse
         if (stock_result.warehouse_assigned && !stock_result.requesting_hub_id.empty())
         {
-            // Create SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB message
             message_t dispatch_msg;
-            int create_result =
-                create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB,
-                                     SERVER,                                     // source_id = SERVER
-                                     stock_result.assigned_warehouse_id.c_str(), // target_id = warehouse
-                                     stock_result.items, stock_result.item_count, NULL);
-
+            int create_result = create_items_message(&dispatch_msg, SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB,
+                                                     SERVER, stock_result.assigned_warehouse_id.c_str(),
+                                                     stock_result.items, stock_result.item_count, NULL);
             if (create_result != 0)
             {
                 std::cerr << "[MSG] ERROR: Failed to create dispatch message for warehouse "
                           << stock_result.assigned_warehouse_id << std::endl;
-                return result; // stock request was still created successfully
+                return responses;
             }
 
-            // Find warehouse session and send
-            std::string warehouse_session =
-                m_session_manager.find_session_by_username(stock_result.assigned_warehouse_id);
-
-            if (warehouse_session.empty())
-            {
-                std::cerr << "[MSG] WARNING: Warehouse " << stock_result.assigned_warehouse_id
-                          << " is not connected, dispatch message cannot be sent now" << std::endl;
-                // Transaction is still in DB as DISPATCHED — could be retried later
-            }
-            else
-            {
-                char dispatch_json[BUFFER_SIZE];
-                if (serialize_message_to_json(&dispatch_msg, dispatch_json) == 0)
-                {
-                    m_send_callback(warehouse_session, std::string(dispatch_json));
-                    track_message_for_ack(warehouse_session, dispatch_msg);
-                    std::cout << "[MSG] Sent dispatch order to warehouse " << stock_result.assigned_warehouse_id
-                              << " (session: " << warehouse_session << ")" << std::endl;
-                }
-                else
-                {
-                    std::cerr << "[MSG] ERROR: Failed to serialize dispatch message" << std::endl;
-                }
-            }
+            responses.push_back(make_send_to_username(stock_result.assigned_warehouse_id.c_str(), dispatch_msg));
+            std::cout << "[MSG] Dispatch order queued for warehouse " << stock_result.assigned_warehouse_id
+                      << std::endl;
         }
     }
     else if (category == message_category::RECEIPT_CONFIRM)
@@ -291,121 +362,76 @@ message_processing_result message_handler::handle_other_message(const message_t&
 
         if (!replenish_result.success)
         {
-            result.success = false;
-            result.error_message = "Failed to process replenish request";
-            return result;
+            std::cerr << "[MSG] Failed to process replenish request" << std::endl;
+            return responses;
         }
 
-        // Send RESTOCK_NOTICE back to the warehouse to trigger its internal restock workflow
         message_t restock_msg;
         int create_result = create_items_message(&restock_msg, SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, SERVER,
                                                  replenish_result.assigned_warehouse_id.c_str(), replenish_result.items,
                                                  replenish_result.item_count, NULL);
-
         if (create_result != 0)
         {
-            std::cerr << "[MSG] ERROR: Failed to create restock notice for warehouse "
-                      << replenish_result.assigned_warehouse_id << std::endl;
-            return result;
+            std::cerr << "[MSG] ERROR: Failed to create restock notice" << std::endl;
+            return responses;
         }
 
-        char restock_json[BUFFER_SIZE];
-        if (serialize_message_to_json(&restock_msg, restock_json) == 0)
-        {
-            m_send_callback(session_id, std::string(restock_json));
-            track_message_for_ack(session_id, restock_msg);
-            std::cout << "[MSG] Sent restock notice to warehouse " << replenish_result.assigned_warehouse_id
-                      << std::endl;
-        }
-        else
-        {
-            std::cerr << "[MSG] ERROR: Failed to serialize restock notice" << std::endl;
-        }
+        // Restock goes back to the same session that sent the replenish request
+        responses.push_back(make_send_response(req.session_id, restock_msg));
+        responses.push_back(make_start_timer(req.session_id, restock_msg));
+        std::cout << "[MSG] Restock notice queued for warehouse " << replenish_result.assigned_warehouse_id
+                  << std::endl;
     }
     else
     {
         std::cout << "[MSG] Received message of unhandled type: " << msg.msg_type << std::endl;
     }
 
-    return result;
+    return responses;
 }
+
+// ==================== CATEGORIZATION ====================
 
 message_category message_handler::categorize_message(const char* msg_type) const
 {
-    // Check for AUTH_REQUEST messages
-    if (strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 || strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0)
     {
         return message_category::AUTH_REQUEST;
     }
 
-    // Check for ACK messages
-    if (strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0)
     {
         return message_category::ACK_MESSAGE;
     }
 
-    if (strcmp(msg_type, HUB_TO_SERVER__INVENTORY_UPDATE) == 0 ||
-        strcmp(msg_type, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__INVENTORY_UPDATE) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE) == 0)
     {
         return message_category::INV_UPDATE;
     }
 
-    if (strcmp(msg_type, HUB_TO_SERVER__STOCK_REQUEST) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__STOCK_REQUEST) == 0)
     {
         return message_category::STOCK_REQ;
     }
 
-    if (strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
     {
         return message_category::RECEIPT_CONFIRM;
     }
 
-    if (strcmp(msg_type, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE) == 0)
+    if (std::strcmp(msg_type, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE) == 0)
     {
         return message_category::DISPATCH_NOTICE;
     }
 
-    if (strcmp(msg_type, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST) == 0)
+    if (std::strcmp(msg_type, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST) == 0)
     {
         return message_category::REPLENISH_REQ;
     }
 
-    // All other messages
     return message_category::OTHER;
-}
-
-message_processing_result message_handler::handle_ack_message(const message_t& msg, const std::string& session_id)
-{
-    message_processing_result result;
-    result.success = true;
-    result.should_send_response = false;
-    result.error_message = "";
-
-    // Authentication already verified in process_message()
-
-    // Extract ACK information
-    std::string ack_for_timestamp(msg.payload.acknowledgment.ack_for_timestamp);
-    int status_code = msg.payload.acknowledgment.status_code;
-
-    std::cout << "[ACK] Received ACK from " << msg.source_id << " for timestamp: " << ack_for_timestamp
-              << " (status: " << status_code << ")" << std::endl;
-
-    // Cancel timer - if it doesn't exist, it's a duplicate or unknown ACK
-    if (m_timer_manager.cancel_ack_timer(session_id, ack_for_timestamp))
-    {
-        std::cout << "[ACK] Successfully processed and cancelled timer" << std::endl;
-    }
-    else
-    {
-        // Duplicate ACK detection: ACK for message we're not tracking
-        // either its a duplicate ack for a message that already got acked
-        // or its an unknown message that we're not tracking
-        // or the ack corresponds to a message that exceeded the max retries
-        std::cout << "[ACK] WARNING: Received duplicate, expired or unknown ACK (timestamp: " << ack_for_timestamp
-                  << ") - discarding" << std::endl;
-    }
-
-    return result;
 }
 
 const char* message_handler::get_auth_response_type(const std::string& client_type) const
@@ -419,63 +445,4 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
         return SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
     }
     return nullptr;
-}
-
-// ==================== ACK TRACKING METHODS ====================
-// Note: timer_manager is the source of truth for tracking
-// It has a map of session_id to a map of message_timestamp to a timer
-// The timer is started recursively with a retry count
-// The timer is cancelled when the ACK is received
-// The timer is restarted with a incremented retry count when the message is resent
-// should use track_message_for_ack() when messages are sent that expect an ACK
-
-void message_handler::track_message_for_ack(const std::string& session_id, const message_t& msg)
-{
-    std::cout << "[ACK_TRACKING] Started tracking message: " << msg.timestamp << " for session: " << session_id
-              << std::endl;
-
-    // Start recursive timer with retry_count = 0
-    start_ack_timer_recursive(session_id, msg, 0);
-}
-
-void message_handler::start_ack_timer_recursive(const std::string& session_id, const message_t& msg, int retry_count)
-{
-    // Lambda captures all necessary data: session_id, msg, retry_count
-    m_timer_manager.start_ack_timer(session_id, msg.timestamp, m_ack_timeout_seconds,
-                                    [this, session_id, msg, retry_count]() {
-            // Timer expired - check if we should retry or give up
-            if (retry_count >= static_cast<int>(m_max_retries) - 1)
-            {
-                // Max retries reached - close session
-                std::cout << "[ACK_TIMEOUT] Max retries (" << m_max_retries
-                          << ") reached for session: " << session_id << ", message: " << msg.timestamp
-                          << " - closing session" << std::endl;
-
-                // Clear all timers for this session
-                m_timer_manager.clear_session_timers(session_id);
-
-                // blacklist the session
-                m_session_manager.blacklist_session(session_id);
-            }
-            else
-            {
-                // Retry: resend message and restart timer
-                std::cout << "[ACK_TIMEOUT] Timeout for message " << msg.timestamp << " (retry " << (retry_count + 1)
-                          << "/" << m_max_retries << ")" << std::endl;
-
-                // Serialize and resend the message
-                char json[BUFFER_SIZE];
-                if (serialize_message_to_json(&msg, json) == 0)
-                {
-                    m_send_callback(session_id, std::string(json));
-                    std::cout << "[ACK_RETRY] Message resent to session: " << session_id << std::endl;
-                }
-                else
-                {
-                    std::cerr << "[ACK_RETRY] ERROR: Failed to serialize message for retry" << std::endl;
-                }
-
-                start_ack_timer_recursive(session_id, msg, retry_count + 1);
-            }
-        });
 }

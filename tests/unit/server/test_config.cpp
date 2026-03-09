@@ -43,6 +43,7 @@ class ConfigTest : public ::testing::Test
              << "  \"max_auth_attempts\": 3,\n"
              << "  \"max_retries\": 3,\n"
              << "  \"pool_size\": 8,\n"
+             << "  \"worker_threads\": 4,\n"
              << "  \"credentials_path\": \"config/clients\"\n"
              << "}";
         file.close();
