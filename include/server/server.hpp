@@ -1,95 +1,139 @@
 #ifndef SERVER_HPP
 #define SERVER_HPP
 
-#include "auth_module.hpp"
 #include "config.hpp"
-#include "inventory_manager.hpp"
-#include "message_handler.hpp"
+#include "event_loop.hpp"
+#include "ipc.hpp"
+#include "posix_address.hpp"
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
 #include <common/json_manager.h>
+
 #include <array>
-#include <asio.hpp>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
+/**
+ * A TCP session managed by the reactor.
+ * Owns a non-blocking socket fd. All I/O happens in the reactor thread.
+ */
 class tcp_session : public std::enable_shared_from_this<tcp_session>
 {
   public:
-    tcp_session(asio::ip::tcp::socket socket, message_handler& msg_handler, session_manager& session_mgr);
-    void start();
+    tcp_session(int fd, event_loop& loop, shared_queue& shm, session_manager& session_mgr);
+    ~tcp_session();
 
-    // Public method for sending data (used for retries)
+    void start();
     void send(const std::string& data);
+    void close();
+
+    const std::string& session_id() const
+    {
+        return m_session_id;
+    }
+    int fd() const
+    {
+        return m_fd;
+    }
 
   private:
-    void do_read();
-    void do_write(const std::string& data);
+    void on_readable();
     void do_write_next();
-    void process_received_data(std::size_t bytes_transferred);
+    void on_writable();
 
-    asio::ip::tcp::socket m_socket;
-    std::array<char, BUFFER_SIZE> m_data;
-    message_handler& m_message_handler;
+    int m_fd;
+    event_loop& m_loop;
+    shared_queue& m_shm;
     session_manager& m_session_manager;
     std::string m_session_id;
 
-    // Write queue to prevent concurrent async_write
+    std::array<char, BUFFER_SIZE> m_read_buf;
+    std::size_t m_read_offset = 0;
+
     std::deque<std::string> m_write_queue;
     bool m_writing = false;
+    bool m_closed = false;
 };
 
+/**
+ * A UDP server socket: one per address family (IPv4 / IPv6).
+ * All I/O in the reactor thread.
+ */
 class udp_server
 {
   public:
-    udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint, message_handler& msg_handler,
-               session_manager& session_mgr);
+    udp_server(event_loop& loop, shared_queue& shm, session_manager& session_mgr, const posix_address& bind_addr);
+    ~udp_server();
 
-    // Send message to a session (looks up endpoint from session_manager)
     void send_to_session(const std::string& session_id, const std::string& data);
+    int fd() const
+    {
+        return m_fd;
+    }
 
   private:
-    void do_receive();
-    void do_send(const std::string& data, const asio::ip::udp::endpoint& target_endpoint);
-    void process_received_data(const std::string& json_input, const asio::ip::udp::endpoint& sender_endpoint);
+    void on_readable();
 
-    asio::ip::udp::socket m_socket;
-    asio::ip::udp::endpoint m_sender_endpoint;
-    std::array<char, BUFFER_SIZE> m_data;
-    message_handler& m_message_handler;
+    int m_fd;
+    event_loop& m_loop;
+    shared_queue& m_shm;
     session_manager& m_session_manager;
+    std::array<char, BUFFER_SIZE> m_read_buf;
 };
 
+/**
+ * The main server class — runs in the reactor process.
+ * Owns TCP acceptors, UDP servers, session manager, timer manager,
+ * and the reactor-side of the shared queue.
+ */
 class server
 {
   public:
-    server(asio::io_context& io_context, const config::server_config& config,
-           std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-           std::unique_ptr<timer_manager> timer_mgr, std::unique_ptr<inventory_manager> inv_mgr);
+    server(event_loop& loop, shared_queue& shm, int response_efd, const config::server_config& config,
+           std::unique_ptr<session_manager> session_mgr, std::unique_ptr<timer_manager> timer_mgr);
     ~server();
+
     void start();
     void stop();
 
   private:
-    void start_accept(asio::ip::tcp::acceptor& acceptor);
-    static void configure_acceptor(asio::ip::tcp::acceptor& acceptor, const asio::ip::tcp::endpoint& endpoint);
-    asio::ip::tcp::endpoint make_tcp_endpoint(const std::string& address, std::uint16_t port) const;
-    asio::ip::udp::endpoint make_udp_endpoint(const std::string& address, std::uint16_t port) const;
-    static asio::ip::address parse_address(const std::string& address_literal);
+    // TCP acceptor setup & callbacks
+    int create_listen_socket(const posix_address& addr);
+    void on_accept(int listen_fd);
 
-    asio::io_context& m_io_context;
+    // Response dispatch (worker → reactor)
+    void on_response_ready();
+    void dispatch_response(const response_slot_t& resp);
+
+    // Timer expiry handler (for ACK retries)
+    void handle_ack_timeout(const std::string& session_id, const std::string& timer_key, const std::string& payload,
+                            std::uint32_t retry_count, std::uint32_t max_retries);
+
+    // Send callback (used by timer retry logic in reactor)
+    void send_to_session(const std::string& session_id, const std::string& data);
+
+    event_loop& m_loop;
+    shared_queue& m_shm;
+    int m_response_efd; // eventfd for worker→reactor notification
     config::server_config m_config;
-    asio::ip::tcp::acceptor m_tcp4_acceptor;
-    asio::ip::tcp::acceptor m_tcp6_acceptor;
+
+    // TCP listen sockets (IPv4 + IPv6)
+    int m_tcp4_fd = -1;
+    int m_tcp6_fd = -1;
+
+    // UDP servers
     std::unique_ptr<udp_server> m_udp_server_ipv4;
     std::unique_ptr<udp_server> m_udp_server_ipv6;
+
+    // Active TCP sessions: fd → session
+    std::unordered_map<int, std::shared_ptr<tcp_session>> m_tcp_sessions;
+
+    // Server modules (reactor-side only)
     std::unique_ptr<session_manager> m_session_manager;
-    std::unique_ptr<auth_module> m_auth_module;
     std::unique_ptr<timer_manager> m_timer_manager;
-    std::unique_ptr<inventory_manager> m_inventory_manager;
-    std::unique_ptr<message_handler> m_message_handler;
 };
 
 #endif // SERVER_HPP

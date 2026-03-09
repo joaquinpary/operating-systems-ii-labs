@@ -1,5 +1,6 @@
 #include "timer_manager.hpp"
 
+#include "event_loop.hpp"
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
@@ -8,21 +9,21 @@
 class TimerManagerTest : public ::testing::Test
 {
   protected:
-    std::unique_ptr<asio::io_context> io_context;
+    std::unique_ptr<event_loop> loop;
     std::unique_ptr<timer_manager> tm;
     std::unique_ptr<std::thread> io_thread;
 
     void SetUp() override
     {
-        io_context = std::make_unique<asio::io_context>();
-        tm = std::make_unique<timer_manager>(*io_context);
+        loop = std::make_unique<event_loop>();
+        tm = std::make_unique<timer_manager>(*loop);
     }
 
     void TearDown() override
     {
-        if (io_context)
+        if (loop)
         {
-            io_context->stop();
+            loop->stop();
         }
         if (io_thread && io_thread->joinable())
         {
@@ -32,7 +33,7 @@ class TimerManagerTest : public ::testing::Test
 
     void start_io_context()
     {
-        io_thread = std::make_unique<std::thread>([this]() { io_context->run(); });
+        io_thread = std::make_unique<std::thread>([this]() { loop->run(); });
         std::this_thread::sleep_for(std::chrono::milliseconds(5)); // Let it start
     }
 };
@@ -151,8 +152,8 @@ TEST_F(TimerManagerTest, ClearSessionTimers)
     // Immediately clear all timers for session_1 before they expire
     tm->clear_session_timers("session_1");
     
-    // Stop io_context to ensure the thread exits promptly
-    io_context->stop();
+    // Stop loop to ensure the thread exits promptly
+    loop->stop();
     
     EXPECT_EQ(timeout_count.load(), 0);
 }

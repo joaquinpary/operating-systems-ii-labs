@@ -3,19 +3,11 @@
 
 #include "auth_module.hpp"
 #include "inventory_manager.hpp"
-#include "session_manager.hpp"
-#include "timer_manager.hpp"
+#include "ipc.hpp"
 #include <common/json_manager.h>
 #include <cstdint>
 #include <string>
-
-struct message_processing_result
-{
-    bool success;
-    message_t response_message; // Response to send back (if any)
-    bool should_send_response;
-    std::string error_message;
-};
+#include <vector>
 
 enum class message_category
 {
@@ -29,34 +21,43 @@ enum class message_category
     OTHER
 };
 
+/**
+ * message_handler — runs inside the worker process.
+ *
+ * It receives a request_slot_t (from the shared memory ring buffer),
+ * processes the message using auth_module / inventory_manager,
+ * and returns a vector of response_slot_t to be pushed back to the reactor.
+ *
+ * It does NOT touch session_manager or timer_manager directly (those live in the reactor).
+ * Instead it emits response commands: SEND, START_ACK_TIMER, CANCEL_ACK_TIMER,
+ * CLEAR_TIMERS, BLACKLIST, MARK_AUTHENTICATED.
+ */
 class message_handler
 {
   public:
-    using send_callback_t = std::function<void(const std::string& session_id, const std::string& data)>;
-
-    message_handler(auth_module& auth, session_manager& session_mgr, timer_manager& timer_mgr,
-                    inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                    std::uint32_t max_retries, send_callback_t send_callback);
+    message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
+                    std::uint32_t max_retries);
     ~message_handler();
 
-    // Generate ACK if the message requires it (called before processing for immediate response)
-    // Returns true if ACK was generated, false otherwise
-    bool generate_ack_if_needed(const message_t& msg, const std::string& session_id, message_t* ack_out);
-
-    // Process an incoming message (without generating ACK - that's done separately)
-    // Returns processing result with response message if needed
-    message_processing_result process_message(const std::string& json_input, const std::string& session_id);
+    /**
+     * Process a request slot and produce responses.
+     * @return vector of response commands to post back to the reactor via shared_queue.
+     */
+    std::vector<response_slot_t> process_request(const request_slot_t& request);
 
   private:
+    // Generate ACK response slot if the message requires it
+    bool generate_ack_if_needed(const message_t& msg, const request_slot_t& req, response_slot_t& ack_out);
+
     // Handle authentication request
-    message_processing_result handle_auth_request(const message_t& msg, const std::string& session_id);
+    std::vector<response_slot_t> handle_auth_request(const message_t& msg, const request_slot_t& req);
 
     // Handle ACK messages from clients
-    message_processing_result handle_ack_message(const message_t& msg, const std::string& session_id);
+    std::vector<response_slot_t> handle_ack_message(const message_t& msg, const request_slot_t& req);
 
-    // Handle other message types (for now, reject if not authenticated)
-    message_processing_result handle_other_message(const message_t& msg, const std::string& session_id,
-                                                   message_category category);
+    // Handle other message types
+    std::vector<response_slot_t> handle_other_message(const message_t& msg, const request_slot_t& req,
+                                                      message_category category);
 
     // Categorize message type for routing
     message_category categorize_message(const char* msg_type) const;
@@ -64,17 +65,19 @@ class message_handler
     // Get response message type based on client type
     const char* get_auth_response_type(const std::string& client_type) const;
 
-    // ACK tracking methods (timer_manager is the source of truth)
-    void track_message_for_ack(const std::string& session_id, const message_t& msg);
-    void start_ack_timer_recursive(const std::string& session_id, const message_t& msg, int retry_count);
+    // Helper to make response slots
+    response_slot_t make_send_response(const char* session_id, const message_t& msg);
+    response_slot_t make_send_to_username(const char* username, const message_t& msg);
+    response_slot_t make_start_timer(const char* session_id, const message_t& msg);
+    response_slot_t make_cancel_timer(const char* session_id, const char* timestamp);
+    response_slot_t make_clear_timers(const char* session_id);
+    response_slot_t make_blacklist(const char* session_id);
+    response_slot_t make_mark_authenticated(const char* session_id, const char* client_type, const char* username);
 
     auth_module& m_auth_module;
-    session_manager& m_session_manager;
-    timer_manager& m_timer_manager;
     inventory_manager& m_inventory_manager;
     std::uint32_t m_ack_timeout_seconds;
     std::uint32_t m_max_retries;
-    send_callback_t m_send_callback;
 };
 
 #endif // MESSAGE_HANDLER_HPP

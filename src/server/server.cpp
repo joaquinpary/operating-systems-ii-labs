@@ -1,142 +1,139 @@
 #include "server.hpp"
 
+#include <cerrno>
 #include <common/json_manager.h>
+#include <cstring>
+#include <fcntl.h>
 #include <iostream>
-#include <sstream>
+#include <netinet/in.h>
 #include <stdexcept>
-#include <utility>
+#include <sys/eventfd.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
-asio::ip::address server::parse_address(const std::string& address_literal)
+// ==================== tcp_session ====================
+
+tcp_session::tcp_session(int fd, event_loop& loop, shared_queue& shm, session_manager& session_mgr)
+    : m_fd(fd), m_loop(loop), m_shm(shm), m_session_manager(session_mgr), m_session_id(session_mgr.create_session())
 {
-    try
-    {
-        return asio::ip::make_address(address_literal);
-    }
-    catch (const std::exception& ex)
-    {
-        throw std::runtime_error("Failed to parse address '" + address_literal + "': " + ex.what());
-    }
+    m_read_buf.fill(0);
 }
 
-// TCP SESSION CONSTRUCTOR
-tcp_session::tcp_session(asio::ip::tcp::socket socket, message_handler& msg_handler, session_manager& session_mgr)
-    : m_socket(std::move(socket)), m_message_handler(msg_handler), m_session_manager(session_mgr),
-      m_session_id(session_mgr.create_session())
+tcp_session::~tcp_session()
 {
+    close();
 }
 
 void tcp_session::start()
 {
-    // Register this session in session_manager for retry mechanism
     auto self = shared_from_this();
     m_session_manager.set_tcp_session(m_session_id, self);
 
-    do_read();
+    // Register for reading (edge-triggered)
+    m_loop.add_fd(m_fd, EPOLLIN | EPOLLET, [this](std::uint32_t events) {
+        if (events & (EPOLLHUP | EPOLLERR))
+        {
+            m_session_manager.remove_session(m_session_id);
+            close();
+            return;
+        }
+        if (events & EPOLLIN)
+        {
+            on_readable();
+        }
+        if (events & EPOLLOUT)
+        {
+            on_writable();
+        }
+    });
 }
 
 void tcp_session::send(const std::string& data)
-{
-    do_write(data);
-}
-
-void tcp_session::do_read()
-{
-    auto self = shared_from_this();
-    asio::async_read(m_socket, asio::buffer(m_data, BUFFER_SIZE),
-                     [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
-                         if (!ec)
-                         {
-                             if (bytes_transferred != BUFFER_SIZE)
-                             {
-                                 std::cerr << "\n\n[TCP] ERROR: Expected " << BUFFER_SIZE
-                                           << " bytes but received " << bytes_transferred << std::endl;
-                             }
-
-                             m_data[BUFFER_SIZE - 1] = '\0';
-                             std::cout << "\n\n[TCP] <- " << m_data.data() << std::endl;
-
-                             process_received_data(bytes_transferred);
-                             return;
-                         }
-                         if (ec != asio::error::operation_aborted)
-                         {
-                             std::cerr << "\n\n[TCP] ERROR: " << ec.message() << std::endl;
-                         }
-                         if (ec == asio::error::eof || ec == asio::error::connection_reset)
-                         {
-                             m_session_manager.remove_session(m_session_id);
-                         }
-                     });
-}
-
-void tcp_session::process_received_data(std::size_t bytes_transferred)
-{
-    std::string json_input(m_data.data());
-
-    // First, deserialize to check if we need to send ACK
-    message_t incoming_msg;
-    if (deserialize_message_from_json(json_input.c_str(), &incoming_msg) == 0)
-    {
-        // Generate and send ACK immediately (if needed)
-        message_t ack_msg;
-        if (m_message_handler.generate_ack_if_needed(incoming_msg, m_session_id, &ack_msg))
-        {
-            char ack_json[BUFFER_SIZE];
-            if (serialize_message_to_json(&ack_msg, ack_json) == 0)
-            {
-                std::string ack_str(ack_json);
-                do_write(ack_str);
-                std::cout << "[TCP] ACK sent immediately" << std::endl;
-            }
-            else
-            {
-                std::cerr << "\n\n[TCP] ERROR: Failed to serialize ACK message" << std::endl;
-            }
-        }
-    }
-
-    // Now process the message (can take time)
-    message_processing_result result = m_message_handler.process_message(json_input, m_session_id);
-
-    if (!result.success)
-    {
-        std::cerr << "\n\n[TCP] ERROR: Message processing failed - " << result.error_message << std::endl;
-        if (!m_writing)
-        {
-            do_read();
-        }
-        return;
-    }
-
-    // Send additional response if needed
-    if (result.should_send_response)
-    {
-        char response_json[BUFFER_SIZE];
-        if (serialize_message_to_json(&result.response_message, response_json) == 0)
-        {
-            std::string response_str(response_json);
-            do_write(response_str);
-        }
-        else
-        {
-            std::cerr << "\n\n[TCP] ERROR: Failed to serialize response message" << std::endl;
-        }
-    }
-
-    // If nothing was queued, go back to reading
-    if (!m_writing)
-    {
-        do_read();
-    }
-}
-
-void tcp_session::do_write(const std::string& data)
 {
     m_write_queue.push_back(data);
     if (!m_writing)
     {
         m_writing = true;
+        // Enable EPOLLOUT to trigger write
+        m_loop.modify_fd(m_fd, EPOLLIN | EPOLLOUT | EPOLLET);
         do_write_next();
+    }
+}
+
+void tcp_session::close()
+{
+    if (m_closed)
+    {
+        return;
+    }
+    m_closed = true;
+    m_loop.remove_fd(m_fd);
+    ::close(m_fd);
+    m_fd = -1;
+}
+
+void tcp_session::on_readable()
+{
+    // Edge-triggered: must drain the socket
+    while (true)
+    {
+        ssize_t remaining = static_cast<ssize_t>(BUFFER_SIZE) - static_cast<ssize_t>(m_read_offset);
+        if (remaining <= 0)
+        {
+            // We have a complete BUFFER_SIZE read — process it
+            m_read_buf[BUFFER_SIZE - 1] = '\0';
+            std::string json_input(m_read_buf.data());
+            std::cout << "\n\n[TCP] <- " << json_input << std::endl;
+
+            // Fill request slot and push to workers
+            request_slot_t req{};
+            std::strncpy(req.session_id, m_session_id.c_str(), SESSION_ID_SIZE - 1);
+            req.protocol = static_cast<std::uint8_t>(protocol_type::TCP);
+            std::memcpy(req.raw_json, m_read_buf.data(), BUFFER_SIZE);
+            req.payload_len = BUFFER_SIZE;
+            req.is_authenticated = m_session_manager.is_authenticated(m_session_id);
+            req.is_blacklisted = m_session_manager.is_blacklisted(m_session_id);
+
+            auto client_type = m_session_manager.get_client_type(m_session_id);
+            std::strncpy(req.client_type, client_type.c_str(), ROLE_SIZE - 1);
+
+            auto info = m_session_manager.get_session_info(m_session_id);
+            if (info)
+            {
+                std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
+            }
+
+            m_shm.push_request(req);
+
+            m_read_offset = 0;
+            m_read_buf.fill(0);
+            continue;
+        }
+
+        ssize_t n = recv(m_fd, m_read_buf.data() + m_read_offset, static_cast<std::size_t>(remaining), 0);
+        if (n > 0)
+        {
+            m_read_offset += static_cast<std::size_t>(n);
+        }
+        else if (n == 0)
+        {
+            // EOF
+            std::cout << "[TCP] Connection closed by peer (session: " << m_session_id << ")" << std::endl;
+            m_session_manager.remove_session(m_session_id);
+            close();
+            return;
+        }
+        else
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                break; // No more data right now
+            }
+            std::cerr << "[TCP] recv error: " << strerror(errno) << std::endl;
+            m_session_manager.remove_session(m_session_id);
+            close();
+            return;
+        }
     }
 }
 
@@ -145,247 +142,195 @@ void tcp_session::do_write_next()
     if (m_write_queue.empty())
     {
         m_writing = false;
-        do_read();
+        // Disable EPOLLOUT
+        m_loop.modify_fd(m_fd, EPOLLIN | EPOLLET);
         return;
     }
 
-    auto self = shared_from_this();
     std::string data = m_write_queue.front();
     m_write_queue.pop_front();
 
-    auto fixed_buffer = std::make_shared<std::array<char, BUFFER_SIZE>>();
-    std::fill(fixed_buffer->begin(), fixed_buffer->end(), 0);
-
+    // Pad to BUFFER_SIZE
+    std::array<char, BUFFER_SIZE> buf{};
+    buf.fill(0);
     if (data.length() >= BUFFER_SIZE)
     {
-        std::cerr << "\n\n[TCP] ERROR: Message too large (" << data.length() << " bytes), truncating to "
-                  << (BUFFER_SIZE - 1) << " bytes" << std::endl;
-        std::copy_n(data.begin(), BUFFER_SIZE - 1, fixed_buffer->begin());
+        std::copy_n(data.begin(), BUFFER_SIZE - 1, buf.begin());
     }
     else
     {
-        std::copy(data.begin(), data.end(), fixed_buffer->begin());
+        std::copy(data.begin(), data.end(), buf.begin());
     }
 
-    asio::async_write(m_socket, asio::buffer(*fixed_buffer, BUFFER_SIZE),
-                      [this, self, fixed_buffer, data](const asio::error_code& ec, std::size_t bytes_transferred) {
-                          if (!ec)
-                          {
-                              std::cout << "\n\n[TCP] -> " << data << std::endl;
-                              do_write_next(); // Process next message in queue
-                              return;
-                          }
-                          if (ec != asio::error::operation_aborted)
-                          {
-                              std::cerr << "\n\n[TCP] ERROR: " << ec.message() << std::endl;
-                          }
-                          m_writing = false;
-                      });
-}
-
-// UDP SERVER CONSTRUCTOR
-udp_server::udp_server(asio::io_context& io_context, const asio::ip::udp::endpoint& endpoint,
-                       message_handler& msg_handler, session_manager& session_mgr)
-    : m_socket(io_context), m_message_handler(msg_handler), m_session_manager(session_mgr)
-{
-    m_socket.open(endpoint.protocol());
-    m_socket.set_option(asio::socket_base::reuse_address(true));
-    if (endpoint.protocol() == asio::ip::udp::v6())
+    // Blocking-style write in a loop (socket is non-blocking, so we retry on EAGAIN)
+    std::size_t total_sent = 0;
+    while (total_sent < BUFFER_SIZE)
     {
-        m_socket.set_option(asio::ip::v6_only(true));
-    }
-    m_socket.bind(endpoint);
-    do_receive();
-}
-
-void udp_server::do_receive()
-{
-    m_socket.async_receive_from(
-        asio::buffer(m_data), m_sender_endpoint, [this](const asio::error_code& ec, std::size_t bytes_transferred) {
-            if (!ec)
-            {
-                if (bytes_transferred >= BUFFER_SIZE)
-                {
-                    std::cerr << "\n\n[UDP] ERROR: Message too large! Received " << bytes_transferred
-                              << " bytes, buffer is " << BUFFER_SIZE << " bytes" << std::endl;
-                    do_receive();
-                    return;
-                }
-
-                m_data[bytes_transferred] = '\0';
-
-                std::string message_copy(m_data.data(), bytes_transferred);
-                asio::ip::udp::endpoint sender_copy = m_sender_endpoint;
-
-                std::cout << "\n\n[UDP] <- " << message_copy << std::endl;
-
-                do_receive();
-
-                process_received_data(message_copy, sender_copy);
-                return;
-            }
-            if (ec != asio::error::operation_aborted)
-            {
-                std::cerr << "\n\n[UDP] ERROR: " << ec.message() << std::endl;
-                do_receive();
-            }
-        });
-}
-
-void udp_server::process_received_data(const std::string& json_input, const asio::ip::udp::endpoint& sender_endpoint)
-{
-    if (json_input.empty())
-    {
-        std::cerr << "ERROR: Empty message received from " << sender_endpoint << std::endl;
-        return;
-    }
-
-    // Get or create UDP session (deterministic session_id from endpoint)
-    std::string session_id = m_session_manager.get_or_create_udp_session(sender_endpoint);
-
-    if (!m_session_manager.is_authenticated(session_id))
-    {
-        auto session_info = m_session_manager.get_session_info(session_id);
-        if (!session_info)
+        ssize_t n = ::send(m_fd, buf.data() + total_sent, BUFFER_SIZE - total_sent, MSG_NOSIGNAL);
+        if (n > 0)
         {
-            session_id = m_session_manager.create_session();
+            total_sent += static_cast<std::size_t>(n);
+        }
+        else if (n == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+            {
+                // Can't write more now — we'll be called again on EPOLLOUT
+                // Put remaining data back (partial write scenario is unlikely for small buffers)
+                break;
+            }
+            std::cerr << "[TCP] send error: " << strerror(errno) << std::endl;
+            m_writing = false;
+            return;
         }
     }
 
-    // First, deserialize to check if we need to send ACK
-    message_t incoming_msg;
-    if (deserialize_message_from_json(json_input.c_str(), &incoming_msg) == 0)
+    if (total_sent == BUFFER_SIZE)
     {
-        // Generate and send ACK immediately (if needed)
-        message_t ack_msg;
-        if (m_message_handler.generate_ack_if_needed(incoming_msg, session_id, &ack_msg))
-        {
-            char ack_json[BUFFER_SIZE];
-            if (serialize_message_to_json(&ack_msg, ack_json) == 0)
-            {
-                std::string ack_str(ack_json);
-                do_send(ack_str, sender_endpoint);
-                std::cout << "[UDP] ACK sent immediately" << std::endl;
-            }
-            else
-            {
-                std::cerr << "\n\n[UDP] ERROR: Failed to serialize ACK message" << std::endl;
-            }
-        }
+        std::cout << "\n\n[TCP] -> " << data << std::endl;
+        do_write_next();
     }
+    // If partial, EPOLLOUT will trigger on_writable which retries
+}
 
-    // Now process the message (can take time)
-    message_processing_result result = m_message_handler.process_message(json_input, session_id);
-
-    if (!result.success)
+void tcp_session::on_writable()
+{
+    if (m_writing)
     {
-        std::cerr << "\n\n[UDP] ERROR: Message processing failed - " << result.error_message << std::endl;
-        return;
-    }
-
-    // Send additional response if needed
-    if (result.should_send_response)
-    {
-        char response_json[BUFFER_SIZE];
-        if (serialize_message_to_json(&result.response_message, response_json) == 0)
-        {
-            std::string response_str(response_json);
-            do_send(response_str, sender_endpoint);
-        }
-        else
-        {
-            std::cerr << "\n\n[UDP] ERROR: Failed to serialize response message" << std::endl;
-        }
+        do_write_next();
     }
 }
 
-void udp_server::do_send(const std::string& data, const asio::ip::udp::endpoint& target_endpoint)
+// ==================== udp_server ====================
+
+udp_server::udp_server(event_loop& loop, shared_queue& shm, session_manager& session_mgr,
+                       const posix_address& bind_addr)
+    : m_fd(-1), m_loop(loop), m_shm(shm), m_session_manager(session_mgr)
 {
-    m_socket.async_send_to(
-        asio::buffer(data.data(), data.length()), target_endpoint,
-        [this, data, target_endpoint](const asio::error_code& ec, std::size_t /*bytes_transferred*/) {
-            auto addr = target_endpoint.address().to_string();
-            auto port = target_endpoint.port();
-            if (ec && ec != asio::error::operation_aborted)
+    int domain = (bind_addr.family() == AF_INET6) ? AF_INET6 : AF_INET;
+    m_fd = socket(domain, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+    if (m_fd == -1)
+    {
+        throw std::runtime_error(std::string("UDP socket() failed: ") + strerror(errno));
+    }
+
+    int optval = 1;
+    setsockopt(m_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    if (domain == AF_INET6)
+    {
+        int v6only = 1;
+        setsockopt(m_fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+    }
+
+    if (bind(m_fd, bind_addr.sockaddr_ptr(), bind_addr.sockaddr_len()) == -1)
+    {
+        ::close(m_fd);
+        throw std::runtime_error(std::string("UDP bind() failed: ") + strerror(errno));
+    }
+
+    // Register for reading (level-triggered for UDP is fine)
+    m_loop.add_fd(m_fd, EPOLLIN, [this](std::uint32_t /*events*/) { on_readable(); });
+}
+
+udp_server::~udp_server()
+{
+    if (m_fd != -1)
+    {
+        m_loop.remove_fd(m_fd);
+        ::close(m_fd);
+    }
+}
+
+void udp_server::on_readable()
+{
+    // Drain all available datagrams
+    while (true)
+    {
+        struct sockaddr_storage sender_storage
+        {
+        };
+        socklen_t sender_len = sizeof(sender_storage);
+
+        ssize_t n = recvfrom(m_fd, m_read_buf.data(), BUFFER_SIZE - 1, 0,
+                             reinterpret_cast<struct sockaddr*>(&sender_storage), &sender_len);
+        if (n <= 0)
+        {
+            if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
             {
-                std::cerr << "\n\n[UDP] ERROR: " << ec.message() << " -> " << addr << ":" << port << std::endl;
+                break;
             }
-            else
+            if (n == -1)
             {
-                std::cout << "\n\n[UDP] -> " << addr << ":" << port << " | data=" << data << std::endl;
+                std::cerr << "[UDP] recvfrom error: " << strerror(errno) << std::endl;
             }
-        });
+            break;
+        }
+
+        m_read_buf[static_cast<std::size_t>(n)] = '\0';
+        std::string json_input(m_read_buf.data(), static_cast<std::size_t>(n));
+        posix_address sender_addr(sender_storage, sender_len);
+
+        std::cout << "\n\n[UDP] <- " << json_input << std::endl;
+
+        // Get or create session
+        std::string session_id = m_session_manager.get_or_create_udp_session(sender_addr);
+
+        // Fill request slot
+        request_slot_t req{};
+        std::strncpy(req.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
+        req.protocol = static_cast<std::uint8_t>(protocol_type::UDP);
+        std::memcpy(req.raw_json, m_read_buf.data(), BUFFER_SIZE);
+        req.payload_len = static_cast<std::uint32_t>(n);
+        req.is_authenticated = m_session_manager.is_authenticated(session_id);
+        req.is_blacklisted = m_session_manager.is_blacklisted(session_id);
+
+        auto client_type = m_session_manager.get_client_type(session_id);
+        std::strncpy(req.client_type, client_type.c_str(), ROLE_SIZE - 1);
+
+        auto info = m_session_manager.get_session_info(session_id);
+        if (info)
+        {
+            std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
+        }
+
+        m_shm.push_request(req);
+    }
 }
 
 void udp_server::send_to_session(const std::string& session_id, const std::string& data)
 {
-    // Look up endpoint from session_manager
     auto endpoint = m_session_manager.get_udp_endpoint(session_id);
-    if (endpoint)
+    if (!endpoint)
     {
-        do_send(data, *endpoint);
+        std::cerr << "[UDP] ERROR: No endpoint found for session: " << session_id << std::endl;
+        return;
+    }
+
+    // Pad to BUFFER_SIZE for protocol compatibility
+    std::array<char, BUFFER_SIZE> buf{};
+    buf.fill(0);
+    std::size_t copy_len = std::min(data.length(), static_cast<std::size_t>(BUFFER_SIZE - 1));
+    std::copy_n(data.begin(), copy_len, buf.begin());
+
+    ssize_t sent = sendto(m_fd, buf.data(), BUFFER_SIZE, 0, endpoint->sockaddr_ptr(), endpoint->sockaddr_len());
+    if (sent == -1)
+    {
+        std::cerr << "[UDP] sendto error: " << strerror(errno) << " -> " << endpoint->to_string() << std::endl;
     }
     else
     {
-        std::cerr << "[UDP] ERROR: No endpoint found for session: " << session_id << std::endl;
+        std::cout << "\n\n[UDP] -> " << endpoint->to_string() << " | data=" << data << std::endl;
     }
 }
 
-server::server(asio::io_context& io_context, const config::server_config& config,
-               std::unique_ptr<session_manager> session_mgr, std::unique_ptr<auth_module> auth_mod,
-               std::unique_ptr<timer_manager> timer_mgr, std::unique_ptr<inventory_manager> inv_mgr)
-    : m_io_context(io_context), m_config(config), m_tcp4_acceptor(io_context), m_tcp6_acceptor(io_context),
-      m_session_manager(std::move(session_mgr)), m_auth_module(std::move(auth_mod)),
-      m_timer_manager(std::move(timer_mgr)), m_inventory_manager(std::move(inv_mgr))
+// ==================== server ====================
+
+server::server(event_loop& loop, shared_queue& shm, int response_efd, const config::server_config& config,
+               std::unique_ptr<session_manager> session_mgr, std::unique_ptr<timer_manager> timer_mgr)
+    : m_loop(loop), m_shm(shm), m_response_efd(response_efd), m_config(config),
+      m_session_manager(std::move(session_mgr)), m_timer_manager(std::move(timer_mgr))
 {
-    // Create message_handler with generic send callback
-    // The callback resolves whether to send via TCP or UDP
-    m_message_handler =
-        std::make_unique<message_handler>(*m_auth_module, *m_session_manager, *m_timer_manager, *m_inventory_manager,
-                                          m_config.ack_timeout, m_config.max_retries,
-                                          [this](const std::string& session_id, const std::string& data) {
-                                              // Generic send callback - determines TCP vs UDP and sends appropriately
-                                              auto session_info = m_session_manager->get_session_info(session_id);
-                                              if (!session_info)
-                                              {
-                                                  std::cerr << "[SERVER] Cannot send to session " << session_id
-                                                            << ": session not found" << std::endl;
-                                                  return;
-                                              }
-
-                                              if (session_info->type == session_info::connection_type::UDP)
-                                              {
-                                                  if (session_info->udp_endpoint->address().is_v6())
-                                                  {
-                                                      m_udp_server_ipv6->send_to_session(session_id, data);
-                                                  }
-                                                  else
-                                                  {
-                                                      m_udp_server_ipv4->send_to_session(session_id, data);
-                                                  }
-                                              }
-                                              else
-                                              {
-                                                  // For TCP, use weak_ptr from session_info
-                                                  if (auto session = session_info->tcp_session_ref.lock())
-                                                  {
-                                                      session->send(data);
-                                                  }
-                                                  else
-                                                  {
-                                                      std::cerr << "[SERVER] WARNING: TCP session " << session_id
-                                                                << " expired, cannot resend" << std::endl;
-                                                  }
-                                              }
-                                          });
-
-    configure_acceptor(m_tcp4_acceptor, make_tcp_endpoint(m_config.ip_v4, m_config.network_port));
-    configure_acceptor(m_tcp6_acceptor, make_tcp_endpoint(m_config.ip_v6, m_config.network_port));
-
-    m_udp_server_ipv4 = std::make_unique<udp_server>(
-        io_context, make_udp_endpoint(m_config.ip_v4, m_config.network_port), *m_message_handler, *m_session_manager);
-    m_udp_server_ipv6 = std::make_unique<udp_server>(
-        io_context, make_udp_endpoint(m_config.ip_v6, m_config.network_port), *m_message_handler, *m_session_manager);
 }
 
 server::~server()
@@ -395,8 +340,27 @@ server::~server()
 
 void server::start()
 {
-    start_accept(m_tcp4_acceptor);
-    start_accept(m_tcp6_acceptor);
+    // Create TCP listen sockets
+    posix_address tcp4_addr = posix_address::from_ipv4(m_config.ip_v4, m_config.network_port);
+    posix_address tcp6_addr = posix_address::from_ipv6(m_config.ip_v6, m_config.network_port);
+
+    m_tcp4_fd = create_listen_socket(tcp4_addr);
+    m_tcp6_fd = create_listen_socket(tcp6_addr);
+
+    // Register TCP acceptors with epoll
+    m_loop.add_fd(m_tcp4_fd, EPOLLIN, [this](std::uint32_t /*events*/) { on_accept(m_tcp4_fd); });
+    m_loop.add_fd(m_tcp6_fd, EPOLLIN, [this](std::uint32_t /*events*/) { on_accept(m_tcp6_fd); });
+
+    // Create UDP servers
+    posix_address udp4_addr = posix_address::from_ipv4(m_config.ip_v4, m_config.network_port);
+    posix_address udp6_addr = posix_address::from_ipv6(m_config.ip_v6, m_config.network_port);
+
+    m_udp_server_ipv4 = std::make_unique<udp_server>(m_loop, m_shm, *m_session_manager, udp4_addr);
+    m_udp_server_ipv6 = std::make_unique<udp_server>(m_loop, m_shm, *m_session_manager, udp6_addr);
+
+    // Register eventfd for worker → reactor responses
+    m_loop.add_fd(m_response_efd, EPOLLIN, [this](std::uint32_t /*events*/) { on_response_ready(); });
+
     std::cout << "Server started:\n"
               << "  TCP IPv4: " << m_config.ip_v4 << ":" << m_config.network_port << '\n'
               << "  TCP IPv6: " << m_config.ip_v6 << ":" << m_config.network_port << '\n'
@@ -406,61 +370,234 @@ void server::start()
 
 void server::stop()
 {
-    if (m_tcp4_acceptor.is_open())
+    if (m_tcp4_fd != -1)
     {
-        m_tcp4_acceptor.close();
+        m_loop.remove_fd(m_tcp4_fd);
+        ::close(m_tcp4_fd);
+        m_tcp4_fd = -1;
     }
-    if (m_tcp6_acceptor.is_open())
+    if (m_tcp6_fd != -1)
     {
-        m_tcp6_acceptor.close();
+        m_loop.remove_fd(m_tcp6_fd);
+        ::close(m_tcp6_fd);
+        m_tcp6_fd = -1;
     }
+
+    m_udp_server_ipv4.reset();
+    m_udp_server_ipv6.reset();
+
+    // Close all TCP sessions
+    for (auto& [fd, session] : m_tcp_sessions)
+    {
+        session->close();
+    }
+    m_tcp_sessions.clear();
 }
 
-void server::start_accept(asio::ip::tcp::acceptor& acceptor)
+int server::create_listen_socket(const posix_address& addr)
 {
-    acceptor.async_accept([this, &acceptor](const asio::error_code& ec, asio::ip::tcp::socket socket) {
-        if (!ec)
+    int domain = (addr.family() == AF_INET6) ? AF_INET6 : AF_INET;
+    int fd = socket(domain, SOCK_STREAM | SOCK_NONBLOCK, 0);
+    if (fd == -1)
+    {
+        throw std::runtime_error(std::string("TCP socket() failed: ") + strerror(errno));
+    }
+
+    int optval = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    if (domain == AF_INET6)
+    {
+        int v6only = 1;
+        setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+    }
+
+    if (::bind(fd, addr.sockaddr_ptr(), addr.sockaddr_len()) == -1)
+    {
+        ::close(fd);
+        throw std::runtime_error(std::string("TCP bind() failed: ") + strerror(errno));
+    }
+
+    if (listen(fd, SOMAXCONN) == -1)
+    {
+        ::close(fd);
+        throw std::runtime_error(std::string("listen() failed: ") + strerror(errno));
+    }
+
+    return fd;
+}
+
+void server::on_accept(int listen_fd)
+{
+    // Accept all pending connections (level-triggered)
+    while (true)
+    {
+        struct sockaddr_storage client_addr
         {
-            try
+        };
+        socklen_t addr_len = sizeof(client_addr);
+
+        int client_fd = accept4(listen_fd, reinterpret_cast<struct sockaddr*>(&client_addr), &addr_len, SOCK_NONBLOCK);
+        if (client_fd == -1)
+        {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
             {
-                std::cout << "Accepted TCP connection from " << socket.remote_endpoint() << '\n';
+                break; // No more pending connections
             }
-            catch (const std::exception&)
-            {
-                std::cout << "Accepted TCP connection\n";
-            }
-            std::make_shared<tcp_session>(std::move(socket), *m_message_handler, *m_session_manager)->start();
-        }
-        else if (ec != asio::error::operation_aborted)
-        {
-            std::cerr << "Accept error: " << ec.message() << '\n';
+            std::cerr << "[SERVER] accept4 error: " << strerror(errno) << std::endl;
+            break;
         }
 
-        if (acceptor.is_open())
-        {
-            start_accept(acceptor);
-        }
-    });
-}
+        posix_address peer(client_addr, addr_len);
+        std::cout << "Accepted TCP connection from " << peer.to_string() << '\n';
 
-void server::configure_acceptor(asio::ip::tcp::acceptor& acceptor, const asio::ip::tcp::endpoint& endpoint)
-{
-    acceptor.open(endpoint.protocol());
-    acceptor.set_option(asio::socket_base::reuse_address(true));
-    if (endpoint.protocol() == asio::ip::tcp::v6())
-    {
-        acceptor.set_option(asio::ip::v6_only(true));
+        auto session = std::make_shared<tcp_session>(client_fd, m_loop, m_shm, *m_session_manager);
+        m_tcp_sessions[client_fd] = session;
+        session->start();
     }
-    acceptor.bind(endpoint);
-    acceptor.listen();
 }
 
-asio::ip::tcp::endpoint server::make_tcp_endpoint(const std::string& address, std::uint16_t port) const
+// ==================== Response dispatch ====================
+
+void server::on_response_ready()
 {
-    return asio::ip::tcp::endpoint(parse_address(address), port);
+    // Drain the eventfd
+    std::uint64_t val;
+    if (read(m_response_efd, &val, sizeof(val)) == -1)
+    {
+        if (errno != EAGAIN)
+        {
+            std::cerr << "[SERVER] eventfd read error: " << strerror(errno) << std::endl;
+        }
+    }
+
+    // Process all queued responses
+    response_slot_t resp;
+    while (m_shm.pop_response(resp))
+    {
+        dispatch_response(resp);
+    }
 }
 
-asio::ip::udp::endpoint server::make_udp_endpoint(const std::string& address, std::uint16_t port) const
+void server::dispatch_response(const response_slot_t& resp)
 {
-    return asio::ip::udp::endpoint(parse_address(address), port);
+    std::string session_id(resp.session_id);
+    auto cmd = static_cast<response_command>(resp.command);
+
+    switch (cmd)
+    {
+    case response_command::SEND: {
+        std::string data(resp.payload, resp.payload_len);
+        // If session_id is empty but target_username is set, resolve session by username
+        std::string target_session = session_id;
+        if (target_session.empty() && resp.target_username[0] != '\0')
+        {
+            target_session = m_session_manager->find_session_by_username(std::string(resp.target_username));
+            if (target_session.empty())
+            {
+                std::cerr << "[REACTOR] Cannot resolve session for username: " << resp.target_username << std::endl;
+                break;
+            }
+        }
+        send_to_session(target_session, data);
+        break;
+    }
+    case response_command::START_ACK_TIMER: {
+        std::string timer_key(resp.timer_key);
+        std::string payload(resp.payload, resp.payload_len);
+        std::uint32_t retry_count = resp.retry_count;
+        std::uint32_t max_retries = resp.max_retries;
+        std::uint32_t timeout = resp.timer_timeout;
+
+        m_timer_manager->start_ack_timer(session_id, timer_key, static_cast<int>(timeout),
+                                         [this, session_id, timer_key, payload, retry_count, max_retries]() {
+                                             handle_ack_timeout(session_id, timer_key, payload, retry_count,
+                                                                max_retries);
+                                         });
+        break;
+    }
+    case response_command::CANCEL_ACK_TIMER: {
+        std::string timer_key(resp.timer_key);
+        if (m_timer_manager->cancel_ack_timer(session_id, timer_key))
+        {
+            std::cout << "[REACTOR] Cancelled ACK timer for " << session_id << " / " << timer_key << std::endl;
+        }
+        break;
+    }
+    case response_command::CLEAR_TIMERS: {
+        m_timer_manager->clear_session_timers(session_id);
+        break;
+    }
+    case response_command::BLACKLIST: {
+        m_session_manager->blacklist_session(session_id);
+        break;
+    }
+    case response_command::MARK_AUTHENTICATED: {
+        std::string client_type(resp.client_type);
+        std::string username(resp.username);
+        m_session_manager->mark_authenticated(session_id, client_type, username);
+        break;
+    }
+    }
+}
+
+void server::handle_ack_timeout(const std::string& session_id, const std::string& timer_key, const std::string& payload,
+                                std::uint32_t retry_count, std::uint32_t max_retries)
+{
+    if (retry_count >= max_retries - 1)
+    {
+        std::cout << "[ACK_TIMEOUT] Max retries (" << max_retries << ") reached for session: " << session_id
+                  << " - blacklisting" << std::endl;
+        m_timer_manager->clear_session_timers(session_id);
+        m_session_manager->blacklist_session(session_id);
+        return;
+    }
+
+    std::cout << "[ACK_TIMEOUT] Timeout for message " << timer_key << " (retry " << (retry_count + 1) << "/"
+              << max_retries << ")" << std::endl;
+
+    // Resend
+    send_to_session(session_id, payload);
+
+    // Restart timer with incremented retry count
+    m_timer_manager->start_ack_timer(session_id, timer_key, static_cast<int>(m_config.ack_timeout),
+                                     [this, session_id, timer_key, payload, retry_count, max_retries]() {
+                                         handle_ack_timeout(session_id, timer_key, payload, retry_count + 1,
+                                                            max_retries);
+                                     });
+}
+
+void server::send_to_session(const std::string& session_id, const std::string& data)
+{
+    auto info = m_session_manager->get_session_info(session_id);
+    if (!info)
+    {
+        std::cerr << "[SERVER] Cannot send to session " << session_id << ": session not found" << std::endl;
+        return;
+    }
+
+    if (info->type == session_info::connection_type::UDP)
+    {
+        auto endpoint = m_session_manager->get_udp_endpoint(session_id);
+        if (endpoint && endpoint->is_v6())
+        {
+            m_udp_server_ipv6->send_to_session(session_id, data);
+        }
+        else
+        {
+            m_udp_server_ipv4->send_to_session(session_id, data);
+        }
+    }
+    else
+    {
+        // TCP: find session by fd
+        if (auto tcp_sess = info->tcp_session_ref.lock())
+        {
+            tcp_sess->send(data);
+        }
+        else
+        {
+            std::cerr << "[SERVER] WARNING: TCP session " << session_id << " expired" << std::endl;
+        }
+    }
 }

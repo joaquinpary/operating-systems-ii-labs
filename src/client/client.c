@@ -188,7 +188,7 @@ int run_client(const char* config_path)
     logger_config_t log_config = {.max_file_size = 10 * 1024 * 1024, // 10 MB
                                   .max_backup_files = 5,
                                   .min_level = LOG_DEBUG};
-    
+
     strncpy(log_config.log_file_path, log_path, FILE_PATH - 1);
     log_config.log_file_path[FILE_PATH - 1] = '\0';
 
