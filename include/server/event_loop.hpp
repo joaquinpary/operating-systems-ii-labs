@@ -61,6 +61,7 @@ class event_loop
 
   private:
     int m_epoll_fd;
+    int m_wakeup_fd; ///< Internal eventfd used by stop() to wake up epoll_wait.
     bool m_running;
     std::unordered_map<int, fd_callback_t> m_callbacks;
 };

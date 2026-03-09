@@ -63,10 +63,8 @@ class ServerTest : public ::testing::Test
 
     void TearDown() override
     {
-        if (m_server)
-        {
-            m_server->stop();
-        }
+        // Stop the event loop FIRST and join its thread so no callbacks fire
+        // during server teardown (avoids races on fd map and closed sockets).
         if (m_loop)
         {
             m_loop->stop();
@@ -74,6 +72,11 @@ class ServerTest : public ::testing::Test
         if (m_io_thread && m_io_thread->joinable())
         {
             m_io_thread->join();
+        }
+        // Now safe to tear down the server (no concurrent epoll activity)
+        if (m_server)
+        {
+            m_server->stop();
         }
         m_server.reset();
         m_db_pool.reset();

@@ -51,7 +51,8 @@ void timer_manager::start_ack_timer(const std::string& session_id, const std::st
     {
     };
     ts.it_value.tv_sec = timeout_seconds;
-    ts.it_value.tv_nsec = 0;
+    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
+    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
     ts.it_interval.tv_sec = 0; // One-shot
     ts.it_interval.tv_nsec = 0;
 
@@ -140,7 +141,8 @@ void timer_manager::start_keepalive_timer(const std::string& session_id, int tim
     {
     };
     ts.it_value.tv_sec = timeout_seconds;
-    ts.it_value.tv_nsec = 0;
+    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
+    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
     ts.it_interval.tv_sec = 0;
     ts.it_interval.tv_nsec = 0;
 

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <sys/eventfd.h>
 #include <unistd.h>
 
 event_loop::event_loop() : m_running(false)
@@ -13,10 +14,32 @@ event_loop::event_loop() : m_running(false)
     {
         throw std::runtime_error(std::string("epoll_create1 failed: ") + strerror(errno));
     }
+
+    m_wakeup_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+    if (m_wakeup_fd == -1)
+    {
+        ::close(m_epoll_fd);
+        throw std::runtime_error(std::string("eventfd (wakeup) failed: ") + strerror(errno));
+    }
+
+    // Register the wakeup fd in epoll (level-triggered)
+    struct epoll_event ev {};
+    ev.events = EPOLLIN;
+    ev.data.fd = m_wakeup_fd;
+    if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_wakeup_fd, &ev) == -1)
+    {
+        ::close(m_wakeup_fd);
+        ::close(m_epoll_fd);
+        throw std::runtime_error(std::string("epoll_ctl wakeup fd failed: ") + strerror(errno));
+    }
 }
 
 event_loop::~event_loop()
 {
+    if (m_wakeup_fd != -1)
+    {
+        ::close(m_wakeup_fd);
+    }
     if (m_epoll_fd != -1)
     {
         ::close(m_epoll_fd);
@@ -81,10 +104,22 @@ void event_loop::run()
         for (int i = 0; i < n; ++i)
         {
             int fd = events[i].data.fd;
+
+            // Drain the wakeup fd — no callback needed
+            if (fd == m_wakeup_fd)
+            {
+                std::uint64_t val;
+                (void)read(m_wakeup_fd, &val, sizeof(val));
+                continue;
+            }
+
             auto it = m_callbacks.find(fd);
             if (it != m_callbacks.end())
             {
-                it->second(events[i].events);
+                // Copy callback so it survives even if the handler
+                // removes itself from m_callbacks (e.g. timer expiry).
+                auto cb = it->second;
+                cb(events[i].events);
             }
         }
     }
@@ -93,6 +128,9 @@ void event_loop::run()
 void event_loop::stop()
 {
     m_running = false;
+    // Wake up epoll_wait so it can check m_running and exit
+    std::uint64_t val = 1;
+    (void)write(m_wakeup_fd, &val, sizeof(val));
 }
 
 bool event_loop::is_running() const
