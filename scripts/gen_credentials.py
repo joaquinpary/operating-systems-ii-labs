@@ -1,38 +1,70 @@
 import os
 import random
 import hashlib
-import json
 import sys
 
 SERVER_HOST = "server"
 SERVER_PORT = "9999"
 
-ERROR_RATE = 0.1 
+ERROR_RATE = 0.1
 
-OUTPUT_DIR = "config/clients"
-SERVER_CREDENTIALS_FILE = "config/credentials.json"
+CLIENTS_DIR = "config/clients"
+SERVER_DIR = "config/server"
+
 
 def generate_password(username):
     """Gen a password based on the username using MD5 hash"""
     return hashlib.md5(username.encode()).hexdigest()
 
-def generate_configs(num_clients=2000):
-    if not os.path.exists(OUTPUT_DIR):
+
+def ensure_dir(path):
+    """Create directory if it doesn't exist"""
+    if not os.path.exists(path):
         try:
-            os.makedirs(OUTPUT_DIR)
-            print(f"Directory created: {OUTPUT_DIR}")
+            os.makedirs(path)
+            print(f"Directory created: {path}")
         except OSError as e:
-            print(f"Error creating directory {OUTPUT_DIR}: {e}")
-            return
+            print(f"Error creating directory {path}: {e}")
+            return False
+    return True
+
+
+def clean_conf_files(directory):
+    """Remove existing .conf files from a directory"""
+    for filename in os.listdir(directory):
+        if filename.endswith('.conf'):
+            os.remove(os.path.join(directory, filename))
+
+
+def write_conf_file(filepath, username, password, client_type,
+                    host=SERVER_HOST, port=SERVER_PORT,
+                    protocol=None, ip_version=None):
+    """Write a single .conf file"""
+    try:
+        with open(filepath, "w") as f:
+            f.write(f"host = {host}\n")
+            if ip_version:
+                f.write(f"ipversion = {ip_version}\n")
+            if protocol:
+                f.write(f"protocol = {protocol}\n")
+            f.write(f"port = {port}\n")
+            f.write(f"type = {client_type}\n")
+            f.write(f"username = {username}\n")
+            f.write(f"password = {password}\n")
+    except IOError as e:
+        print(f"Error writing file {filepath}: {e}")
+
+
+def generate_configs(num_clients=2000):
+    if not ensure_dir(CLIENTS_DIR) or not ensure_dir(SERVER_DIR):
+        return
 
     clients = []
-    server_credentials = []
 
     if num_clients < 2000:
-        print(f"Cleaning existing client config files...")
-        for filename in os.listdir(OUTPUT_DIR):
-            if filename.endswith('.conf'):
-                os.remove(os.path.join(OUTPUT_DIR, filename))
+        print("Cleaning existing config files...")
+        clean_conf_files(CLIENTS_DIR)
+        clean_conf_files(SERVER_DIR)
 
     for i in range(1, num_clients + 1):
         username = f"client_{i:04d}"
@@ -51,45 +83,33 @@ def generate_configs(num_clients=2000):
         username = client['username']
         correct_password = generate_password(username)
         client_type = client['type']
-        
-        server_credentials.append({
-            "username": username,
-            "password": correct_password,
-            "type": client_type
-        })
 
+        # Client password may be intentionally wrong to test auth failures
         client_password = correct_password
         if random.random() < ERROR_RATE:
             client_password += "_wrong"
 
         protocol = random.choice(['tcp', 'udp'])
         ip_version = random.choice(['v4', 'v6'])
-        
-        port = SERVER_PORT
 
-        filename = os.path.join(OUTPUT_DIR, f"{username}.conf")
-        
-        try:
-            with open(filename, "w") as f:
-                f.write(f"host = {SERVER_HOST}\n")
-                f.write(f"ipversion = {ip_version}\n")
-                f.write(f"protocol = {protocol}\n")
-                f.write(f"port = {port}\n")
-                f.write(f"type = {client_type}\n")
-                f.write(f"username = {username}\n")
-                f.write(f"password = {client_password}\n")
-            
-        except IOError as e:
-            print(f"Error writing file {filename}: {e}")
+        # Client .conf (may have wrong password)
+        write_conf_file(
+            os.path.join(CLIENTS_DIR, f"{username}.conf"),
+            username, client_password, client_type,
+            protocol=protocol, ip_version=ip_version
+        )
 
-    try:
-        with open(SERVER_CREDENTIALS_FILE, "w") as f:
-            json.dump(server_credentials, f, indent=4)
-        print(f"Generated server credentials file: {SERVER_CREDENTIALS_FILE}")
-    except IOError as e:
-        print(f"Error writing server credentials file: {e}")
+        # Server .conf (always correct password, for DB population)
+        write_conf_file(
+            os.path.join(SERVER_DIR, f"{username}.conf"),
+            username, correct_password, client_type
+        )
 
+    print(f"Generated client configs in: {CLIENTS_DIR}")
+    print(f"Generated server configs in: {SERVER_DIR}")
     print("Process completed.")
+
+
 if __name__ == "__main__":
     num_clients = 2000  # Default
     if len(sys.argv) > 1:
