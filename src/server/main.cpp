@@ -36,6 +36,8 @@ int main()
             {
                 throw std::runtime_error("Failed to initialize database. Server cannot start.");
             }
+            // Ensure all clients start as inactive on fresh boot
+            reset_all_clients_inactive(guard.get());
         }
 
         // ── Create shared memory IPC ────────────────────────────────────

@@ -61,6 +61,7 @@ struct request_slot_t
     std::uint32_t payload_len;
     bool is_authenticated;
     bool is_blacklisted;
+    bool is_disconnect; // true = client disconnected, worker should mark inactive
     char client_type[ROLE_SIZE];
     char username[CREDENTIALS_SIZE];
 };

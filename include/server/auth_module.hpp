@@ -33,6 +33,9 @@ class auth_module
     // password should be the hash to compare against password_hash in DB
     auth_result authenticate(const std::string& username, const std::string& password);
 
+    // Mark a client as inactive in the database (on disconnect)
+    void deactivate_client(const std::string& username);
+
   private:
     connection_pool& m_pool;
 };

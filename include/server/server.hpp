@@ -29,6 +29,7 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
     void start();
     void send(const std::string& data);
     void close();
+    void notify_disconnect();
 
     const std::string& session_id() const
     {

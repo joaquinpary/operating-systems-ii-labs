@@ -151,6 +151,18 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
 {
     std::vector<response_slot_t> responses;
 
+    // Handle disconnect notifications (reactor signals client disconnected)
+    if (request.is_disconnect)
+    {
+        std::string username(request.username);
+        if (!username.empty())
+        {
+            std::cout << "[WORKER] Processing disconnect for " << username << std::endl;
+            m_auth_module.deactivate_client(username);
+        }
+        return responses;
+    }
+
     // Reject messages from blacklisted sessions
     if (request.is_blacklisted)
     {

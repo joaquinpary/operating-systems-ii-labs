@@ -24,6 +24,32 @@ tcp_session::~tcp_session()
     close();
 }
 
+void tcp_session::notify_disconnect()
+{
+    // If the session was authenticated, push a disconnect request so the worker
+    // can mark the client as inactive in the database.
+    if (!m_session_manager.is_authenticated(m_session_id))
+    {
+        return;
+    }
+
+    auto info = m_session_manager.get_session_info(m_session_id);
+    if (!info || info->username.empty())
+    {
+        return;
+    }
+
+    request_slot_t req{};
+    std::strncpy(req.session_id, m_session_id.c_str(), SESSION_ID_SIZE - 1);
+    req.is_disconnect = true;
+    req.is_authenticated = true;
+    std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
+    std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
+    m_shm.push_request(req);
+
+    std::cout << "[TCP] Disconnect notification pushed for " << info->username << std::endl;
+}
+
 void tcp_session::start()
 {
     auto self = shared_from_this();
@@ -33,6 +59,7 @@ void tcp_session::start()
     m_loop.add_fd(m_fd, EPOLLIN | EPOLLET, [this](std::uint32_t events) {
         if (events & (EPOLLHUP | EPOLLERR))
         {
+            notify_disconnect();
             m_session_manager.remove_session(m_session_id);
             close();
             return;
@@ -119,6 +146,7 @@ void tcp_session::on_readable()
         {
             // EOF
             std::cout << "[TCP] Connection closed by peer (session: " << m_session_id << ")" << std::endl;
+            notify_disconnect();
             m_session_manager.remove_session(m_session_id);
             close();
             return;
@@ -130,6 +158,7 @@ void tcp_session::on_readable()
                 break; // No more data right now
             }
             std::cerr << "[TCP] recv error: " << strerror(errno) << std::endl;
+            notify_disconnect();
             m_session_manager.remove_session(m_session_id);
             close();
             return;

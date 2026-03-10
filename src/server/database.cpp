@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #define DEFAULT_DB_PORT 5432
+#define INITIAL_STOCK 100
 
 namespace
 {
@@ -164,7 +165,7 @@ int create_credentials_table(pqxx::connection& conn)
                           "username TEXT UNIQUE NOT NULL, "
                           "password_hash TEXT NOT NULL, "
                           "client_type TEXT NOT NULL, "
-                          "is_active BOOLEAN DEFAULT true"
+                          "is_active BOOLEAN DEFAULT false"
                           ");";
 
         txn.exec(sql);
@@ -668,10 +669,10 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, i
         return -1;
     }
 
-    // Initialize to zeros (default for clients with no inventory row)
+    // Initialize to max stock (default for clients with no inventory row — full stock on first run)
     for (int i = 0; i < 6; i++)
     {
-        quantities_out[i] = 0;
+        quantities_out[i] = INITIAL_STOCK;
     }
 
     try
@@ -683,7 +684,7 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, i
 
         if (result.empty())
         {
-            std::cout << "No inventory found for client " << client_id << ", returning zeros" << std::endl;
+            std::cout << "No inventory found for client " << client_id << ", returning initial stock (" << INITIAL_STOCK << ")" << std::endl;
             return 0;
         }
 
@@ -700,6 +701,49 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, i
     catch (const std::exception& ex)
     {
         std::cerr << "Error getting client inventory: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int set_client_active(pqxx::connection& conn, const std::string& username, bool active)
+{
+    if (username.empty())
+    {
+        std::cerr << "Invalid parameters for set_client_active" << std::endl;
+        return -1;
+    }
+
+    try
+    {
+        pqxx::work txn(conn);
+        std::string sql = "UPDATE credentials SET is_active = $1 WHERE username = $2";
+        txn.exec(pqxx::zview(sql), pqxx::params{active, username});
+        txn.commit();
+
+        std::cout << "Set client " << username << " active = " << (active ? "true" : "false") << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error setting client active status: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int reset_all_clients_inactive(pqxx::connection& conn)
+{
+    try
+    {
+        pqxx::work txn(conn);
+        txn.exec("UPDATE credentials SET is_active = false");
+        txn.commit();
+
+        std::cout << "Reset all clients to inactive." << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error resetting clients to inactive: " << ex.what() << std::endl;
         return -1;
     }
 }

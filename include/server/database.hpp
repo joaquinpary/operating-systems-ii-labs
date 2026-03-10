@@ -59,7 +59,14 @@ int find_transaction_id(pqxx::connection& conn, const std::string& source_id, co
 
 // Query a client's current inventory from the database
 // Returns 0 on success (quantities_out populated), -1 on error
-// If client has no inventory row, quantities_out is filled with zeros
+// If client has no inventory row, quantities_out is filled with INITIAL_STOCK (100)
 int get_client_inventory(pqxx::connection& conn, const std::string& client_id, int quantities_out[6]);
+
+// Set a client's is_active flag in the credentials table
+// Call with true on successful auth, false on disconnect
+int set_client_active(pqxx::connection& conn, const std::string& username, bool active);
+
+// Reset all clients to inactive (call on server startup)
+int reset_all_clients_inactive(pqxx::connection& conn);
 
 #endif
