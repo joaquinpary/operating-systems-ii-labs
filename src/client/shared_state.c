@@ -247,6 +247,183 @@ int get_inventory_count(int item_id)
     return count;
 }
 
+int get_inventory_snapshot(inventory_item_t* out_items)
+{
+    if (out_items == NULL)
+    {
+        return -1;
+    }
+
+    sem_wait(inventory_sem);
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        out_items[i].item_id = shared_data->inventory_item[i].item_id;
+        strncpy(out_items[i].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
+        out_items[i].item_name[ITEM_NAME_SIZE - 1] = '\0';
+        out_items[i].quantity = shared_data->inventory_item[i].quantity;
+    }
+    sem_post(inventory_sem);
+
+    return 0;
+}
+
+int count_items_above_threshold(int threshold)
+{
+    int count = 0;
+
+    sem_wait(inventory_sem);
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        if (shared_data->inventory_item[i].quantity >= threshold)
+        {
+            count++;
+        }
+    }
+    sem_post(inventory_sem);
+
+    return count;
+}
+
+int get_low_stock_report(int low_threshold, int critical_threshold, int max_stock, inventory_item_t* out_low_items,
+                         int* out_item_indices, int* out_critical_count)
+{
+    if (out_low_items == NULL || out_item_indices == NULL || out_critical_count == NULL)
+    {
+        return -1;
+    }
+
+    int low_count = 0;
+    int critical_count = 0;
+
+    sem_wait(inventory_sem);
+
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        int current_quantity = shared_data->inventory_item[i].quantity;
+
+        if (current_quantity < low_threshold && !shared_data->pending_stock_request[i])
+        {
+            out_low_items[low_count].item_id = shared_data->inventory_item[i].item_id;
+            strncpy(out_low_items[low_count].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
+            out_low_items[low_count].item_name[ITEM_NAME_SIZE - 1] = '\0';
+
+            int needed = max_stock - current_quantity;
+            out_low_items[low_count].quantity = (needed > 0) ? needed : 0;
+
+            out_item_indices[low_count] = i;
+            low_count++;
+        }
+
+        if (current_quantity < critical_threshold)
+        {
+            critical_count++;
+        }
+    }
+
+    sem_post(inventory_sem);
+
+    *out_critical_count = critical_count;
+    return low_count;
+}
+
+void mark_pending_stock_requests(const int* item_indices, int count)
+{
+    if (item_indices == NULL || count <= 0)
+    {
+        return;
+    }
+
+    sem_wait(inventory_sem);
+    for (int i = 0; i < count; i++)
+    {
+        int idx = item_indices[i];
+        if (idx < 0 || idx >= QUANTITY_ITEMS)
+        {
+            continue;
+        }
+        shared_data->pending_stock_request[idx] = 1;
+    }
+    sem_post(inventory_sem);
+}
+
+void clear_pending_stock_requests(const inventory_item_t* items, int count)
+{
+    if (items == NULL || count <= 0)
+    {
+        return;
+    }
+
+    sem_wait(inventory_sem);
+    for (int i = 0; i < count; i++)
+    {
+        if (items[i].quantity <= 0)
+        {
+            continue;
+        }
+
+        int item_index = items[i].item_id - 1;
+        if (item_index < 0 || item_index >= QUANTITY_ITEMS)
+        {
+            continue;
+        }
+
+        shared_data->pending_stock_request[item_index] = 0;
+    }
+    sem_post(inventory_sem);
+}
+
+int collect_retryable_messages(char out_messages[][BUFFER_SIZE], int max_count)
+{
+    if (out_messages == NULL || max_count <= 0)
+    {
+        return 0;
+    }
+
+    int collected = 0;
+
+    sem_wait(inventory_sem);
+    for (int i = 0; i < MAX_PENDING_ACKS && collected < max_count; i++)
+    {
+        if (shared_data->pending_acks[i].active && shared_data->pending_acks[i].retry_count > 0)
+        {
+            strncpy(out_messages[collected], shared_data->pending_acks[i].message_json, BUFFER_SIZE - 1);
+            out_messages[collected][BUFFER_SIZE - 1] = '\0';
+            collected++;
+        }
+    }
+    sem_post(inventory_sem);
+
+    return collected;
+}
+
+int wait_for_message(int timeout_seconds)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+    {
+        return -1;
+    }
+
+    ts.tv_sec += timeout_seconds;
+
+    while (sem_timedwait(message_available_sem, &ts) == -1)
+    {
+        if (errno == ETIMEDOUT || errno == EINTR)
+        {
+            return 1;
+        }
+
+        return -1;
+    }
+
+    return 0;
+}
+
+void wake_sender_thread(void)
+{
+    sem_post(message_available_sem);
+}
+
 int add_pending_ack(const char* msg_id, const char* msg_type, const char* message_json)
 {
     sem_wait(inventory_sem);

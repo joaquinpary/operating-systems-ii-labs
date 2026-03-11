@@ -154,7 +154,6 @@ static int get_random_consume_amount(void)
 static void* ack_timeout_checker_thread(void* arg)
 {
     shared_data_t* shared_data = get_shared_data();
-    sem_t* message_available_sem = get_message_sem();
 
     LOG_INFO_MSG("ACK checker thread started");
 
@@ -166,28 +165,13 @@ static void* ack_timeout_checker_thread(void* arg)
         {
             LOG_ERROR_MSG("Max retries exceeded, triggering shutdown");
             shared_data->should_exit = 1;
-            sem_post(message_available_sem);
+            wake_sender_thread();
             break;
         }
         else if (result > 0)
         {
             char messages_to_retry[MAX_PENDING_ACKS][BUFFER_SIZE];
-            int retry_count = 0;
-
-            sem_t* inventory_sem = get_inventory_sem();
-            sem_wait(inventory_sem);
-            for (int i = 0; i < MAX_PENDING_ACKS; i++)
-            {
-                if (shared_data->pending_acks[i].active && shared_data->pending_acks[i].retry_count > 0)
-                {
-                    LOG_DEBUG_MSG("Re-enqueueing msg_id: %s (attempt %d)", shared_data->pending_acks[i].msg_id,
-                                  shared_data->pending_acks[i].retry_count);
-
-                    strncpy(messages_to_retry[retry_count], shared_data->pending_acks[i].message_json, BUFFER_SIZE - 1);
-                    retry_count++;
-                }
-            }
-            sem_post(inventory_sem);
+            int retry_count = collect_retryable_messages(messages_to_retry, MAX_PENDING_ACKS);
 
             for (int i = 0; i < retry_count; i++)
             {
@@ -262,17 +246,12 @@ static void* sender_thread(void* arg)
     client_context* ctx = (client_context*)arg;
     message_t msg;
     shared_data_t* shared_data = get_shared_data();
-    sem_t* message_available_sem = get_message_sem();
 
     LOG_INFO_MSG("Sender thread started");
 
     while (!shared_data->should_exit)
     {
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        ts.tv_sec += 1;
-
-        int sem_result = sem_timedwait(message_available_sem, &ts);
+        int sem_result = wait_for_message(1);
 
         if (sem_result == 0)
         {
@@ -299,17 +278,13 @@ static void* sender_thread(void* arg)
                 }
             }
         }
-        else if (errno == ETIMEDOUT)
-        {
-            continue;
-        }
-        else if (errno == EINTR)
+        else if (sem_result == 1)
         {
             continue;
         }
         else
         {
-            LOG_ERROR_MSG("sem_timedwait error: %s", strerror(errno));
+            LOG_ERROR_MSG("wait_for_message error");
             break;
         }
     }
@@ -348,13 +323,10 @@ static void do_inventory_update(void)
 
     inventory_item_t items[QUANTITY_ITEMS];
 
-    sem_wait(get_inventory_sem());
-
-    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    if (get_inventory_snapshot(items) != 0)
     {
-        items[i].item_id = shared_data->inventory_item[i].item_id;
-        strncpy(items[i].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
-        items[i].quantity = shared_data->inventory_item[i].quantity;
+        LOG_ERROR_MSG("Failed to get inventory snapshot");
+        return;
     }
 
     printf("ITEMS:\n");
@@ -362,8 +334,6 @@ static void do_inventory_update(void)
     {
         printf(" - %s: %d units\n", items[i].item_name, items[i].quantity);
     }
-
-    sem_post(get_inventory_sem());
 
     // Determine correct message type based on client role
     const char* msg_type = (strcmp(shared_data->client_role, HUB) == 0) ? HUB_TO_SERVER__INVENTORY_UPDATE
@@ -392,23 +362,26 @@ static void do_inventory_update(void)
  */
 static void do_consume_stock(void)
 {
-    shared_data_t* shared_data = get_shared_data();
-
     // Prepare items to reduce with random amounts
+    inventory_item_t inventory_snapshot[QUANTITY_ITEMS];
     inventory_item_t items_to_reduce[QUANTITY_ITEMS];
     int items_with_stock = 0;
     int total_to_consume = 0;
 
-    sem_wait(get_inventory_sem());
+    if (get_inventory_snapshot(inventory_snapshot) != 0)
+    {
+        LOG_ERROR_MSG("Failed to get inventory snapshot for consumption");
+        return;
+    }
 
     // Build list of items to consume with random amounts
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        items_to_reduce[i].item_id = shared_data->inventory_item[i].item_id;
-        strncpy(items_to_reduce[i].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
+        items_to_reduce[i].item_id = inventory_snapshot[i].item_id;
+        strncpy(items_to_reduce[i].item_name, inventory_snapshot[i].item_name, ITEM_NAME_SIZE - 1);
         items_to_reduce[i].item_name[ITEM_NAME_SIZE - 1] = '\0';
 
-        if (shared_data->inventory_item[i].quantity > 0)
+        if (inventory_snapshot[i].quantity > 0)
         {
             items_to_reduce[i].quantity = get_random_consume_amount();
             total_to_consume += items_to_reduce[i].quantity;
@@ -419,8 +392,6 @@ static void do_consume_stock(void)
             items_to_reduce[i].quantity = 0;
         }
     }
-
-    sem_post(get_inventory_sem());
 
     // If no items have stock, return early
     if (items_with_stock == 0)
@@ -453,45 +424,21 @@ static int do_check_low_stock(void)
     shared_data_t* shared_data = get_shared_data();
     inventory_item_t low_items[QUANTITY_ITEMS];
     int requested_item_indices[QUANTITY_ITEMS];
-    int low_count = 0;
     int critically_low_count = 0;
 
-    sem_wait(get_inventory_sem());
-
-    // Check each item against threshold
-    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    int low_count = get_low_stock_report(LOW_STOCK_THRESHOLD, CRITICAL_STOCK_THRESHOLD, MAX_STOCK_PER_ITEM, low_items,
+                                         requested_item_indices, &critically_low_count);
+    if (low_count < 0)
     {
-        if (shared_data->inventory_item[i].quantity < LOW_STOCK_THRESHOLD)
-        {
-            if (shared_data->pending_stock_request[i])
-            {
-                continue;
-            }
-
-            // Add to low stock list
-            low_items[low_count].item_id = shared_data->inventory_item[i].item_id;
-            strncpy(low_items[low_count].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
-            low_items[low_count].item_name[ITEM_NAME_SIZE - 1] = '\0';
-
-            // Request enough to reach MAX_STOCK_PER_ITEM
-            int needed = MAX_STOCK_PER_ITEM - shared_data->inventory_item[i].quantity;
-            low_items[low_count].quantity = needed;
-
-            LOG_DEBUG_MSG("Low stock detected: %s (ID: %d) has %d units, requesting %d units",
-                          shared_data->inventory_item[i].item_name, shared_data->inventory_item[i].item_id,
-                          shared_data->inventory_item[i].quantity, needed);
-
-            requested_item_indices[low_count] = i;
-            low_count++;
-        }
-
-        if (shared_data->inventory_item[i].quantity < CRITICAL_STOCK_THRESHOLD)
-        {
-            critically_low_count++;
-        }
+        LOG_ERROR_MSG("Failed to evaluate low stock report");
+        return 0;
     }
 
-    sem_post(get_inventory_sem());
+    for (int i = 0; i < low_count; i++)
+    {
+        LOG_DEBUG_MSG("Low stock detected: %s (ID: %d), requesting %d units", low_items[i].item_name,
+                      low_items[i].item_id, low_items[i].quantity);
+    }
 
     if (low_count > 0)
     {
@@ -514,12 +461,7 @@ static int do_check_low_stock(void)
             return critically_low_count == QUANTITY_ITEMS ? 1 : 0;
         }
 
-        sem_wait(get_inventory_sem());
-        for (int i = 0; i < low_count; i++)
-        {
-            shared_data->pending_stock_request[requested_item_indices[i]] = 1;
-        }
-        sem_post(get_inventory_sem());
+        mark_pending_stock_requests(requested_item_indices, low_count);
 
         LOG_INFO_MSG("Stock request enqueued for %d items", low_count);
     }
@@ -628,16 +570,7 @@ static int child_logic_process(void)
         {
             shared_data->inventory_updated = 0; // Reset flag
 
-            sem_wait(get_inventory_sem());
-            int items_with_stock = 0;
-            for (int i = 0; i < QUANTITY_ITEMS; i++)
-            {
-                if (shared_data->inventory_item[i].quantity >= 5)
-                {
-                    items_with_stock++;
-                }
-            }
-            sem_post(get_inventory_sem());
+            int items_with_stock = count_items_above_threshold(5);
 
             if (items_with_stock > 0)
             {
@@ -842,7 +775,7 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
         {
             LOG_ERROR_MSG("Failed to create ACK checker thread");
             shared_data->should_exit = 1;
-            sem_post(get_message_sem());
+            wake_sender_thread();
             pthread_join(receiver, NULL);
             pthread_join(sender, NULL);
             kill(pid, SIGTERM);
@@ -860,7 +793,7 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
         shared_data->should_exit = 1;
 
         // Wake up sender thread if it's blocked waiting for messages
-        sem_post(get_message_sem());
+        wake_sender_thread();
 
         // Wait for threads
         pthread_join(receiver, NULL);
