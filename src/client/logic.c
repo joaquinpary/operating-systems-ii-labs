@@ -452,6 +452,7 @@ static int do_check_low_stock(void)
 {
     shared_data_t* shared_data = get_shared_data();
     inventory_item_t low_items[QUANTITY_ITEMS];
+    int requested_item_indices[QUANTITY_ITEMS];
     int low_count = 0;
     int critically_low_count = 0;
 
@@ -462,6 +463,11 @@ static int do_check_low_stock(void)
     {
         if (shared_data->inventory_item[i].quantity < LOW_STOCK_THRESHOLD)
         {
+            if (shared_data->pending_stock_request[i])
+            {
+                continue;
+            }
+
             // Add to low stock list
             low_items[low_count].item_id = shared_data->inventory_item[i].item_id;
             strncpy(low_items[low_count].item_name, shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE - 1);
@@ -475,6 +481,7 @@ static int do_check_low_stock(void)
                           shared_data->inventory_item[i].item_name, shared_data->inventory_item[i].item_id,
                           shared_data->inventory_item[i].quantity, needed);
 
+            requested_item_indices[low_count] = i;
             low_count++;
         }
 
@@ -506,6 +513,13 @@ static int do_check_low_stock(void)
             LOG_ERROR_MSG("Failed to enqueue stock request");
             return critically_low_count == QUANTITY_ITEMS ? 1 : 0;
         }
+
+        sem_wait(get_inventory_sem());
+        for (int i = 0; i < low_count; i++)
+        {
+            shared_data->pending_stock_request[requested_item_indices[i]] = 1;
+        }
+        sem_post(get_inventory_sem());
 
         LOG_INFO_MSG("Stock request enqueued for %d items", low_count);
     }

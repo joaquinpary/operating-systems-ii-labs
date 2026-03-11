@@ -146,6 +146,24 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        sem_wait(get_inventory_sem());
+        for (int i = 0; i < QUANTITY_ITEMS; i++)
+        {
+            if (restock->items[i].quantity <= 0)
+            {
+                continue;
+            }
+
+            int item_index = restock->items[i].item_id - 1;
+            if (item_index < 0 || item_index >= QUANTITY_ITEMS)
+            {
+                continue;
+            }
+
+            shared_data->pending_stock_request[item_index] = 0;
+        }
+        sem_post(get_inventory_sem());
+
         // Send receipt confirmation (role-specific message type)
         message_t receipt_msg;
         const char* receipt_type = (strcmp(shared_data->client_role, HUB) == 0)

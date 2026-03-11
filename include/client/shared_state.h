@@ -32,6 +32,7 @@ typedef struct
     char client_id[ID_SIZE];     // username (e.g., "client_0001")
 
     inventory_item_t inventory_item[QUANTITY_ITEMS];
+    int pending_stock_request[QUANTITY_ITEMS]; // 1 if item already requested and waiting for replenishment
 
     char pending_messages[10][BUFFER_SIZE];
     int message_count;
