@@ -61,7 +61,8 @@ int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transactio
 // Query a client's current inventory from the database
 // Returns 0 on success (quantities_out populated), -1 on error
 // If client has no inventory row, quantities_out is filled with INITIAL_STOCK (100)
-int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type, int quantities_out[6]);
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                         int quantities_out[6]);
 
 // Atomically adjust a client's inventory by adding or subtracting quantities.
 // If add=true, quantities are added; if add=false, quantities are subtracted (clamped to 0).

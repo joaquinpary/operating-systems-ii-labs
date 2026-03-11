@@ -701,7 +701,8 @@ int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transactio
     }
 }
 
-int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type, int quantities_out[6])
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                         int quantities_out[6])
 {
     if (client_id.empty() || client_type.empty() || !quantities_out)
     {
@@ -724,7 +725,8 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
 
         if (result.empty())
         {
-            std::cout << "No inventory found for client " << client_id << ", inserting initial stock (" << INITIAL_STOCK << ")" << std::endl;
+            std::cout << "No inventory found for client " << client_id << ", inserting initial stock (" << INITIAL_STOCK
+                      << ")" << std::endl;
             std::string insert_sql =
                 "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
                 "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
@@ -782,8 +784,8 @@ int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id
                   "WHERE client_id = $1";
         }
 
-        txn.exec(pqxx::zview(sql), pqxx::params{client_id, quantities[0], quantities[1], quantities[2],
-                                                quantities[3], quantities[4], quantities[5]});
+        txn.exec(pqxx::zview(sql), pqxx::params{client_id, quantities[0], quantities[1], quantities[2], quantities[3],
+                                                quantities[4], quantities[5]});
         txn.commit();
 
         std::cout << (add ? "Added" : "Subtracted") << " inventory for client " << client_id << std::endl;

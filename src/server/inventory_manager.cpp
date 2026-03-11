@@ -169,8 +169,8 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
 
 int inventory_manager::handle_receipt_confirmation(const message_t& msg)
 {
-    std::cout << "[INVENTORY_MANAGER] Handling receipt confirmation from " << msg.source_id
-              << " (" << msg.source_role << ")" << std::endl;
+    std::cout << "[INVENTORY_MANAGER] Handling receipt confirmation from " << msg.source_id << " (" << msg.source_role
+              << ")" << std::endl;
 
     // The sender of the confirmation is the DESTINATION of the transaction
     // (hub confirms receiving stock, warehouse confirms receiving replenish)
@@ -199,8 +199,8 @@ int inventory_manager::handle_receipt_confirmation(const message_t& msg)
     // Mark transaction as COMPLETED
     complete_transaction(guard.get(), transaction_id, msg.timestamp);
 
-    std::cout << "[INVENTORY_MANAGER] Completed transaction " << transaction_id << " — stock added to "
-              << msg.source_id << std::endl;
+    std::cout << "[INVENTORY_MANAGER] Completed transaction " << transaction_id << " — stock added to " << msg.source_id
+              << std::endl;
     return 0;
 }
 
@@ -271,8 +271,9 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
         }
     }
 
-    std::cout << "[INVENTORY_MANAGER] Transaction " << transaction_id << " DISPATCHED — stock subtracted from warehouse "
-              << msg.source_id << ", hub destination: " << result.requesting_hub_id << std::endl;
+    std::cout << "[INVENTORY_MANAGER] Transaction " << transaction_id
+              << " DISPATCHED — stock subtracted from warehouse " << msg.source_id
+              << ", hub destination: " << result.requesting_hub_id << std::endl;
 
     return result;
 }

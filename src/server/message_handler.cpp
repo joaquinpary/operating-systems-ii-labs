@@ -377,8 +377,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             // Notify the hub that stock is incoming
             message_t incoming_msg;
             int create_result = create_items_message(&incoming_msg, SERVER_TO_HUB__INCOMING_STOCK_NOTICE, SERVER,
-                                                     shipment_result.requesting_hub_id.c_str(),
-                                                     shipment_result.items, shipment_result.item_count, NULL);
+                                                     shipment_result.requesting_hub_id.c_str(), shipment_result.items,
+                                                     shipment_result.item_count, NULL);
             if (create_result == 0)
             {
                 responses.push_back(make_send_to_username(shipment_result.requesting_hub_id.c_str(), incoming_msg));
