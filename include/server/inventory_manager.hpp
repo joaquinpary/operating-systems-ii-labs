@@ -50,7 +50,8 @@ class inventory_manager
     int handle_receipt_confirmation(const message_t& msg);
 
     // Handle shipment notice from warehouse
-    int handle_shipment_notice(const message_t& msg);
+    // Returns stock_request_result with hub destination info so message_handler can notify the hub
+    stock_request_result handle_shipment_notice(const message_t& msg);
 
     // Process pending orders when a warehouse updates its inventory
     // Returns fulfilled orders so message_handler can send dispatch messages
@@ -66,8 +67,9 @@ class inventory_manager
     // Helper: Extract quantities from message payload
     void extract_quantities_from_payload(const payload_items_list& payload, int quantities[6]);
 
-    // Helper: Find transaction by source and destination (for completing orders)
-    int find_transaction_id(const std::string& source_id, const std::string& destination_id);
+    // Helper: Find transaction by source, destination, and status
+    int find_transaction_id(const std::string& source_id, const std::string& destination_id,
+                            const std::string& status = "ASSIGNED");
 };
 
 #endif // INVENTORY_MANAGER_HPP

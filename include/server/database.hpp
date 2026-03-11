@@ -56,10 +56,24 @@ int complete_transaction(pqxx::connection& conn, int transaction_id, const std::
 int get_pending_transactions(pqxx::connection& conn, transaction_record* out_transactions, int max_count);
 int find_transaction_id(pqxx::connection& conn, const std::string& source_id, const std::string& destination_id,
                         const std::string& status);
+int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transaction_record& out);
 
 // Query a client's current inventory from the database
 // Returns 0 on success (quantities_out populated), -1 on error
-// If client has no inventory row, quantities_out is filled with zeros
-int get_client_inventory(pqxx::connection& conn, const std::string& client_id, int quantities_out[6]);
+// If client has no inventory row, quantities_out is filled with INITIAL_STOCK (100)
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                         int quantities_out[6]);
+
+// Atomically adjust a client's inventory by adding or subtracting quantities.
+// If add=true, quantities are added; if add=false, quantities are subtracted (clamped to 0).
+// Returns 0 on success, -1 on error.
+int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id, const int quantities[6], bool add);
+
+// Set a client's is_active flag in the credentials table
+// Call with true on successful auth, false on disconnect
+int set_client_active(pqxx::connection& conn, const std::string& username, bool active);
+
+// Reset all clients to inactive (call on server startup)
+int reset_all_clients_inactive(pqxx::connection& conn);
 
 #endif

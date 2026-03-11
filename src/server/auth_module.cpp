@@ -33,14 +33,6 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
             return result;
         }
 
-        // Check if user is active
-        if (!cred->is_active)
-        {
-            result.status_code = auth_result_code::USER_INACTIVE;
-            result.error_message = "User account is inactive";
-            return result;
-        }
-
         // Compare password hash (assuming password is already hashed when sent)
         // TODO: If passwords are sent in plain text, implement hashing here
         if (cred->password_hash != password)
@@ -54,6 +46,10 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
         result.status_code = auth_result_code::SUCCESS;
         result.client_type = cred->client_type;
         result.username = cred->username;
+
+        // Mark client as active in the database
+        set_client_active(guard.get(), username, true);
+
         return result;
     }
     catch (const std::exception& ex)
@@ -62,5 +58,18 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
         result.status_code = auth_result_code::ERROR;
         result.error_message = "Internal authentication error";
         return result;
+    }
+}
+
+void auth_module::deactivate_client(const std::string& username)
+{
+    try
+    {
+        auto guard = m_pool.acquire();
+        set_client_active(guard.get(), username, false);
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error deactivating client " << username << ": " << ex.what() << std::endl;
     }
 }

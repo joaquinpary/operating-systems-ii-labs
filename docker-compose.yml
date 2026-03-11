@@ -39,7 +39,7 @@ services:
       - "9999:9999"
     volumes:
       - ./config/server_config.json:/etc/server/config.json
-      - ./config/clients:/etc/server/clients
+      - ./config/server:/etc/server/clients
     networks:
       - dhl_net
     command: ["/app/dhl_server"]

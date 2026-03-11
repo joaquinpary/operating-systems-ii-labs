@@ -8,6 +8,7 @@
 #include <stdexcept>
 
 #define DEFAULT_DB_PORT 5432
+#define INITIAL_STOCK 100
 
 namespace
 {
@@ -164,7 +165,7 @@ int create_credentials_table(pqxx::connection& conn)
                           "username TEXT UNIQUE NOT NULL, "
                           "password_hash TEXT NOT NULL, "
                           "client_type TEXT NOT NULL, "
-                          "is_active BOOLEAN DEFAULT true"
+                          "is_active BOOLEAN DEFAULT false"
                           ");";
 
         txn.exec(sql);
@@ -660,18 +661,59 @@ int find_transaction_id(pqxx::connection& conn, const std::string& source_id, co
     }
 }
 
-int get_client_inventory(pqxx::connection& conn, const std::string& client_id, int quantities_out[6])
+int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transaction_record& out)
 {
-    if (client_id.empty() || !quantities_out)
+    try
+    {
+        pqxx::work txn(conn);
+        std::string sql = "SELECT transaction_id, transaction_type, source_id, source_type, destination_id, "
+                          "destination_type, status, food, water, medicine, tools, guns, ammo FROM "
+                          "inventory_transactions WHERE transaction_id = $1";
+
+        pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
+
+        if (result.empty())
+        {
+            return -1;
+        }
+
+        const auto& row = result[0];
+        out.transaction_id = row[0].as<int>();
+        out.transaction_type = row[1].as<std::string>();
+        out.source_id = row[2].is_null() ? "" : row[2].as<std::string>();
+        out.source_type = row[3].is_null() ? "" : row[3].as<std::string>();
+        out.destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
+        out.destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
+        out.status = row[6].as<std::string>();
+        out.food = row[7].as<int>();
+        out.water = row[8].as<int>();
+        out.medicine = row[9].as<int>();
+        out.tools = row[10].as<int>();
+        out.guns = row[11].as<int>();
+        out.ammo = row[12].as<int>();
+
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error getting transaction by id: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                         int quantities_out[6])
+{
+    if (client_id.empty() || client_type.empty() || !quantities_out)
     {
         std::cerr << "Invalid parameters for get_client_inventory" << std::endl;
         return -1;
     }
 
-    // Initialize to zeros (default for clients with no inventory row)
+    // Initialize to max stock (default for clients with no inventory row — full stock on first run)
     for (int i = 0; i < 6; i++)
     {
-        quantities_out[i] = 0;
+        quantities_out[i] = INITIAL_STOCK;
     }
 
     try
@@ -683,7 +725,14 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, i
 
         if (result.empty())
         {
-            std::cout << "No inventory found for client " << client_id << ", returning zeros" << std::endl;
+            std::cout << "No inventory found for client " << client_id << ", inserting initial stock (" << INITIAL_STOCK
+                      << ")" << std::endl;
+            std::string insert_sql =
+                "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
+                "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
+            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, INITIAL_STOCK});
+            txn.commit();
+            // quantities_out already initialized to INITIAL_STOCK above
             return 0;
         }
 
@@ -700,6 +749,94 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, i
     catch (const std::exception& ex)
     {
         std::cerr << "Error getting client inventory: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id, const int quantities[6], bool add)
+{
+    if (client_id.empty() || !quantities)
+    {
+        std::cerr << "Invalid parameters for adjust_client_inventory" << std::endl;
+        return -1;
+    }
+
+    try
+    {
+        pqxx::work txn(conn);
+
+        std::string sql;
+        if (add)
+        {
+            sql = "UPDATE client_inventory SET "
+                  "food = food + $2, water = water + $3, medicine = medicine + $4, "
+                  "tools = tools + $5, guns = guns + $6, ammo = ammo + $7, "
+                  "last_updated = CURRENT_TIMESTAMP "
+                  "WHERE client_id = $1";
+        }
+        else
+        {
+            sql = "UPDATE client_inventory SET "
+                  "food = GREATEST(0, food - $2), water = GREATEST(0, water - $3), "
+                  "medicine = GREATEST(0, medicine - $4), tools = GREATEST(0, tools - $5), "
+                  "guns = GREATEST(0, guns - $6), ammo = GREATEST(0, ammo - $7), "
+                  "last_updated = CURRENT_TIMESTAMP "
+                  "WHERE client_id = $1";
+        }
+
+        txn.exec(pqxx::zview(sql), pqxx::params{client_id, quantities[0], quantities[1], quantities[2], quantities[3],
+                                                quantities[4], quantities[5]});
+        txn.commit();
+
+        std::cout << (add ? "Added" : "Subtracted") << " inventory for client " << client_id << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error adjusting client inventory: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int set_client_active(pqxx::connection& conn, const std::string& username, bool active)
+{
+    if (username.empty())
+    {
+        std::cerr << "Invalid parameters for set_client_active" << std::endl;
+        return -1;
+    }
+
+    try
+    {
+        pqxx::work txn(conn);
+        std::string sql = "UPDATE credentials SET is_active = $1 WHERE username = $2";
+        txn.exec(pqxx::zview(sql), pqxx::params{active, username});
+        txn.commit();
+
+        std::cout << "Set client " << username << " active = " << (active ? "true" : "false") << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error setting client active status: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
+int reset_all_clients_inactive(pqxx::connection& conn)
+{
+    try
+    {
+        pqxx::work txn(conn);
+        txn.exec("UPDATE credentials SET is_active = false");
+        txn.commit();
+
+        std::cout << "Reset all clients to inactive." << std::endl;
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error resetting clients to inactive: " << ex.what() << std::endl;
         return -1;
     }
 }

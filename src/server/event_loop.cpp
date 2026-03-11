@@ -23,7 +23,9 @@ event_loop::event_loop() : m_running(false)
     }
 
     // Register the wakeup fd in epoll (level-triggered)
-    struct epoll_event ev {};
+    struct epoll_event ev
+    {
+    };
     ev.events = EPOLLIN;
     ev.data.fd = m_wakeup_fd;
     if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, m_wakeup_fd, &ev) == -1)
