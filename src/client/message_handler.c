@@ -146,6 +146,8 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        clear_pending_stock_requests(restock->items, QUANTITY_ITEMS);
+
         // Send receipt confirmation (role-specific message type)
         message_t receipt_msg;
         const char* receipt_type = (strcmp(shared_data->client_role, HUB) == 0)
