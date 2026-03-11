@@ -50,6 +50,14 @@ response_slot_t message_handler::make_send_to_username(const char* username, con
         std::memcpy(slot.payload, json_buf, len);
         slot.payload_len = len;
     }
+
+    // Populate timer fields so reactor can start ACK timer after resolving the session
+    slot.start_ack_timer = true;
+    std::strncpy(slot.timer_key, msg.timestamp, TIMESTAMP_SIZE - 1);
+    slot.timer_timeout = m_ack_timeout_seconds;
+    slot.retry_count = 0;
+    slot.max_retries = m_max_retries;
+
     return slot;
 }
 
@@ -323,12 +331,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                 continue;
             }
 
-            // Send to warehouse by username (reactor resolves session)
+            // Send to warehouse by username (reactor resolves session + starts ACK timer)
             responses.push_back(make_send_to_username(fulfilled.assigned_warehouse_id.c_str(), dispatch_msg));
-            // Timer tracking: we need the warehouse session_id, but we don't have it.
-            // Timer will be started when reactor resolves the username to session_id.
-            // For now, we skip timer tracking for dispatches by username — reactor handles it.
-            // Alternative: add a START_ACK_TIMER_BY_USERNAME command.
             std::cout << "[MSG] Dispatch queued for warehouse " << fulfilled.assigned_warehouse_id << std::endl;
         }
     }
@@ -366,7 +370,27 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
     }
     else if (category == message_category::DISPATCH_NOTICE)
     {
-        m_inventory_manager.handle_shipment_notice(msg);
+        stock_request_result shipment_result = m_inventory_manager.handle_shipment_notice(msg);
+
+        if (shipment_result.success && !shipment_result.requesting_hub_id.empty())
+        {
+            // Notify the hub that stock is incoming
+            message_t incoming_msg;
+            int create_result = create_items_message(&incoming_msg, SERVER_TO_HUB__INCOMING_STOCK_NOTICE, SERVER,
+                                                     shipment_result.requesting_hub_id.c_str(),
+                                                     shipment_result.items, shipment_result.item_count, NULL);
+            if (create_result == 0)
+            {
+                responses.push_back(make_send_to_username(shipment_result.requesting_hub_id.c_str(), incoming_msg));
+                std::cout << "[MSG] Incoming stock notice queued for hub " << shipment_result.requesting_hub_id
+                          << std::endl;
+            }
+            else
+            {
+                std::cerr << "[MSG] ERROR: Failed to create incoming stock notice for hub "
+                          << shipment_result.requesting_hub_id << std::endl;
+            }
+        }
     }
     else if (category == message_category::REPLENISH_REQ)
     {
@@ -428,7 +452,8 @@ message_category message_handler::categorize_message(const char* msg_type) const
         return message_category::STOCK_REQ;
     }
 
-    if (std::strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
     {
         return message_category::RECEIPT_CONFIRM;
     }

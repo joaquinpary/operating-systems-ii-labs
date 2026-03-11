@@ -90,6 +90,9 @@ struct response_slot_t
     // For SEND by username (when worker doesn't know the session_id)
     // If session_id is empty and target_username is set, reactor resolves session via find_session_by_username
     char target_username[CREDENTIALS_SIZE];
+
+    // When true on a SEND command, reactor will also start an ACK timer after sending
+    bool start_ack_timer;
 };
 
 /**
