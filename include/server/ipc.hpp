@@ -37,7 +37,10 @@ enum class response_command : std::uint8_t
     CANCEL_ACK_TIMER = 2,
     CLEAR_TIMERS = 3,
     BLACKLIST = 4,
-    MARK_AUTHENTICATED = 5 // Mark a session as authenticated
+    MARK_AUTHENTICATED = 5, // Mark a session as authenticated
+    START_KEEPALIVE_TIMER = 6,
+    RESET_KEEPALIVE_TIMER = 7,
+    DISCONNECT = 8 // Force-disconnect a session (e.g. keepalive timeout)
 };
 
 /**

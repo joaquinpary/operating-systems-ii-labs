@@ -13,6 +13,7 @@ enum class message_category
 {
     AUTH_REQUEST,
     ACK_MESSAGE,
+    KEEPALIVE_MSG,
     INV_UPDATE,
     STOCK_REQ,
     RECEIPT_CONFIRM,
@@ -36,7 +37,7 @@ class message_handler
 {
   public:
     message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                    std::uint32_t max_retries);
+                    std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds);
     ~message_handler();
 
     /**
@@ -73,11 +74,14 @@ class message_handler
     response_slot_t make_clear_timers(const char* session_id);
     response_slot_t make_blacklist(const char* session_id);
     response_slot_t make_mark_authenticated(const char* session_id, const char* client_type, const char* username);
+    response_slot_t make_start_keepalive_timer(const char* session_id);
+    response_slot_t make_reset_keepalive_timer(const char* session_id);
 
     auth_module& m_auth_module;
     inventory_manager& m_inventory_manager;
     std::uint32_t m_ack_timeout_seconds;
     std::uint32_t m_max_retries;
+    std::uint32_t m_keepalive_timeout_seconds;
 };
 
 #endif // MESSAGE_HANDLER_HPP

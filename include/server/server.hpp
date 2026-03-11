@@ -109,9 +109,10 @@ class server
     void on_response_ready();
     void dispatch_response(const response_slot_t& resp);
 
-    // Timer expiry handler (for ACK retries)
+    // Timer expiry handlers
     void handle_ack_timeout(const std::string& session_id, const std::string& timer_key, const std::string& payload,
                             std::uint32_t retry_count, std::uint32_t max_retries);
+    void handle_keepalive_timeout(const std::string& session_id);
 
     // Send callback (used by timer retry logic in reactor)
     void send_to_session(const std::string& session_id, const std::string& data);

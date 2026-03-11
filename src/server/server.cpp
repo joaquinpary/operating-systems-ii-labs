@@ -584,7 +584,48 @@ void server::dispatch_response(const response_slot_t& resp)
         m_session_manager->mark_authenticated(session_id, client_type, username);
         break;
     }
+    case response_command::START_KEEPALIVE_TIMER: {
+        std::uint32_t timeout = resp.timer_timeout;
+        m_timer_manager->start_keepalive_timer(session_id, static_cast<int>(timeout),
+                                               [this, session_id]() { handle_keepalive_timeout(session_id); });
+        break;
     }
+    case response_command::RESET_KEEPALIVE_TIMER: {
+        m_timer_manager->reset_keepalive_timer(session_id);
+        break;
+    }
+    case response_command::DISCONNECT: {
+        handle_keepalive_timeout(session_id);
+        break;
+    }
+    }
+}
+
+void server::handle_keepalive_timeout(const std::string& session_id)
+{
+    std::cout << "[REACTOR] Keepalive timeout — disconnecting session: " << session_id << std::endl;
+
+    // Clear all timers for this session
+    m_timer_manager->clear_session_timers(session_id);
+
+    auto info = m_session_manager->get_session_info(session_id);
+    if (!info)
+    {
+        std::cerr << "[REACTOR] Session " << session_id << " not found for keepalive disconnect" << std::endl;
+        return;
+    }
+
+    // If TCP, close the session (notify_disconnect + close are handled by tcp_session)
+    if (info->type == session_info::connection_type::TCP)
+    {
+        if (auto tcp_sess = info->tcp_session_ref.lock())
+        {
+            tcp_sess->notify_disconnect();
+            tcp_sess->close();
+        }
+    }
+
+    m_session_manager->remove_session(session_id);
 }
 
 void server::handle_ack_timeout(const std::string& session_id, const std::string& timer_key, const std::string& payload,

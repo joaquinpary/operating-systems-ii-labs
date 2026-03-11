@@ -78,6 +78,15 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     // Acquire a connection from the pool
     auto guard = m_pool.acquire();
 
+    // Subtract requested quantities from the hub's inventory immediately.
+    // A stock request implies the hub already consumed these items internally,
+    // so we reflect it now instead of waiting for the next inventory update.
+    if (adjust_client_inventory(guard.get(), std::string(msg.source_id), quantities, false) != 0)
+    {
+        std::cerr << "[INVENTORY_MANAGER] Failed to subtract stock-request quantities from hub " << msg.source_id
+                  << std::endl;
+    }
+
     // Create transaction with hub as destination (stock will be sent TO the hub)
     int transaction_id =
         create_transaction(guard.get(), "STOCK_REQUEST", msg.source_id, msg.source_role, quantities, msg.timestamp);

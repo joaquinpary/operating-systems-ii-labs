@@ -24,7 +24,7 @@ class timer_manager
 
     bool cancel_ack_timer(const std::string& session_id, const std::string& msg_timestamp);
 
-    // ==================== KEEPALIVE TIMERS (PLACEHOLDER) ====================
+    // ==================== KEEPALIVE TIMERS ====================
 
     void start_keepalive_timer(const std::string& session_id, int timeout_seconds, std::function<void()> on_timeout);
     void reset_keepalive_timer(const std::string& session_id);
@@ -44,6 +44,9 @@ class timer_manager
 
     // Keepalive timers: session_id → timerfd
     std::map<std::string, int> m_keepalive_timers;
+
+    // Keepalive timeout per session (to re-arm on reset)
+    std::map<std::string, int> m_keepalive_timeouts;
 };
 
 #endif // TIMER_MANAGER_HPP

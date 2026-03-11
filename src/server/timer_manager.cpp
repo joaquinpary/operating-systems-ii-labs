@@ -122,13 +122,16 @@ bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::s
     return true;
 }
 
-// ==================== KEEPALIVE TIMERS (PLACEHOLDER) ====================
+// ==================== KEEPALIVE TIMERS ====================
 
 void timer_manager::start_keepalive_timer(const std::string& session_id, int timeout_seconds,
                                           std::function<void()> on_timeout)
 {
     // Cancel existing
     cancel_keepalive_timer(session_id);
+
+    // Store timeout for future resets
+    m_keepalive_timeouts[session_id] = timeout_seconds;
 
     int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (tfd == -1)
@@ -175,10 +178,37 @@ void timer_manager::start_keepalive_timer(const std::string& session_id, int tim
 void timer_manager::reset_keepalive_timer(const std::string& session_id)
 {
     auto it = m_keepalive_timers.find(session_id);
-    if (it != m_keepalive_timers.end())
+    if (it == m_keepalive_timers.end())
     {
-        std::cout << "[TIMER] Reset keepalive timer for session: " << session_id << " (PLACEHOLDER)" << std::endl;
+        return;
     }
+
+    auto timeout_it = m_keepalive_timeouts.find(session_id);
+    if (timeout_it == m_keepalive_timeouts.end())
+    {
+        return;
+    }
+
+    int timeout_seconds = timeout_it->second;
+    int tfd = it->second;
+
+    struct itimerspec ts
+    {
+    };
+    ts.it_value.tv_sec = timeout_seconds;
+    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
+    ts.it_interval.tv_sec = 0;
+    ts.it_interval.tv_nsec = 0;
+
+    if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
+    {
+        std::cerr << "[TIMER] Failed to reset keepalive timerfd for session: " << session_id << ": "
+                  << strerror(errno) << std::endl;
+        return;
+    }
+
+    std::cout << "[TIMER] Reset keepalive timer for session: " << session_id << " (" << timeout_seconds << "s)"
+              << std::endl;
 }
 
 void timer_manager::cancel_keepalive_timer(const std::string& session_id)
@@ -190,6 +220,7 @@ void timer_manager::cancel_keepalive_timer(const std::string& session_id)
         m_keepalive_timers.erase(it);
         std::cout << "[TIMER] Cancelled keepalive timer for session: " << session_id << std::endl;
     }
+    m_keepalive_timeouts.erase(session_id);
 }
 
 // ==================== SESSION CLEANUP ====================

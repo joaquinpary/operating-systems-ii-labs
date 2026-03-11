@@ -6,9 +6,9 @@
 // ==================== CONSTRUCTOR / DESTRUCTOR ====================
 
 message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                                 std::uint32_t max_retries)
+                                 std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds)
     : m_auth_module(auth), m_inventory_manager(inv_mgr), m_ack_timeout_seconds(ack_timeout_seconds),
-      m_max_retries(max_retries)
+      m_max_retries(max_retries), m_keepalive_timeout_seconds(keepalive_timeout_seconds)
 {
 }
 
@@ -123,6 +123,25 @@ response_slot_t message_handler::make_mark_authenticated(const char* session_id,
     return slot;
 }
 
+response_slot_t message_handler::make_start_keepalive_timer(const char* session_id)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::START_KEEPALIVE_TIMER);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    slot.timer_timeout = m_keepalive_timeout_seconds;
+    return slot;
+}
+
+response_slot_t message_handler::make_reset_keepalive_timer(const char* session_id)
+{
+    response_slot_t slot;
+    std::memset(&slot, 0, sizeof(slot));
+    slot.command = static_cast<std::uint8_t>(response_command::RESET_KEEPALIVE_TIMER);
+    std::strncpy(slot.session_id, session_id, SESSION_ID_SIZE - 1);
+    return slot;
+}
+
 // ==================== ACK GENERATION ====================
 
 bool message_handler::generate_ack_if_needed(const message_t& msg, const request_slot_t& req, response_slot_t& ack_out)
@@ -215,6 +234,11 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     case message_category::ACK_MESSAGE:
         handler_responses = handle_ack_message(incoming_msg, request);
         break;
+    case message_category::KEEPALIVE_MSG:
+        // Keepalive: ACK was already generated above, just reset the keepalive timer
+        std::cout << "[MSG] Keepalive from " << incoming_msg.source_id << std::endl;
+        responses.push_back(make_reset_keepalive_timer(request.session_id));
+        break;
     default:
         handler_responses = handle_other_message(incoming_msg, request, category);
         break;
@@ -277,6 +301,9 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
             responses.push_back(make_start_timer(req.session_id, inv_msg));
             std::cout << "[WORKER] Auth success + inventory queued for " << auth_res.username << std::endl;
         }
+
+        // 4. Start keepalive timer for this session
+        responses.push_back(make_start_keepalive_timer(req.session_id));
     }
     else
     {
@@ -439,6 +466,12 @@ message_category message_handler::categorize_message(const char* msg_type) const
     if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0)
     {
         return message_category::ACK_MESSAGE;
+    }
+
+    if (std::strcmp(msg_type, HUB_TO_SERVER__KEEPALIVE) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__KEEPALIVE) == 0)
+    {
+        return message_category::KEEPALIVE_MSG;
     }
 
     if (std::strcmp(msg_type, HUB_TO_SERVER__INVENTORY_UPDATE) == 0 ||

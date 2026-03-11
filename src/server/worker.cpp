@@ -55,7 +55,7 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
     // Create processing modules
     auth_module auth(*pool);
     inventory_manager inv_mgr(*pool);
-    message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries);
+    message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout);
 
     // Spawn worker threads
     /// Fallback thread count when hardware_concurrency() returns 0.

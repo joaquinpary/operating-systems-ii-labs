@@ -14,6 +14,7 @@ struct server_config
     std::uint32_t ack_timeout;
     std::uint32_t max_auth_attempts;
     std::uint32_t max_retries;
+    std::uint32_t keepalive_timeout;
     std::uint32_t pool_size;
     std::uint32_t worker_threads;
     std::string credentials_path;
