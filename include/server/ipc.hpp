@@ -12,8 +12,8 @@
 #include <sys/stat.h>
 
 /// Ring buffer sizes (must be power of 2 for masking).
-inline constexpr std::uint32_t REQUEST_QUEUE_SIZE = 4096;
-inline constexpr std::uint32_t RESPONSE_QUEUE_SIZE = 4096;
+inline constexpr std::uint32_t REQUEST_QUEUE_SIZE = 8192;
+inline constexpr std::uint32_t RESPONSE_QUEUE_SIZE = 8192;
 
 /// Maximum length of a session identifier string.
 inline constexpr std::size_t SESSION_ID_SIZE = 64;
@@ -114,9 +114,13 @@ struct shm_header_t
     alignas(CACHE_LINE_SIZE) std::atomic<std::uint64_t> resp_tail; // reactor reads from here (consumer)
     std::uint32_t resp_capacity;
 
-    // Synchronization
+    // Synchronization — request ring
     sem_t sem_requests;         // signaled when a request is available
     sem_t sem_free_req_slots;   // signaled when a request slot is freed (backpressure)
+
+    // Synchronization — response ring
+    sem_t sem_responses;        // signaled when a response is available
+    sem_t sem_free_resp_slots;  // signaled when a response slot is freed (backpressure)
     pthread_mutex_t resp_mutex; // protects resp_head for multiple worker threads
 
     // Shutdown flag

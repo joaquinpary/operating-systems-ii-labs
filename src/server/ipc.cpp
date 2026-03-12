@@ -106,7 +106,7 @@ void shared_queue::init_header()
 
     m_header->shutdown_flag.store(0, std::memory_order_relaxed);
 
-    // Initialize process-shared semaphores
+    // Initialize process-shared semaphores — request ring
     if (sem_init(&m_header->sem_requests, 1, 0) == -1)
     {
         throw std::runtime_error(std::string("sem_init sem_requests failed: ") + strerror(errno));
@@ -114,6 +114,16 @@ void shared_queue::init_header()
     if (sem_init(&m_header->sem_free_req_slots, 1, REQUEST_QUEUE_SIZE) == -1)
     {
         throw std::runtime_error(std::string("sem_init sem_free_req_slots failed: ") + strerror(errno));
+    }
+
+    // Initialize process-shared semaphores — response ring
+    if (sem_init(&m_header->sem_responses, 1, 0) == -1)
+    {
+        throw std::runtime_error(std::string("sem_init sem_responses failed: ") + strerror(errno));
+    }
+    if (sem_init(&m_header->sem_free_resp_slots, 1, RESPONSE_QUEUE_SIZE) == -1)
+    {
+        throw std::runtime_error(std::string("sem_init sem_free_resp_slots failed: ") + strerror(errno));
     }
 
     // Initialize process-shared mutex for response ring
@@ -138,6 +148,8 @@ shared_queue::~shared_queue()
         {
             sem_destroy(&m_header->sem_requests);
             sem_destroy(&m_header->sem_free_req_slots);
+            sem_destroy(&m_header->sem_responses);
+            sem_destroy(&m_header->sem_free_resp_slots);
             pthread_mutex_destroy(&m_header->resp_mutex);
         }
         munmap(m_base, m_size);
@@ -249,6 +261,9 @@ bool shared_queue::pop_response(response_slot_t& slot)
 
     // Single consumer (reactor) — no lock needed for resp_tail
     m_header->resp_tail.store(tail + 1, std::memory_order_release);
+
+    // Signal workers that a response slot is free
+    sem_post(&m_header->sem_free_resp_slots);
     return true;
 }
 
@@ -294,6 +309,25 @@ bool shared_queue::wait_request(request_slot_t& slot)
 
 void shared_queue::push_response(const response_slot_t& slot, int efd)
 {
+    // Wait for a free response slot (backpressure — prevents overwriting unread responses)
+    while (sem_wait(&m_header->sem_free_resp_slots) == -1)
+    {
+        if (errno == EINTR)
+        {
+            if (m_header->shutdown_flag.load(std::memory_order_acquire))
+            {
+                return;
+            }
+            continue;
+        }
+        return;
+    }
+
+    if (m_header->shutdown_flag.load(std::memory_order_acquire))
+    {
+        return;
+    }
+
     // Multiple producers (worker threads) — protect with mutex
     pthread_mutex_lock(&m_header->resp_mutex);
 
@@ -320,10 +354,16 @@ void shared_queue::signal_shutdown()
 {
     m_header->shutdown_flag.store(1, std::memory_order_release);
 
-    // Wake up all blocked workers
+    // Wake up all blocked workers on request ring
     for (int i = 0; i < REQUEST_QUEUE_SIZE; ++i)
     {
         sem_post(&m_header->sem_requests);
+    }
+
+    // Wake up any workers blocked on the response ring (backpressure)
+    for (int i = 0; i < RESPONSE_QUEUE_SIZE; ++i)
+    {
+        sem_post(&m_header->sem_free_resp_slots);
     }
 }
 
