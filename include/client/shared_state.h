@@ -173,6 +173,25 @@ int get_low_stock_report(int low_threshold, int critical_threshold, int max_stoc
                          int* out_item_indices, int* out_critical_count);
 
 /**
+ * Log the current inventory state at DEBUG level
+ * @param context Label shown in the log line to identify the call site
+ */
+void log_inventory_snapshot(const char* context);
+
+/**
+ * Build a full QUANTITY_ITEMS payload from a low-stock subset
+ *
+ * Preserves canonical inventory item identity (item_id + item_name) for all items.
+ * Items present in low_items keep their requested quantity; the rest are set to 0.
+ *
+ * @param low_items Subset array returned by get_low_stock_report
+ * @param low_count Number of entries in low_items
+ * @param out_full_items Output array with QUANTITY_ITEMS entries
+ * @return 0 on success, -1 on error
+ */
+int build_full_request_payload(const inventory_item_t* low_items, int low_count, inventory_item_t* out_full_items);
+
+/**
  * Mark requested items as pending replenishment
  * @param item_indices Array of inventory indices [0..QUANTITY_ITEMS-1]
  * @param count Number of indices in item_indices

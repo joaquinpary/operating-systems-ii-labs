@@ -329,11 +329,7 @@ static void do_inventory_update(void)
         return;
     }
 
-    printf("ITEMS:\n");
-    for (int i = 0; i < QUANTITY_ITEMS; i++)
-    {
-        printf(" - %s: %d units\n", items[i].item_name, items[i].quantity);
-    }
+    log_inventory_snapshot("INVENTORY_UPDATE send");
 
     // Determine correct message type based on client role
     const char* msg_type = (strcmp(shared_data->client_role, HUB) == 0) ? HUB_TO_SERVER__INVENTORY_UPDATE
@@ -422,6 +418,15 @@ static void do_consume_stock(void)
 static int do_check_low_stock(void)
 {
     shared_data_t* shared_data = get_shared_data();
+
+    // Warehouses replenish only through dispatch orders from the server,
+    // not through autonomous stock requests.
+    if (strcmp(shared_data->client_role, HUB) != 0)
+    {
+        LOG_DEBUG_MSG("do_check_low_stock() skipped for WAREHOUSE role");
+        return 0;
+    }
+
     inventory_item_t low_items[QUANTITY_ITEMS];
     int requested_item_indices[QUANTITY_ITEMS];
     int critically_low_count = 0;
@@ -445,11 +450,18 @@ static int do_check_low_stock(void)
         LOG_INFO_MSG("Low stock detected for %d items, requesting replenishment", low_count);
 
         message_t msg;
+        inventory_item_t full_request_items[QUANTITY_ITEMS];
 
-        const char* msg_type = (strcmp(shared_data->client_role, HUB) == 0) ? HUB_TO_SERVER__STOCK_REQUEST
-                                                                            : WAREHOUSE_TO_SERVER__REPLENISH_REQUEST;
+        if (build_full_request_payload(low_items, low_count, full_request_items) != 0)
+        {
+            LOG_ERROR_MSG("Failed to build full stock request payload");
+            return critically_low_count == QUANTITY_ITEMS ? 1 : 0;
+        }
 
-        if (create_items_message(&msg, msg_type, shared_data->client_id, SERVER, low_items, low_count, NULL) != 0)
+        log_inventory_snapshot("STOCK_REQUEST send");
+
+        if (create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, shared_data->client_id, SERVER, full_request_items,
+                                 QUANTITY_ITEMS, NULL) != 0)
         {
             LOG_ERROR_MSG("Failed to create stock request message");
             return critically_low_count == QUANTITY_ITEMS ? 1 : 0;

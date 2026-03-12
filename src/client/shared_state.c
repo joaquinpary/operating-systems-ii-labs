@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "shared_state.h"
 #include "json_manager.h"
+#include "logger.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,7 +11,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ITEMS_NAME "FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"
+#define ITEMS_NAME "food", "water", "medicine", "tools", "guns", "ammo"
 #define IPC_NAME_BUFFER_SIZE 64
 
 static int shm_fd = -1;
@@ -209,17 +210,28 @@ int modify_inventory(const inventory_item_t* items, inventory_operation_t operat
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        if (operation == INVENTORY_ADD)
-        {
-            shared_data->inventory_item[i].quantity += items[i].quantity;
-        }
-        else if (operation == INVENTORY_REDUCE)
-        {
-            int requested_qty = items[i].quantity;
-            int available_qty = shared_data->inventory_item[i].quantity;
-            int actual_qty = (requested_qty <= available_qty) ? requested_qty : available_qty;
+        if (items[i].item_id == 0 || items[i].quantity == 0)
+            continue;
 
-            shared_data->inventory_item[i].quantity -= actual_qty;
+        // Match incoming item to local slot by item_id, not by index
+        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        {
+            if (shared_data->inventory_item[j].item_id != items[i].item_id)
+                continue;
+
+            if (operation == INVENTORY_ADD)
+            {
+                shared_data->inventory_item[j].quantity += items[i].quantity;
+            }
+            else if (operation == INVENTORY_REDUCE)
+            {
+                int requested_qty = items[i].quantity;
+                int available_qty = shared_data->inventory_item[j].quantity;
+                int actual_qty = (requested_qty <= available_qty) ? requested_qty : available_qty;
+
+                shared_data->inventory_item[j].quantity -= actual_qty;
+            }
+            break;
         }
     }
 
@@ -324,6 +336,55 @@ int get_low_stock_report(int low_threshold, int critical_threshold, int max_stoc
 
     *out_critical_count = critical_count;
     return low_count;
+}
+
+void log_inventory_snapshot(const char* context)
+{
+    inventory_item_t snapshot[QUANTITY_ITEMS];
+    if (get_inventory_snapshot(snapshot) != 0)
+    {
+        LOG_DEBUG_MSG("[%s] inventory snapshot unavailable", context ? context : "?");
+        return;
+    }
+
+    LOG_DEBUG_MSG("[%s] Current inventory:", context ? context : "?");
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        LOG_DEBUG_MSG("  item_id=%d  %-10s  qty=%d", snapshot[i].item_id, snapshot[i].item_name, snapshot[i].quantity);
+    }
+}
+
+int build_full_request_payload(const inventory_item_t* low_items, int low_count, inventory_item_t* out_full_items)
+{
+    if (out_full_items == NULL || low_items == NULL || low_count < 0)
+    {
+        return -1;
+    }
+
+    if (get_inventory_snapshot(out_full_items) != 0)
+    {
+        return -1;
+    }
+
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        out_full_items[i].quantity = 0;
+    }
+
+    for (int i = 0; i < low_count; i++)
+    {
+        int low_item_id = low_items[i].item_id;
+        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        {
+            if (out_full_items[j].item_id == low_item_id)
+            {
+                out_full_items[j].quantity = low_items[i].quantity;
+                break;
+            }
+        }
+    }
+
+    return 0;
 }
 
 void mark_pending_stock_requests(const int* item_indices, int count)

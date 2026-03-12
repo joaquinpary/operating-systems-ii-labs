@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 
+// Thresholds for warehouse replenishment after dispatch
+#define LOW_STOCK_THRESHOLD 20
+#define CRITICAL_STOCK_THRESHOLD 5
+#define MAX_STOCK_PER_ITEM 100
+
 /**
  * @brief Helper function to create and enqueue an ACK message
  * @param msg_timestamp The timestamp of the message being acknowledged
@@ -77,6 +82,8 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        log_inventory_snapshot("INVENTORY_UPDATE recv");
+
         if (send_ack_to_server(msg->timestamp) != 0)
         {
             return -1;
@@ -106,6 +113,8 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        log_inventory_snapshot("ORDER_TO_DISPATCH recv");
+
         // Send shipment notice
         message_t shipment_msg;
         if (create_items_message(&shipment_msg, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE, shared_data->client_id,
@@ -122,6 +131,47 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
         LOG_INFO_MSG("Shipment notice sent, dispatching to HUB %s", msg->target_id);
+
+        // Check if dispatch left warehouse below stock threshold
+        inventory_item_t low_items[QUANTITY_ITEMS];
+        int low_indices[QUANTITY_ITEMS];
+        int critical_count = 0;
+
+        int low_count = get_low_stock_report(LOW_STOCK_THRESHOLD, CRITICAL_STOCK_THRESHOLD, MAX_STOCK_PER_ITEM,
+                                             low_items, low_indices, &critical_count);
+
+        if (low_count > 0)
+        {
+            LOG_INFO_MSG("Post-dispatch: %d items below threshold, requesting replenishment", low_count);
+
+            message_t replenish_msg;
+            inventory_item_t full_request_items[QUANTITY_ITEMS];
+
+            if (build_full_request_payload(low_items, low_count, full_request_items) != 0)
+            {
+                LOG_ERROR_MSG("Failed to build full warehouse replenish payload");
+                return -1;
+            }
+
+            if (create_items_message(&replenish_msg, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, shared_data->client_id,
+                                     SERVER, full_request_items, QUANTITY_ITEMS, NULL) == 0)
+            {
+                if (enqueue_pending_message(&replenish_msg) == 0)
+                {
+                    mark_pending_stock_requests(low_indices, low_count);
+                    LOG_INFO_MSG("Warehouse replenish request enqueued for %d items", low_count);
+                }
+                else
+                {
+                    LOG_ERROR_MSG("Failed to enqueue warehouse replenish request");
+                }
+            }
+            else
+            {
+                LOG_ERROR_MSG("Failed to create warehouse replenish request");
+            }
+        }
+
         return 0;
     }
 
@@ -145,6 +195,8 @@ int handle_server_message(const message_t* msg)
             LOG_ERROR_MSG("Failed to add inventory for stock delivery");
             return -1;
         }
+
+        log_inventory_snapshot("RESTOCK recv");
 
         clear_pending_stock_requests(restock->items, QUANTITY_ITEMS);
 
