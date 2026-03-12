@@ -22,14 +22,13 @@
 
 // Configuration constants for business logic
 #define INVENTORY_UPDATE_INTERVAL_SEC 60 // Periodic inventory reporting
-#define CONSUME_STOCK_MIN_SEC 2          // Minimum seconds between stock consumption
-#define CONSUME_STOCK_MAX_SEC 10         // Maximum seconds between stock consumption
+#define CONSUME_STOCK_MIN_SEC 10          // Minimum seconds between stock consumption
+#define CONSUME_STOCK_MAX_SEC 30         // Maximum seconds between stock consumption
 #define CONSUME_MIN_AMOUNT 1             // Minimum units to consume per item
 #define CONSUME_MAX_AMOUNT 20            // Maximum units to consume per item
 #define LOW_STOCK_THRESHOLD 20           // Threshold to trigger stock request
 #define CRITICAL_STOCK_THRESHOLD 5       // Threshold to disable consumption
 #define MAX_STOCK_PER_ITEM 100           // Maximum inventory capacity per item
-#define REORDER_QUANTITY 50              // Amount requested when low stock
 #define EMERGENCY_CHECK_INTERVAL_SEC 30  // Interval for emergency evaluation
 
 static client_context* logic_ctx = NULL;

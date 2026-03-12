@@ -202,8 +202,8 @@ void timer_manager::reset_keepalive_timer(const std::string& session_id)
 
     if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
     {
-        std::cerr << "[TIMER] Failed to reset keepalive timerfd for session: " << session_id << ": "
-                  << strerror(errno) << std::endl;
+        std::cerr << "[TIMER] Failed to reset keepalive timerfd for session: " << session_id << ": " << strerror(errno)
+                  << std::endl;
         return;
     }
 

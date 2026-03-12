@@ -207,7 +207,7 @@ int handle_server_message(const message_t* msg)
                                        : WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION;
 
         if (create_items_message(&receipt_msg, receipt_type, shared_data->client_id, SERVER, restock->items,
-                                 QUANTITY_ITEMS, msg->timestamp) != 0)
+                                 QUANTITY_ITEMS, restock->order_timestamp) != 0)
         {
             LOG_ERROR_MSG("Failed to create receipt confirmation message");
             return -1;
