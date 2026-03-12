@@ -172,6 +172,32 @@ bool message_handler::generate_ack_if_needed(const message_t& msg, const request
     return true;
 }
 
+// ==================== IMMEDIATE ACK GENERATION ====================
+
+std::optional<response_slot_t> message_handler::generate_ack(const request_slot_t& request)
+{
+    // No ACK for disconnects, blacklisted, or unauthenticated sessions
+    if (request.is_disconnect || request.is_blacklisted || !request.is_authenticated)
+    {
+        return std::nullopt;
+    }
+
+    // Deserialize just to check message type and build the ACK
+    message_t incoming_msg;
+    if (deserialize_message_from_json(request.raw_json, &incoming_msg) != 0)
+    {
+        return std::nullopt;
+    }
+
+    response_slot_t ack_slot;
+    if (generate_ack_if_needed(incoming_msg, request, ack_slot))
+    {
+        return ack_slot;
+    }
+
+    return std::nullopt;
+}
+
 // ==================== MAIN ENTRY POINT ====================
 
 std::vector<response_slot_t> message_handler::process_request(const request_slot_t& request)
@@ -217,12 +243,9 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         return responses;
     }
 
-    // Generate ACK first (so it's sent before the processing response)
-    response_slot_t ack_slot;
-    if (generate_ack_if_needed(incoming_msg, request, ack_slot))
-    {
-        responses.push_back(ack_slot);
-    }
+    // NOTE: ACK is no longer generated here — it is sent immediately by the worker
+    // thread via generate_ack() BEFORE calling process_request(), so the client
+    // receives the ACK without waiting for heavy business logic (DB queries, etc.).
 
     // Route message to appropriate handler
     std::vector<response_slot_t> handler_responses;
@@ -235,7 +258,7 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         handler_responses = handle_ack_message(incoming_msg, request);
         break;
     case message_category::KEEPALIVE_MSG:
-        // Keepalive: ACK was already generated above, just reset the keepalive timer
+        // Keepalive: ACK was already sent immediately, just reset the keepalive timer
         std::cout << "[MSG] Keepalive from " << incoming_msg.source_id << std::endl;
         responses.push_back(make_reset_keepalive_timer(request.session_id));
         break;

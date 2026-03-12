@@ -6,6 +6,7 @@
 #include "ipc.hpp"
 #include <common/json_manager.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,7 +42,16 @@ class message_handler
     ~message_handler();
 
     /**
-     * Process a request slot and produce responses.
+     * Generate an immediate ACK for the request if applicable.
+     * This is a lightweight operation (JSON parse + ACK build, no DB access)
+     * and should be called and sent BEFORE process_request to avoid ACK timeouts.
+     * @return The ACK response slot, or std::nullopt if no ACK is needed.
+     */
+    std::optional<response_slot_t> generate_ack(const request_slot_t& request);
+
+    /**
+     * Process a request slot and produce responses (heavy business logic).
+     * ACK is NOT included — call generate_ack() separately before this.
      * @return vector of response commands to post back to the reactor via shared_queue.
      */
     std::vector<response_slot_t> process_request(const request_slot_t& request);

@@ -29,10 +29,19 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
 
     while (shm.wait_request(request))
     {
-        // Process the request
+        // 1. Send ACK immediately (lightweight — no DB access)
+        //    This ensures the client gets the ACK before the heavy business logic runs,
+        //    preventing ACK timeouts under high load.
+        auto ack = handler.generate_ack(request);
+        if (ack)
+        {
+            shm.push_response(*ack, response_efd);
+        }
+
+        // 2. Process the request (heavy business logic — DB queries, inventory, etc.)
         std::vector<response_slot_t> responses = handler.process_request(request);
 
-        // Push all responses back to the reactor
+        // 3. Push all remaining responses back to the reactor
         for (const auto& resp : responses)
         {
             shm.push_response(resp, response_efd);
