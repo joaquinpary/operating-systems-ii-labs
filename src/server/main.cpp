@@ -8,6 +8,8 @@
 #include "timer_manager.hpp"
 #include "worker.hpp"
 
+#include <common/logger.h>
+
 #include <csignal>
 #include <cstring>
 #include <iostream>
@@ -79,8 +81,17 @@ int main()
         }
 
         // ── PARENT: Reactor process ─────────────────────────────────────
-        std::cout << "[REACTOR] Reactor process PID " << getpid() << ", worker PID " << worker_pid << std::endl;
 
+        // Initialize logger for the reactor process
+        {
+            const char* log_dir = std::getenv("LOG_DIR");
+            if (!log_dir) log_dir = "logs/server";
+            logger_config_t log_cfg = {.max_file_size = 10 * 1024 * 1024, .max_backup_files = 5, .min_level = LOG_DEBUG};
+            snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_reactor.log", log_dir);
+            log_init(&log_cfg);
+        }
+
+        LOG_INFO_MSG("[REACTOR] pid=%d worker_pid=%d", getpid(), worker_pid);
         // Create signalfd for clean shutdown
         int sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
         if (sig_fd == -1)
@@ -103,7 +114,7 @@ int main()
             struct signalfd_siginfo info;
             if (read(sig_fd, &info, sizeof(info)) == sizeof(info))
             {
-                std::cout << "\n[REACTOR] Signal " << info.ssi_signo << " received, shutting down..." << std::endl;
+                LOG_INFO_MSG("[REACTOR] signal=%u shutting down", info.ssi_signo);
             }
             srv.stop();
             shm.signal_shutdown();
@@ -113,20 +124,18 @@ int main()
         // Start accepting connections
         srv.start();
 
-        std::cout << "[REACTOR] Server running. Waiting for connections..." << std::endl;
-
+        LOG_INFO_MSG("[REACTOR] Server running, waiting for connections");
         // Run the event loop (blocks until loop.stop())
         loop.run();
 
         // ── Cleanup ─────────────────────────────────────────────────────
-        std::cout << "[REACTOR] Event loop stopped, waiting for worker process..." << std::endl;
-
+        LOG_INFO_MSG("[REACTOR] Event loop stopped, waiting for worker");
         // Wait for worker process to exit
         int status;
         waitpid(worker_pid, &status, 0);
         if (WIFEXITED(status))
         {
-            std::cout << "[REACTOR] Worker exited with status " << WEXITSTATUS(status) << std::endl;
+            LOG_INFO_MSG("[REACTOR] Worker exited status=%d", WEXITSTATUS(status));
         }
 
         // Close signalfd and eventfd
@@ -136,11 +145,14 @@ int main()
         // Unlink shared memory
         shared_queue::unlink();
 
-        std::cout << "[REACTOR] Server shutdown complete." << std::endl;
+        LOG_INFO_MSG("[REACTOR] Shutdown complete");
+        log_close();
     }
     catch (const std::exception& ex)
     {
-        std::cerr << "Fatal error: " << ex.what() << '\n';
+        LOG_ERROR_MSG("[REACTOR] Fatal: %s", ex.what());
+        std::cerr << "Fatal: " << ex.what() << '\n';
+        log_close();
         return 1;
     }
 

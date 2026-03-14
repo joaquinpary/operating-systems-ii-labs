@@ -7,6 +7,10 @@
 #include "ipc.hpp"
 #include "message_handler.hpp"
 
+#include <common/json_manager.h>
+#include <common/logger.h>
+
+#include <cstring>
 #include <iostream>
 #include <thread>
 #include <unistd.h>
@@ -23,19 +27,34 @@
  */
 static void worker_thread_func(shared_queue& shm, message_handler& handler, int response_efd, int thread_id)
 {
-    std::cout << "[WORKER T" << thread_id << "] Thread started" << std::endl;
-
+    LOG_INFO_MSG("[T%d] Thread started", thread_id);
     request_slot_t request;
 
     while (shm.wait_request(request))
     {
+        // Deserialize once for logging (type, timestamp, source)
+        message_t log_msg;
+        bool deserialized = (deserialize_message_from_json(request.raw_json, &log_msg) == 0);
+
+        if (deserialized)
+        {
+            LOG_INFO_MSG("[T%d] IN type=%s ts=%s from=%s sess=%s", thread_id,
+                         log_msg.msg_type, log_msg.timestamp, log_msg.source_id, request.session_id);
+        }
+        else if (request.is_disconnect)
+        {
+            LOG_INFO_MSG("[T%d] IN disconnect user=%s sess=%s", thread_id, request.username, request.session_id);
+        }
+
         // 1. Send ACK immediately (lightweight — no DB access)
-        //    This ensures the client gets the ACK before the heavy business logic runs,
-        //    preventing ACK timeouts under high load.
         auto ack = handler.generate_ack(request);
         if (ack)
         {
             shm.push_response(*ack, response_efd);
+            if (deserialized)
+            {
+                LOG_DEBUG_MSG("[T%d] ACK pushed ts=%s -> sess=%s", thread_id, log_msg.timestamp, request.session_id);
+            }
         }
 
         // 2. Process the request (heavy business logic — DB queries, inventory, etc.)
@@ -45,16 +64,26 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
         for (const auto& resp : responses)
         {
             shm.push_response(resp, response_efd);
+            LOG_DEBUG_MSG("[T%d] OUT cmd=%u -> sess=%s", thread_id,
+                          static_cast<unsigned>(resp.command), resp.session_id);
         }
     }
 
-    std::cout << "[WORKER T" << thread_id << "] Thread exiting (shutdown signaled)" << std::endl;
+    LOG_INFO_MSG("[T%d] Thread exiting", thread_id);
 }
 
 void run_worker_process(int response_efd, const config::server_config& cfg)
 {
-    std::cout << "[WORKER] Worker process started (PID " << getpid() << ")" << std::endl;
+    // Initialize logger for the worker process (separate file from reactor)
+    {
+        const char* log_dir = std::getenv("LOG_DIR");
+        if (!log_dir) log_dir = "logs/server";
+        logger_config_t log_cfg = {.max_file_size = 10 * 1024 * 1024, .max_backup_files = 5, .min_level = LOG_DEBUG};
+        snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_worker.log", log_dir);
+        log_init(&log_cfg);
+    }
 
+    LOG_INFO_MSG("[WORKER] pid=%d started", getpid());
     // Open shared memory segment (created by reactor before fork)
     shared_queue shm = shared_queue::open();
 
@@ -67,7 +96,6 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
     message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout);
 
     // Spawn worker threads
-    /// Fallback thread count when hardware_concurrency() returns 0.
     static constexpr std::uint32_t DEFAULT_WORKER_THREADS = 4;
 
     std::uint32_t num_threads = cfg.worker_threads;
@@ -80,8 +108,7 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
         }
     }
 
-    std::cout << "[WORKER] Spawning " << num_threads << " worker threads" << std::endl;
-
+    LOG_INFO_MSG("[WORKER] Spawning %u threads", num_threads);
     std::vector<std::thread> threads;
     threads.reserve(num_threads);
 
@@ -90,11 +117,11 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
         threads.emplace_back(worker_thread_func, std::ref(shm), std::ref(handler), response_efd, static_cast<int>(i));
     }
 
-    // Wait for all threads to complete
     for (auto& t : threads)
     {
         t.join();
     }
 
-    std::cout << "[WORKER] All threads finished, worker process exiting" << std::endl;
+    LOG_INFO_MSG("[WORKER] All threads finished, exiting");
+    log_close();
 }

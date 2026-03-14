@@ -320,6 +320,9 @@ static void do_inventory_update(void)
 
     LOG_DEBUG_MSG("Keepalive message enqueued");
 
+    struct timespec jitter = {.tv_sec = rand() % 3, .tv_nsec = (long)(rand() % 1000) * 1000000L};
+    nanosleep(&jitter, NULL);
+
     inventory_item_t items[QUANTITY_ITEMS];
 
     if (get_inventory_snapshot(items) != 0)

@@ -61,8 +61,6 @@ connection_pool::connection_pool(const std::string& conn_string, size_t pool_siz
         throw std::invalid_argument(POOL_LOG_PREFIX "Pool size must be greater than 0");
     }
 
-    std::cout << POOL_LOG_PREFIX "Creating pool with " << pool_size << " connections..." << std::endl;
-
     for (size_t i = 0; i < pool_size; i++)
     {
         try
@@ -73,7 +71,6 @@ connection_pool::connection_pool(const std::string& conn_string, size_t pool_siz
                 throw std::runtime_error(POOL_LOG_PREFIX "Failed to open connection");
             }
             m_available.push(std::move(conn));
-            std::cout << POOL_LOG_PREFIX "Connection " << (i + 1) << "/" << pool_size << " created" << std::endl;
         }
         catch (const std::exception& ex)
         {
@@ -82,7 +79,6 @@ connection_pool::connection_pool(const std::string& conn_string, size_t pool_siz
         }
     }
 
-    std::cout << POOL_LOG_PREFIX "Pool ready with " << pool_size << " connections" << std::endl;
 }
 
 connection_pool::~connection_pool()
@@ -92,7 +88,6 @@ connection_pool::~connection_pool()
     {
         m_available.pop();
     }
-    std::cout << POOL_LOG_PREFIX "Pool destroyed" << std::endl;
 }
 
 connection_pool::connection_guard connection_pool::acquire()
@@ -103,9 +98,6 @@ connection_pool::connection_guard connection_pool::acquire()
 
     auto conn = std::move(m_available.front());
     m_available.pop();
-
-    std::cout << POOL_LOG_PREFIX "Connection acquired (" << m_available.size() << "/" << m_pool_size << " available)"
-              << std::endl;
 
     return connection_guard(*this, std::move(conn));
 }
@@ -135,8 +127,6 @@ void connection_pool::release(std::unique_ptr<pqxx::connection> conn)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_available.push(std::move(conn));
-        std::cout << POOL_LOG_PREFIX "Connection released (" << m_available.size() << "/" << m_pool_size
-                  << " available)" << std::endl;
     }
 
     m_cv.notify_one();

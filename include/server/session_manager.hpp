@@ -67,6 +67,7 @@ class session_manager
     void remove_session(const std::string& session_id);
     std::string get_client_type(const std::string& session_id) const;
     std::string find_session_by_username(const std::string& username) const;
+    bool has_session(const std::string& session_id) const;
 
     std::optional<posix_address> get_udp_endpoint(const std::string& session_id) const;
     void set_tcp_session(const std::string& session_id, std::weak_ptr<tcp_session> session);
@@ -74,6 +75,7 @@ class session_manager
   private:
     std::string make_udp_session_id(const posix_address& endpoint) const;
     std::unordered_map<std::string, session_info> m_sessions;
+    std::unordered_map<std::string, std::string> m_username_to_session; ///< Reverse index: username → session_id
     std::uint64_t m_session_counter;
 };
 

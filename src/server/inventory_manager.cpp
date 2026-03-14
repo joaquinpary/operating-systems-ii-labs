@@ -17,8 +17,6 @@ std::vector<stock_request_result> inventory_manager::handle_inventory_update(con
 {
     std::vector<stock_request_result> fulfilled_orders;
 
-    std::cout << "[INVENTORY_MANAGER] Handling inventory update from " << msg.source_id << std::endl;
-
     // Extract quantities from payload
     int quantities[6] = {0};
     extract_quantities_from_payload(msg.payload.inventory_update, quantities);
@@ -58,8 +56,6 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     result.warehouse_assigned = false;
     result.item_count = 0;
     result.requesting_hub_id = std::string(msg.source_id);
-
-    std::cout << "[INVENTORY_MANAGER] Handling stock request from hub " << msg.source_id << std::endl;
 
     // Extract quantities from payload
     int quantities[6] = {0};
@@ -106,8 +102,6 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
 
     if (warehouse_id.empty())
     {
-        std::cout << "[INVENTORY_MANAGER] No warehouse available, order " << transaction_id << " queued as PENDING"
-                  << std::endl;
         return result;
     }
 
@@ -118,8 +112,6 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     result.warehouse_assigned = true;
     result.assigned_warehouse_id = warehouse_id;
 
-    std::cout << "[INVENTORY_MANAGER] Assigned order " << transaction_id << " to warehouse " << warehouse_id
-              << " for hub " << msg.source_id << std::endl;
     return result;
 }
 
@@ -131,8 +123,6 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
     result.warehouse_assigned = false;
     result.item_count = 0;
     result.requesting_hub_id = ""; // empty = warehouse self-request
-
-    std::cout << "[INVENTORY_MANAGER] Handling replenish request from warehouse " << msg.source_id << std::endl;
 
     // Extract quantities from payload
     int quantities[6] = {0};
@@ -170,17 +160,11 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
     result.warehouse_assigned = true;
     result.assigned_warehouse_id = std::string(msg.source_id);
 
-    std::cout << "[INVENTORY_MANAGER] Authorized restock for warehouse " << msg.source_id << ", transaction "
-              << transaction_id << std::endl;
-
     return result;
 }
 
 int inventory_manager::handle_receipt_confirmation(const message_t& msg)
 {
-    std::cout << "[INVENTORY_MANAGER] Handling receipt confirmation from " << msg.source_id << " (" << msg.source_role
-              << ")" << std::endl;
-
     // The sender of the confirmation is the DESTINATION of the transaction
     // (hub confirms receiving stock, warehouse confirms receiving replenish)
     int transaction_id = find_transaction_id("", std::string(msg.source_id), "DISPATCHED");
@@ -208,8 +192,7 @@ int inventory_manager::handle_receipt_confirmation(const message_t& msg)
     // Mark transaction as COMPLETED
     complete_transaction(guard.get(), transaction_id, msg.timestamp);
 
-    std::cout << "[INVENTORY_MANAGER] Completed transaction " << transaction_id << " — stock added to " << msg.source_id
-              << std::endl;
+
     return 0;
 }
 
@@ -220,8 +203,6 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
     result.success = false;
     result.warehouse_assigned = false;
     result.item_count = 0;
-
-    std::cout << "[INVENTORY_MANAGER] Handling shipment notice from warehouse " << msg.source_id << std::endl;
 
     // Find the ASSIGNED transaction where this warehouse is the source
     int transaction_id = find_transaction_id(msg.source_id, "", "ASSIGNED");
@@ -280,9 +261,6 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
         }
     }
 
-    std::cout << "[INVENTORY_MANAGER] Transaction " << transaction_id
-              << " DISPATCHED — stock subtracted from warehouse " << msg.source_id
-              << ", hub destination: " << result.requesting_hub_id << std::endl;
 
     return result;
 }
@@ -290,9 +268,6 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
 std::vector<stock_request_result> inventory_manager::process_pending_orders(const std::string& warehouse_id)
 {
     std::vector<stock_request_result> fulfilled;
-
-    std::cout << "[INVENTORY_MANAGER] Processing pending orders after warehouse " << warehouse_id << " inventory update"
-              << std::endl;
 
     // Acquire a connection from the pool
     auto guard = m_pool.acquire();
@@ -305,8 +280,6 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
     {
         return fulfilled;
     }
-
-    std::cout << "[INVENTORY_MANAGER] Found " << count << " pending orders, checking first fulfillable" << std::endl;
 
     // Item names corresponding to item_ids 1-6
     const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
@@ -348,10 +321,6 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
             }
 
             fulfilled.push_back(result);
-
-            std::cout << "[INVENTORY_MANAGER] Fulfilled pending order " << pending[i].transaction_id
-                      << " with warehouse " << available_warehouse << " for hub " << pending[i].destination_id
-                      << std::endl;
 
             // Only fulfill ONE order per inventory update
             break;
@@ -438,6 +407,5 @@ bool inventory_manager::get_client_inventory_message(const std::string& client_i
         return false;
     }
 
-    std::cout << "[INVENTORY_MANAGER] Built inventory message for client " << client_id << std::endl;
     return true;
 }

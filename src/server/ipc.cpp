@@ -212,17 +212,15 @@ shared_queue& shared_queue::operator=(shared_queue&& other) noexcept
 
 bool shared_queue::push_request(const request_slot_t& slot)
 {
-    // Wait for a free slot (backpressure)
-    while (sem_wait(&m_header->sem_free_req_slots) == -1)
+    // Non-blocking try: never freeze the reactor event loop
+    if (sem_trywait(&m_header->sem_free_req_slots) == -1)
     {
-        if (errno == EINTR)
+        if (errno == EAGAIN)
         {
-            if (m_header->shutdown_flag.load(std::memory_order_acquire))
-            {
-                return false;
-            }
-            continue;
+            // Queue full — load shedding (caller drops the message)
+            return false;
         }
+        // Any other error (e.g. EINVAL)
         return false;
     }
 

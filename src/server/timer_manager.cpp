@@ -1,5 +1,7 @@
 #include "timer_manager.hpp"
 
+#include <common/logger.h>
+
 #include <cstring>
 #include <iostream>
 #include <sys/timerfd.h>
@@ -10,13 +12,14 @@ timer_manager::timer_manager(event_loop& loop) : m_loop(loop)
     m_timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
     if (m_timerfd == -1)
     {
-        std::cerr << "[TIMER_MANAGER] FATAL: timerfd_create failed: " << strerror(errno) << '\n';
+        std::cerr << "[TIMER] timerfd_create fail: " << strerror(errno) << '\n';
+        LOG_ERROR_MSG("[TIMER] timerfd_create fail: %s", strerror(errno));
         return;
     }
 
     m_loop.add_fd(m_timerfd, EPOLLIN, [this](std::uint32_t /*events*/) { on_timerfd_ready(); });
 
-    std::cout << "[TIMER_MANAGER] Initialized (single timerfd=" << m_timerfd << ")\n";
+    LOG_INFO_MSG("[TIMER] init timerfd=%d", m_timerfd);
 }
 
 timer_manager::~timer_manager()
@@ -30,7 +33,7 @@ timer_manager::~timer_manager()
         ::close(m_timerfd);
     }
 
-    std::cout << "[TIMER_MANAGER] Destroyed\n";
+    LOG_INFO_MSG("[TIMER] destroyed");
 }
 
 // ==================== INTERNAL HELPERS ====================
@@ -109,7 +112,8 @@ void timer_manager::rearm_timerfd()
     // One-shot (it_interval stays zero)
     if (timerfd_settime(m_timerfd, 0, &ts, nullptr) == -1)
     {
-        std::cerr << "[TIMER] timerfd_settime failed: " << strerror(errno) << '\n';
+        std::cerr << "[TIMER] settime fail: " << strerror(errno) << '\n';
+        LOG_ERROR_MSG("[TIMER] settime fail: %s", strerror(errno));
     }
 }
 
@@ -145,6 +149,11 @@ void timer_manager::on_timerfd_ready()
     // can further adjust the timerfd.
     rearm_timerfd();
 
+    if (!to_fire.empty())
+    {
+        LOG_DEBUG_MSG("[TIMER] fired %zu expired timers", to_fire.size());
+    }
+
     for (auto& cb : to_fire)
     {
         cb();
@@ -159,8 +168,7 @@ void timer_manager::start_ack_timer(const std::string& session_id, const std::st
     timer_key key{"ack", session_id, msg_timestamp};
     insert_timer(key, timeout_seconds, std::move(on_timeout));
 
-    std::cout << "[TIMER] Started ACK timer for session: " << session_id << ", message: " << msg_timestamp
-              << " (timeout: " << timeout_seconds << "s)\n";
+    LOG_INFO_MSG("[TIMER] +ACK sess=%s ts=%s timeout=%ds", session_id.c_str(), msg_timestamp.c_str(), timeout_seconds);
 }
 
 bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::string& msg_timestamp)
@@ -170,8 +178,7 @@ bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::s
 
     if (found)
     {
-        std::cout << "[TIMER] Cancelled ACK timer for session: " << session_id << ", message: " << msg_timestamp
-                  << '\n';
+        LOG_INFO_MSG("[TIMER] -ACK sess=%s ts=%s", session_id.c_str(), msg_timestamp.c_str());
     }
 
     return found;
@@ -192,8 +199,7 @@ void timer_manager::start_keepalive_timer(const std::string& session_id, int tim
     timer_key key{"keepalive", session_id, ""};
     insert_timer(key, timeout_seconds, on_timeout);
 
-    std::cout << "[TIMER] Started keepalive timer for session: " << session_id << " (timeout: " << timeout_seconds
-              << "s)\n";
+    LOG_INFO_MSG("[TIMER] +KA sess=%s timeout=%ds", session_id.c_str(), timeout_seconds);
 }
 
 void timer_manager::reset_keepalive_timer(const std::string& session_id)
@@ -213,7 +219,7 @@ void timer_manager::reset_keepalive_timer(const std::string& session_id)
     timer_key key{"keepalive", session_id, ""};
     insert_timer(key, timeout_it->second, cb_it->second);
 
-    std::cout << "[TIMER] Reset keepalive timer for session: " << session_id << " (" << timeout_it->second << "s)\n";
+    LOG_DEBUG_MSG("[TIMER] ~KA sess=%s reset=%ds", session_id.c_str(), timeout_it->second);
 }
 
 void timer_manager::cancel_keepalive_timer(const std::string& session_id)
@@ -221,7 +227,7 @@ void timer_manager::cancel_keepalive_timer(const std::string& session_id)
     timer_key key{"keepalive", session_id, ""};
     if (cancel_timer(key))
     {
-        std::cout << "[TIMER] Cancelled keepalive timer for session: " << session_id << '\n';
+        LOG_INFO_MSG("[TIMER] -KA sess=%s", session_id.c_str());
     }
     m_keepalive_timeouts.erase(session_id);
     m_keepalive_callbacks.erase(session_id);

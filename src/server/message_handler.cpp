@@ -1,5 +1,7 @@
 #include "message_handler.hpp"
 
+#include <common/logger.h>
+
 #include <cstring>
 #include <iostream>
 
@@ -210,7 +212,7 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         std::string username(request.username);
         if (!username.empty())
         {
-            std::cout << "[WORKER] Processing disconnect for " << username << std::endl;
+            LOG_INFO_MSG("[WORKER] disconnect user=%s", username.c_str());
             m_auth_module.deactivate_client(username);
         }
         return responses;
@@ -219,7 +221,7 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     // Reject messages from blacklisted sessions
     if (request.is_blacklisted)
     {
-        std::cout << "[WORKER] Ignoring message from blacklisted session: " << request.session_id << std::endl;
+        LOG_WARNING_MSG("[WORKER] blacklisted sess=%s", request.session_id);
         return responses;
     }
 
@@ -228,7 +230,8 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     int deserialize_result = deserialize_message_from_json(request.raw_json, &incoming_msg);
     if (deserialize_result != 0)
     {
-        std::cerr << "[WORKER] Failed to deserialize message from " << request.session_id << std::endl;
+        std::cerr << "[WORKER] deserialize fail sess=" << request.session_id << '\n';
+        LOG_ERROR_MSG("[WORKER] deserialize fail sess=%s", request.session_id);
         return responses;
     }
 
@@ -238,8 +241,7 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     // SECURITY: Only AUTH_REQUEST is allowed from unauthenticated sessions
     if (category != message_category::AUTH_REQUEST && !request.is_authenticated)
     {
-        std::cout << "[SECURITY] Rejected unauthenticated message type: " << incoming_msg.msg_type << " from "
-                  << request.session_id << std::endl;
+        LOG_WARNING_MSG("[SECURITY] rejected type=%s sess=%s (unauthenticated)", incoming_msg.msg_type, request.session_id);
         return responses;
     }
 
@@ -259,7 +261,7 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         break;
     case message_category::KEEPALIVE_MSG:
         // Keepalive: ACK was already sent immediately, just reset the keepalive timer
-        std::cout << "[MSG] Keepalive from " << incoming_msg.source_id << std::endl;
+        LOG_DEBUG_MSG("[MSG] keepalive from=%s sess=%s", incoming_msg.source_id, request.session_id);
         responses.push_back(make_reset_keepalive_timer(request.session_id));
         break;
     default:
@@ -291,7 +293,8 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
     const char* response_type = get_auth_response_type(msg.source_role);
     if (!response_type)
     {
-        std::cerr << "[WORKER] Invalid source role for auth request" << std::endl;
+        std::cerr << "[AUTH] bad source_role\n";
+        LOG_ERROR_MSG("[AUTH] bad source_role sess=%s", req.session_id);
         return responses;
     }
 
@@ -299,7 +302,8 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
                                                      static_cast<int>(auth_res.status_code));
     if (create_result != 0)
     {
-        std::cerr << "[WORKER] Failed to create auth response" << std::endl;
+        std::cerr << "[AUTH] create response fail\n";
+        LOG_ERROR_MSG("[AUTH] create response fail sess=%s", req.session_id);
         return responses;
     }
 
@@ -322,7 +326,7 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
         {
             responses.push_back(make_send_response(req.session_id, inv_msg));
             responses.push_back(make_start_timer(req.session_id, inv_msg));
-            std::cout << "[WORKER] Auth success + inventory queued for " << auth_res.username << std::endl;
+            LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(), req.session_id);
         }
 
         // 4. Start keepalive timer for this session
@@ -346,8 +350,7 @@ std::vector<response_slot_t> message_handler::handle_ack_message(const message_t
     std::string ack_for_timestamp(msg.payload.acknowledgment.ack_for_timestamp);
     int status_code = msg.payload.acknowledgment.status_code;
 
-    std::cout << "[ACK] Received ACK from " << msg.source_id << " for timestamp: " << ack_for_timestamp
-              << " (status: " << status_code << ")" << std::endl;
+    LOG_INFO_MSG("[ACK] from=%s ts=%s status=%d sess=%s", msg.source_id, ack_for_timestamp.c_str(), status_code, req.session_id);
 
     // Tell reactor to cancel the ACK timer
     responses.push_back(make_cancel_timer(req.session_id, ack_for_timestamp.c_str()));
@@ -362,7 +365,7 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 {
     std::vector<response_slot_t> responses;
 
-    std::cout << "[MSG] Processing message type: " << msg.msg_type << " from " << msg.source_id << std::endl;
+    LOG_INFO_MSG("[MSG] type=%s from=%s ts=%s sess=%s", msg.msg_type, msg.source_id, msg.timestamp, req.session_id);
 
     if (category == message_category::INV_UPDATE)
     {
@@ -376,14 +379,14 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                                                      fulfilled.item_count, NULL);
             if (create_result != 0)
             {
-                std::cerr << "[MSG] ERROR: Failed to create dispatch message for pending order "
-                          << fulfilled.transaction_id << std::endl;
+                std::cerr << "[MSG] dispatch create fail txn=" << fulfilled.transaction_id << '\n';
+                LOG_ERROR_MSG("[MSG] dispatch create fail txn=%d", fulfilled.transaction_id);
                 continue;
             }
 
             // Send to warehouse by username (reactor resolves session + starts ACK timer)
             responses.push_back(make_send_to_username(fulfilled.assigned_warehouse_id.c_str(), dispatch_msg));
-            std::cout << "[MSG] Dispatch queued for warehouse " << fulfilled.assigned_warehouse_id << std::endl;
+            LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(), fulfilled.transaction_id);
         }
     }
     else if (category == message_category::STOCK_REQ)
@@ -392,7 +395,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
         if (!stock_result.success)
         {
-            std::cerr << "[MSG] Failed to process stock request" << std::endl;
+            std::cerr << "[MSG] stock_request fail\n";
+            LOG_ERROR_MSG("[MSG] stock_request fail from=%s", msg.source_id);
             return responses;
         }
 
@@ -404,14 +408,13 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                                                      stock_result.items, stock_result.item_count, NULL);
             if (create_result != 0)
             {
-                std::cerr << "[MSG] ERROR: Failed to create dispatch message for warehouse "
-                          << stock_result.assigned_warehouse_id << std::endl;
+                std::cerr << "[MSG] dispatch create fail wh=" << stock_result.assigned_warehouse_id << '\n';
+                LOG_ERROR_MSG("[MSG] dispatch create fail wh=%s", stock_result.assigned_warehouse_id.c_str());
                 return responses;
             }
 
             responses.push_back(make_send_to_username(stock_result.assigned_warehouse_id.c_str(), dispatch_msg));
-            std::cout << "[MSG] Dispatch order queued for warehouse " << stock_result.assigned_warehouse_id
-                      << std::endl;
+            LOG_INFO_MSG("[MSG] stock_req dispatch -> wh=%s hub=%s", stock_result.assigned_warehouse_id.c_str(), stock_result.requesting_hub_id.c_str());
         }
     }
     else if (category == message_category::RECEIPT_CONFIRM)
@@ -432,13 +435,12 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             if (create_result == 0)
             {
                 responses.push_back(make_send_to_username(shipment_result.requesting_hub_id.c_str(), incoming_msg));
-                std::cout << "[MSG] Incoming stock notice queued for hub " << shipment_result.requesting_hub_id
-                          << std::endl;
+                LOG_INFO_MSG("[MSG] incoming_stock -> hub=%s", shipment_result.requesting_hub_id.c_str());
             }
             else
             {
-                std::cerr << "[MSG] ERROR: Failed to create incoming stock notice for hub "
-                          << shipment_result.requesting_hub_id << std::endl;
+                std::cerr << "[MSG] incoming_stock create fail hub=" << shipment_result.requesting_hub_id << '\n';
+                LOG_ERROR_MSG("[MSG] incoming_stock create fail hub=%s", shipment_result.requesting_hub_id.c_str());
             }
         }
     }
@@ -448,7 +450,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
         if (!replenish_result.success)
         {
-            std::cerr << "[MSG] Failed to process replenish request" << std::endl;
+            std::cerr << "[MSG] replenish fail\n";
+            LOG_ERROR_MSG("[MSG] replenish fail from=%s", msg.source_id);
             return responses;
         }
 
@@ -458,19 +461,19 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                                                  replenish_result.item_count, NULL);
         if (create_result != 0)
         {
-            std::cerr << "[MSG] ERROR: Failed to create restock notice" << std::endl;
+            std::cerr << "[MSG] restock create fail\n";
+            LOG_ERROR_MSG("[MSG] restock create fail wh=%s", replenish_result.assigned_warehouse_id.c_str());
             return responses;
         }
 
         // Restock goes back to the same session that sent the replenish request
         responses.push_back(make_send_response(req.session_id, restock_msg));
         responses.push_back(make_start_timer(req.session_id, restock_msg));
-        std::cout << "[MSG] Restock notice queued for warehouse " << replenish_result.assigned_warehouse_id
-                  << std::endl;
+        LOG_INFO_MSG("[MSG] restock -> wh=%s sess=%s", replenish_result.assigned_warehouse_id.c_str(), req.session_id);
     }
     else
     {
-        std::cout << "[MSG] Received message of unhandled type: " << msg.msg_type << std::endl;
+        LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
     }
 
     return responses;
