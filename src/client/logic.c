@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "logic.h"
 #include "connection.h"
+#include "timers.h"
 #include "emergency_detector.h"
 #include "json_manager.h"
 #include "logger.h"
@@ -19,17 +20,6 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-
-// Configuration constants for business logic
-#define INVENTORY_UPDATE_INTERVAL_SEC 60 // Periodic inventory reporting
-#define CONSUME_STOCK_MIN_SEC 10          // Minimum seconds between stock consumption
-#define CONSUME_STOCK_MAX_SEC 30         // Maximum seconds between stock consumption
-#define CONSUME_MIN_AMOUNT 1             // Minimum units to consume per item
-#define CONSUME_MAX_AMOUNT 20            // Maximum units to consume per item
-#define LOW_STOCK_THRESHOLD 20           // Threshold to trigger stock request
-#define CRITICAL_STOCK_THRESHOLD 5       // Threshold to disable consumption
-#define MAX_STOCK_PER_ITEM 100           // Maximum inventory capacity per item
-#define EMERGENCY_CHECK_INTERVAL_SEC 30  // Interval for emergency evaluation
 
 static client_context* logic_ctx = NULL;
 
@@ -128,9 +118,26 @@ static void do_emergency_check(void)
 
 /**
  * @brief Generate random interval for stock consumption
- * @return Random seconds between CONSUME_STOCK_MIN_SEC and CONSUME_STOCK_MAX_SEC
+ * @return Random milliseconds between configured consume min and max
  */
 static int get_random_consume_interval(void)
+{
+    const timer_config_t* cfg = get_timer_config();
+    static int seeded = 0;
+    if (!seeded)
+    {
+        srand(time(NULL) ^ getpid());
+        seeded = 1;
+    }
+    return cfg->consume_stock_min_ms + (rand() % (cfg->consume_stock_max_ms - cfg->consume_stock_min_ms + 1));
+}
+
+/**
+ * @brief Generate random initial phase for periodic timers
+ * @param interval_ms Periodic interval in milliseconds
+ * @return Random milliseconds in [interval_ms/2, interval_ms]
+ */
+static int get_random_phase_offset(int interval_ms)
 {
     static int seeded = 0;
     if (!seeded)
@@ -138,16 +145,24 @@ static int get_random_consume_interval(void)
         srand(time(NULL) ^ getpid());
         seeded = 1;
     }
-    return CONSUME_STOCK_MIN_SEC + (rand() % (CONSUME_STOCK_MAX_SEC - CONSUME_STOCK_MIN_SEC + 1));
+
+    int min_offset = interval_ms / 2;
+    if (min_offset <= 0)
+    {
+        min_offset = 1;
+    }
+
+    return min_offset + (rand() % (interval_ms - min_offset + 1));
 }
 
 /**
  * @brief Generate random consumption amount for an item
- * @return Random units between CONSUME_MIN_AMOUNT and CONSUME_MAX_AMOUNT
+ * @return Random units between configured consume min/max amount
  */
 static int get_random_consume_amount(void)
 {
-    return CONSUME_MIN_AMOUNT + (rand() % (CONSUME_MAX_AMOUNT - CONSUME_MIN_AMOUNT + 1));
+    const timer_config_t* cfg = get_timer_config();
+    return cfg->consume_min_amount + (rand() % (cfg->consume_max_amount - cfg->consume_min_amount + 1));
 }
 
 static void* ack_timeout_checker_thread(void* arg)
@@ -320,9 +335,6 @@ static void do_inventory_update(void)
 
     LOG_DEBUG_MSG("Keepalive message enqueued");
 
-    struct timespec jitter = {.tv_sec = rand() % 3, .tv_nsec = (long)(rand() % 1000) * 1000000L};
-    nanosleep(&jitter, NULL);
-
     inventory_item_t items[QUANTITY_ITEMS];
 
     if (get_inventory_snapshot(items) != 0)
@@ -413,12 +425,13 @@ static void do_consume_stock(void)
  * @brief Check for low stock levels and request replenishment
  *
  * Scans inventory for items below threshold (20 units) and sends a STOCK_REQUEST
- * message to the server if low stock is detected. Requests up to MAX_STOCK_PER_ITEM.
+ * message to the server if low stock is detected. Requests up to configured max stock.
  *
  * @return 1 if all items are critically low (need to pause consumption), 0 otherwise
  */
 static int do_check_low_stock(void)
 {
+    const timer_config_t* cfg = get_timer_config();
     shared_data_t* shared_data = get_shared_data();
 
     // Warehouses replenish only through dispatch orders from the server,
@@ -433,8 +446,8 @@ static int do_check_low_stock(void)
     int requested_item_indices[QUANTITY_ITEMS];
     int critically_low_count = 0;
 
-    int low_count = get_low_stock_report(LOW_STOCK_THRESHOLD, CRITICAL_STOCK_THRESHOLD, MAX_STOCK_PER_ITEM, low_items,
-                                         requested_item_indices, &critically_low_count);
+    int low_count = get_low_stock_report(cfg->low_stock_threshold, cfg->critical_stock_threshold, cfg->max_stock_per_item,
+                                         low_items, requested_item_indices, &critically_low_count);
     if (low_count < 0)
     {
         LOG_ERROR_MSG("Failed to evaluate low stock report");
@@ -494,6 +507,7 @@ static int do_check_low_stock(void)
 
 static int child_logic_process(void)
 {
+    const timer_config_t* cfg = get_timer_config();
     shared_data_t* shared_data = get_shared_data();
 
     LOG_INFO_MSG("Business logic process started (PID: %d)", getpid());
@@ -529,9 +543,11 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure inventory update timer (60 seconds, repeating)
-    struct itimerspec inventory_spec = {.it_interval = {.tv_sec = INVENTORY_UPDATE_INTERVAL_SEC, .tv_nsec = 0},
-                                        .it_value = {.tv_sec = INVENTORY_UPDATE_INTERVAL_SEC, .tv_nsec = 0}};
+    // Configure inventory update timer with random initial phase offset
+    int inventory_phase_offset = get_random_phase_offset(cfg->inventory_update_interval_ms);
+    struct itimerspec inventory_spec = ms_to_itimerspec(inventory_phase_offset);
+    inventory_spec.it_interval.tv_sec = cfg->inventory_update_interval_ms / 1000;
+    inventory_spec.it_interval.tv_nsec = (long)(cfg->inventory_update_interval_ms % 1000) * 1000000L;
     if (timerfd_settime(inventory_timer_fd, 0, &inventory_spec, NULL) == -1)
     {
         LOG_ERROR_MSG("Failed to set inventory timer: %s", strerror(errno));
@@ -540,10 +556,9 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure stock consumption timer (random interval between 2-10 seconds, one-shot)
+    // Configure stock consumption timer (random interval, one-shot)
     int consume_interval = get_random_consume_interval();
-    struct itimerspec consume_spec = {.it_interval = {.tv_sec = 0, .tv_nsec = 0}, // One-shot timer (no repeat)
-                                      .it_value = {.tv_sec = consume_interval, .tv_nsec = 0}};
+    struct itimerspec consume_spec = ms_to_itimerspec(consume_interval);
     if (timerfd_settime(consume_timer_fd, 0, &consume_spec, NULL) == -1)
     {
         LOG_ERROR_MSG("Failed to set consume timer: %s", strerror(errno));
@@ -553,9 +568,11 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure emergency check timer (30 seconds, repeating)
-    struct itimerspec emergency_spec = {.it_interval = {.tv_sec = EMERGENCY_CHECK_INTERVAL_SEC, .tv_nsec = 0},
-                                        .it_value = {.tv_sec = EMERGENCY_CHECK_INTERVAL_SEC, .tv_nsec = 0}};
+    // Configure emergency check timer with random initial phase offset
+    int emergency_phase_offset = get_random_phase_offset(cfg->emergency_check_interval_ms);
+    struct itimerspec emergency_spec = ms_to_itimerspec(emergency_phase_offset);
+    emergency_spec.it_interval.tv_sec = cfg->emergency_check_interval_ms / 1000;
+    emergency_spec.it_interval.tv_nsec = (long)(cfg->emergency_check_interval_ms % 1000) * 1000000L;
     if (timerfd_settime(emergency_timer_fd, 0, &emergency_spec, NULL) == -1)
     {
         LOG_ERROR_MSG("Failed to set emergency timer: %s", strerror(errno));
@@ -565,9 +582,11 @@ static int child_logic_process(void)
         return -1;
     }
 
-    LOG_INFO_MSG("Timers configured: inventory=%ds, consume=random(%d-%ds), first=%ds, emergency=%ds",
-                 INVENTORY_UPDATE_INTERVAL_SEC, CONSUME_STOCK_MIN_SEC, CONSUME_STOCK_MAX_SEC, consume_interval,
-                 EMERGENCY_CHECK_INTERVAL_SEC);
+    LOG_INFO_MSG(
+        "Timers configured: inventory=%dms (first=%dms), consume=random(%d-%dms, first=%dms), emergency=%dms "
+        "(first=%dms)",
+        cfg->inventory_update_interval_ms, inventory_phase_offset, cfg->consume_stock_min_ms, cfg->consume_stock_max_ms,
+        consume_interval, cfg->emergency_check_interval_ms, emergency_phase_offset);
 
     // Event loop with select()
     int maxfd = inventory_timer_fd;
@@ -584,13 +603,12 @@ static int child_logic_process(void)
         {
             shared_data->inventory_updated = 0; // Reset flag
 
-            int items_with_stock = count_items_above_threshold(5);
+            int items_with_stock = count_items_above_threshold(cfg->critical_stock_threshold);
 
             if (items_with_stock > 0)
             {
                 int next_interval = get_random_consume_interval();
-                struct itimerspec resume_spec = {.it_interval = {.tv_sec = 0, .tv_nsec = 0},
-                                                 .it_value = {.tv_sec = next_interval, .tv_nsec = 0}};
+                struct itimerspec resume_spec = ms_to_itimerspec(next_interval);
 
                 if (timerfd_settime(consume_timer_fd, 0, &resume_spec, NULL) == -1)
                 {
@@ -599,7 +617,7 @@ static int child_logic_process(void)
                 else
                 {
                     consume_timer_active = 1;
-                    LOG_INFO_MSG("Consume timer reactivated after inventory update (next in %ds)", next_interval);
+                    LOG_INFO_MSG("Consume timer reactivated after inventory update (next in %dms)", next_interval);
                 }
             }
         }
@@ -657,8 +675,7 @@ static int child_logic_process(void)
                         if (all_low)
                         {
                             // Disable consume timer until stock arrives
-                            struct itimerspec disable_spec = {.it_interval = {.tv_sec = 0, .tv_nsec = 0},
-                                                              .it_value = {.tv_sec = 0, .tv_nsec = 0}};
+                            struct itimerspec disable_spec = ms_to_itimerspec(0);
 
                             if (timerfd_settime(consume_timer_fd, 0, &disable_spec, NULL) == -1)
                             {
@@ -674,8 +691,7 @@ static int child_logic_process(void)
                         {
                             // Reconfigure timer with new random interval (one-shot)
                             int next_interval = get_random_consume_interval();
-                            struct itimerspec new_consume_spec = {.it_interval = {.tv_sec = 0, .tv_nsec = 0},
-                                                                  .it_value = {.tv_sec = next_interval, .tv_nsec = 0}};
+                            struct itimerspec new_consume_spec = ms_to_itimerspec(next_interval);
 
                             if (timerfd_settime(consume_timer_fd, 0, &new_consume_spec, NULL) == -1)
                             {
@@ -683,7 +699,7 @@ static int child_logic_process(void)
                             }
                             else
                             {
-                                LOG_DEBUG_MSG("Next consume in %d seconds", next_interval);
+                                LOG_DEBUG_MSG("Next consume in %dms", next_interval);
                             }
                         }
                     }

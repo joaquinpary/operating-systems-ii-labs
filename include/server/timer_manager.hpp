@@ -50,9 +50,9 @@ class timer_manager
     /// sub_key: msg_timestamp for ACK timers, empty for keepalive.
     struct timer_key
     {
-        std::string type;     // "ack" or "keepalive"
+        std::string type; // "ack" or "keepalive"
         std::string session;
-        std::string sub_key;  // msg_timestamp for ACK, "" for keepalive
+        std::string sub_key; // msg_timestamp for ACK, "" for keepalive
 
         bool operator==(const timer_key& o) const
         {
@@ -60,8 +60,10 @@ class timer_manager
         }
         bool operator<(const timer_key& o) const
         {
-            if (type != o.type) return type < o.type;
-            if (session != o.session) return session < o.session;
+            if (type != o.type)
+                return type < o.type;
+            if (session != o.session)
+                return session < o.session;
             return sub_key < o.sub_key;
         }
     };

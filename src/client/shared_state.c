@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "timers.h"
 #include "shared_state.h"
 #include "json_manager.h"
 #include "logger.h"
@@ -23,6 +24,13 @@ static sem_t* message_available_sem = NULL;
 static char shm_name[IPC_NAME_BUFFER_SIZE];
 static char inventory_sem_name[IPC_NAME_BUFFER_SIZE];
 static char message_sem_name[IPC_NAME_BUFFER_SIZE];
+
+static long elapsed_ms(const struct timespec* start, const struct timespec* end)
+{
+    long sec_ms = (long)(end->tv_sec - start->tv_sec) * 1000L;
+    long nsec_ms = (long)(end->tv_nsec - start->tv_nsec) / 1000000L;
+    return sec_ms + nsec_ms;
+}
 
 int ipc_init(const char* client_id)
 {
@@ -487,6 +495,13 @@ void wake_sender_thread(void)
 
 int add_pending_ack(const char* msg_id, const char* msg_type, const char* message_json)
 {
+    const timer_config_t* cfg = get_timer_config();
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        return -1;
+    }
+
     sem_wait(inventory_sem);
 
     for (int i = 0; i < MAX_PENDING_ACKS; i++)
@@ -494,10 +509,10 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
         if (shared_data->pending_acks[i].active && strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0 &&
             strcmp(shared_data->pending_acks[i].msg_type, msg_type) == 0)
         {
-            shared_data->pending_acks[i].send_time = time(NULL);
+            shared_data->pending_acks[i].send_time = now;
             sem_post(inventory_sem);
             printf("[ACK_TRACK] Updated send_time for existing msg_id: %s, type: %s (retry %d/%d)\n", msg_id, msg_type,
-                   shared_data->pending_acks[i].retry_count, MAX_RETRIES);
+                   shared_data->pending_acks[i].retry_count, cfg->max_retries);
             return 0;
         }
     }
@@ -507,7 +522,7 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
         if (!shared_data->pending_acks[i].active)
         {
             shared_data->pending_acks[i].active = 1;
-            shared_data->pending_acks[i].send_time = time(NULL);
+            shared_data->pending_acks[i].send_time = now;
             shared_data->pending_acks[i].retry_count = 0;
             strncpy(shared_data->pending_acks[i].msg_id, msg_id, sizeof(shared_data->pending_acks[i].msg_id) - 1);
             strncpy(shared_data->pending_acks[i].msg_type, msg_type, sizeof(shared_data->pending_acks[i].msg_type) - 1);
@@ -545,7 +560,13 @@ int remove_pending_ack(const char* msg_id)
 
 int check_ack_timeouts(void)
 {
-    time_t now = time(NULL);
+    const timer_config_t* cfg = get_timer_config();
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        return -1;
+    }
+
     int needs_retransmission = 0;
 
     sem_wait(inventory_sem);
@@ -554,22 +575,23 @@ int check_ack_timeouts(void)
     {
         if (shared_data->pending_acks[i].active)
         {
-            time_t elapsed = now - shared_data->pending_acks[i].send_time;
-            if (elapsed >= ACK_TIMEOUT_SECONDS)
+            long elapsed = elapsed_ms(&shared_data->pending_acks[i].send_time, &now);
+            if (elapsed >= cfg->ack_timeout_ms)
             {
                 shared_data->pending_acks[i].retry_count++;
 
-                if (shared_data->pending_acks[i].retry_count >= MAX_RETRIES)
+                if (shared_data->pending_acks[i].retry_count >= cfg->max_retries)
                 {
                     fprintf(stderr, "[ACK_TRACK] MAX RETRIES (%d) reached for msg_id: %s - Disconnecting\n",
-                            MAX_RETRIES, shared_data->pending_acks[i].msg_id);
+                            cfg->max_retries, shared_data->pending_acks[i].msg_id);
                     shared_data->ack_timeout_occurred = 1;
                     sem_post(inventory_sem);
                     return -1; // Signal disconnection
                 }
 
-                fprintf(stderr, "[ACK_TRACK] TIMEOUT! No ACK for msg_id: %s (retry %d/%d)\n",
-                        shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count, MAX_RETRIES);
+                fprintf(stderr, "[ACK_TRACK] TIMEOUT! No ACK for msg_id: %s (retry %d/%d, timeout=%dms)\n",
+                        shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count,
+                        cfg->max_retries, cfg->ack_timeout_ms);
 
                 shared_data->pending_acks[i].send_time = now;
                 needs_retransmission = 1;

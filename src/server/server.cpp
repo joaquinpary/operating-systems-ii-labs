@@ -48,7 +48,8 @@ void tcp_session::notify_disconnect()
     std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
     if (!m_shm.push_request(req))
     {
-        LOG_WARNING_MSG("[TCP] IPC queue full, disconnect dropped user=%s sess=%s", info->username.c_str(), m_session_id.c_str());
+        LOG_WARNING_MSG("[TCP] IPC queue full, disconnect dropped user=%s sess=%s", info->username.c_str(),
+                        m_session_id.c_str());
     }
 
     LOG_INFO_MSG("[TCP] disconnect user=%s sess=%s", info->username.c_str(), m_session_id.c_str());
@@ -404,8 +405,8 @@ void server::start()
     // Register eventfd for worker → reactor responses
     m_loop.add_fd(m_response_efd, EPOLLIN, [this](std::uint32_t /*events*/) { on_response_ready(); });
 
-    LOG_INFO_MSG("[SERVER] started tcp4=%s tcp6=%s udp port=%u",
-                 m_config.ip_v4.c_str(), m_config.ip_v6.c_str(), m_config.network_port);
+    LOG_INFO_MSG("[SERVER] started tcp4=%s tcp6=%s udp port=%u", m_config.ip_v4.c_str(), m_config.ip_v6.c_str(),
+                 m_config.network_port);
 }
 
 void server::stop()
@@ -570,7 +571,8 @@ void server::dispatch_response(const response_slot_t& resp)
                 [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
                     handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
                 });
-            LOG_INFO_MSG("[DISPATCH] SEND+ACK_TIMER sess=%s ts=%s timeout=%u", target_session.c_str(), timer_key.c_str(), timeout);
+            LOG_INFO_MSG("[DISPATCH] SEND+ACK_TIMER sess=%s ts=%s timeout=%u", target_session.c_str(),
+                         timer_key.c_str(), timeout);
         }
         break;
     }
@@ -665,15 +667,15 @@ void server::handle_ack_timeout(const std::string& session_id, const std::string
 
     if (retry_count >= max_retries - 1)
     {
-        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u blacklisting",
-                        session_id.c_str(), timer_key.c_str(), max_retries);
+        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u blacklisting", session_id.c_str(),
+                        timer_key.c_str(), max_retries);
         m_timer_manager->clear_session_timers(session_id);
         m_session_manager->blacklist_session(session_id);
         return;
     }
 
-    LOG_WARNING_MSG("[ACK_TIMEOUT] sess=%s ts=%s retry=%u/%u resending",
-                    session_id.c_str(), timer_key.c_str(), retry_count + 1, max_retries);
+    LOG_WARNING_MSG("[ACK_TIMEOUT] sess=%s ts=%s retry=%u/%u resending", session_id.c_str(), timer_key.c_str(),
+                    retry_count + 1, max_retries);
     // Resend
     send_to_session(session_id, payload);
 

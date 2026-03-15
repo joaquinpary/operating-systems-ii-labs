@@ -1,4 +1,5 @@
 #include "client.h"
+#include "timers.h"
 #include "connection.h"
 #include "logger.h"
 #include "logic.h"
@@ -198,6 +199,8 @@ int run_client(const char* config_path)
         fprintf(stderr, "Failed to initialize logger for '%s'\n", config_path);
         return 1;
     }
+
+    load_timer_config();
 
     if (parse_conf(config_path, &config, &creds) != 0)
     {

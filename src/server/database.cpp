@@ -8,7 +8,8 @@
 #include <stdexcept>
 
 #define DEFAULT_DB_PORT 5432
-#define INITIAL_STOCK 100
+#define INITIAL_STOCK_HUB 100
+#define INITIAL_STOCK_WAREHOUSE 500
 
 namespace
 {
@@ -687,10 +688,11 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
         return -1;
     }
 
-    // Initialize to max stock (default for clients with no inventory row — full stock on first run)
+    // Initialize to default stock based on role (warehouse gets more stock than hub)
+    int initial_stock = (client_type == "WAREHOUSE") ? INITIAL_STOCK_WAREHOUSE : INITIAL_STOCK_HUB;
     for (int i = 0; i < 6; i++)
     {
-        quantities_out[i] = INITIAL_STOCK;
+        quantities_out[i] = initial_stock;
     }
 
     try
@@ -705,9 +707,9 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
             std::string insert_sql =
                 "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
                 "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
-            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, INITIAL_STOCK});
+            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, initial_stock});
             txn.commit();
-            // quantities_out already initialized to INITIAL_STOCK above
+            // quantities_out already initialized to initial_stock above
             return 0;
         }
 

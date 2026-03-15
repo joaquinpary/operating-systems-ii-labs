@@ -79,7 +79,9 @@ bool timer_manager::cancel_timer(const timer_key& key)
 
 void timer_manager::rearm_timerfd()
 {
-    struct itimerspec ts{};
+    struct itimerspec ts
+    {
+    };
 
     if (m_heap.empty())
     {

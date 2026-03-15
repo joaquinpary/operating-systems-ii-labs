@@ -1,14 +1,27 @@
 #include "message_handler.h"
+#include "timers.h"
 #include "json_manager.h"
 #include "logger.h"
 #include "shared_state.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
-// Thresholds for warehouse replenishment after dispatch
-#define LOW_STOCK_THRESHOLD 20
-#define CRITICAL_STOCK_THRESHOLD 5
-#define MAX_STOCK_PER_ITEM 100
+static void random_response_delay(void)
+{
+    const timer_config_t* cfg = get_timer_config();
+    static int seeded = 0;
+    if (!seeded)
+    {
+        srand((unsigned)(time(NULL) ^ getpid()));
+        seeded = 1;
+    }
+    int delay_ms = cfg->response_delay_min_ms + (rand() % (cfg->response_delay_max_ms - cfg->response_delay_min_ms + 1));
+    struct timespec ts = {0, (long)delay_ms * 1000000L};
+    nanosleep(&ts, NULL);
+}
 
 /**
  * @brief Helper function to create and enqueue an ACK message
@@ -105,6 +118,9 @@ int handle_server_message(const message_t* msg)
         }
         LOG_DEBUG_MSG("ACK sent for dispatch order");
 
+        // Delay before processing dispatch to avoid burst traffic
+        random_response_delay();
+
         // Reduce inventory
         const payload_order_stock* order = &msg->payload.order_stock;
         if (modify_inventory(order->items, INVENTORY_REDUCE) != 0)
@@ -132,13 +148,17 @@ int handle_server_message(const message_t* msg)
         }
         LOG_INFO_MSG("Shipment notice sent, dispatching to HUB %s", msg->target_id);
 
+        // Delay before checking replenishment to avoid burst traffic
+        random_response_delay();
+
         // Check if dispatch left warehouse below stock threshold
         inventory_item_t low_items[QUANTITY_ITEMS];
         int low_indices[QUANTITY_ITEMS];
         int critical_count = 0;
 
-        int low_count = get_low_stock_report(LOW_STOCK_THRESHOLD, CRITICAL_STOCK_THRESHOLD, MAX_STOCK_PER_ITEM,
-                                             low_items, low_indices, &critical_count);
+        const timer_config_t* cfg = get_timer_config();
+        int low_count = get_low_stock_report(cfg->low_stock_threshold, cfg->critical_stock_threshold,
+                             cfg->max_stock_per_item, low_items, low_indices, &critical_count);
 
         if (low_count > 0)
         {
@@ -199,6 +219,9 @@ int handle_server_message(const message_t* msg)
         log_inventory_snapshot("RESTOCK recv");
 
         clear_pending_stock_requests(restock->items, QUANTITY_ITEMS);
+
+        // Delay before sending receipt confirmation to avoid burst traffic
+        random_response_delay();
 
         // Send receipt confirmation (role-specific message type)
         message_t receipt_msg;

@@ -78,7 +78,6 @@ connection_pool::connection_pool(const std::string& conn_string, size_t pool_siz
             throw;
         }
     }
-
 }
 
 connection_pool::~connection_pool()

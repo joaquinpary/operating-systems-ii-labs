@@ -241,7 +241,8 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     // SECURITY: Only AUTH_REQUEST is allowed from unauthenticated sessions
     if (category != message_category::AUTH_REQUEST && !request.is_authenticated)
     {
-        LOG_WARNING_MSG("[SECURITY] rejected type=%s sess=%s (unauthenticated)", incoming_msg.msg_type, request.session_id);
+        LOG_WARNING_MSG("[SECURITY] rejected type=%s sess=%s (unauthenticated)", incoming_msg.msg_type,
+                        request.session_id);
         return responses;
     }
 
@@ -326,7 +327,8 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
         {
             responses.push_back(make_send_response(req.session_id, inv_msg));
             responses.push_back(make_start_timer(req.session_id, inv_msg));
-            LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(), req.session_id);
+            LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
+                         req.session_id);
         }
 
         // 4. Start keepalive timer for this session
@@ -350,7 +352,8 @@ std::vector<response_slot_t> message_handler::handle_ack_message(const message_t
     std::string ack_for_timestamp(msg.payload.acknowledgment.ack_for_timestamp);
     int status_code = msg.payload.acknowledgment.status_code;
 
-    LOG_INFO_MSG("[ACK] from=%s ts=%s status=%d sess=%s", msg.source_id, ack_for_timestamp.c_str(), status_code, req.session_id);
+    LOG_INFO_MSG("[ACK] from=%s ts=%s status=%d sess=%s", msg.source_id, ack_for_timestamp.c_str(), status_code,
+                 req.session_id);
 
     // Tell reactor to cancel the ACK timer
     responses.push_back(make_cancel_timer(req.session_id, ack_for_timestamp.c_str()));
@@ -386,7 +389,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
             // Send to warehouse by username (reactor resolves session + starts ACK timer)
             responses.push_back(make_send_to_username(fulfilled.assigned_warehouse_id.c_str(), dispatch_msg));
-            LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(), fulfilled.transaction_id);
+            LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(),
+                         fulfilled.transaction_id);
         }
     }
     else if (category == message_category::STOCK_REQ)
@@ -414,7 +418,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             }
 
             responses.push_back(make_send_to_username(stock_result.assigned_warehouse_id.c_str(), dispatch_msg));
-            LOG_INFO_MSG("[MSG] stock_req dispatch -> wh=%s hub=%s", stock_result.assigned_warehouse_id.c_str(), stock_result.requesting_hub_id.c_str());
+            LOG_INFO_MSG("[MSG] stock_req dispatch -> wh=%s hub=%s", stock_result.assigned_warehouse_id.c_str(),
+                         stock_result.requesting_hub_id.c_str());
         }
     }
     else if (category == message_category::RECEIPT_CONFIRM)

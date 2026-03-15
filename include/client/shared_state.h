@@ -9,15 +9,13 @@
 
 // Configuration constants
 #define MAX_PENDING_ACKS 10
-#define ACK_TIMEOUT_SECONDS 5
-#define MAX_RETRIES 3
 
 // ==================== DATA STRUCTURES ====================
 
 // Structure to track pending ACKs
 typedef struct
 {
-    time_t send_time;
+    struct timespec send_time;
     char msg_id[TIMESTAMP_SIZE];
     char msg_type[MESSAGE_TYPE_SIZE];
     char message_json[BUFFER_SIZE];

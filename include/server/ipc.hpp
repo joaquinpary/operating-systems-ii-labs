@@ -115,8 +115,8 @@ struct shm_header_t
     std::uint32_t resp_capacity;
 
     // Synchronization — request ring
-    sem_t sem_requests;         // signaled when a request is available
-    sem_t sem_free_req_slots;   // signaled when a request slot is freed (backpressure)
+    sem_t sem_requests;       // signaled when a request is available
+    sem_t sem_free_req_slots; // signaled when a request slot is freed (backpressure)
 
     // Synchronization — response ring
     sem_t sem_responses;        // signaled when a response is available
