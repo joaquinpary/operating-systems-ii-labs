@@ -1,10 +1,11 @@
 #include "inventory_manager.hpp"
-#include "mem_store.hpp"
+#include "connection_pool.hpp"
+#include "database.hpp"
 
 #include <cstring>
 #include <iostream>
 
-inventory_manager::inventory_manager(mem_store& store) : m_store(store)
+inventory_manager::inventory_manager(connection_pool& pool) : m_pool(pool)
 {
 }
 
@@ -20,8 +21,13 @@ std::vector<stock_request_result> inventory_manager::handle_inventory_update(con
     int quantities[6] = {0};
     extract_quantities_from_payload(msg.payload.inventory_update, quantities);
 
-    // Update client inventory via mem_store (cache + DB write-through)
-    m_store.update_inventory(msg.source_id, msg.source_role, quantities, msg.timestamp);
+    // Single acquire + transaction for the update
+    {
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+        update_client_inventory(txn, msg.source_id, msg.source_role, quantities, msg.timestamp);
+        txn.commit();
+    }
 
     // If warehouse updated inventory, try to fulfill ONE pending order
     if (strcmp(msg.source_role, WAREHOUSE) == 0)
@@ -59,43 +65,50 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
         }
     }
 
-    // Subtract requested quantities from the hub's inventory immediately.
-    // A stock request implies the hub already consumed these items internally,
-    // so we reflect it now instead of waiting for the next inventory update.
-    if (m_store.adjust_inventory(std::string(msg.source_id), quantities, false) != 0)
+    // ONE acquire, ONE transaction for all DB operations
+    try
     {
-        std::cerr << "[INVENTORY_MANAGER] Failed to subtract stock-request quantities from hub " << msg.source_id
-                  << std::endl;
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+
+        // Subtract requested quantities from the hub's inventory immediately
+        adjust_client_inventory(txn, std::string(msg.source_id), quantities, false);
+
+        // Create transaction record
+        int transaction_id =
+            create_transaction(txn, "STOCK_REQUEST", msg.source_id, msg.source_role, quantities, msg.timestamp);
+
+        if (transaction_id < 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to create stock request transaction for hub " << msg.source_id
+                      << std::endl;
+            // txn auto-aborts on destruction
+            return result;
+        }
+
+        result.transaction_id = transaction_id;
+        result.success = true;
+
+        // Try to find a warehouse with sufficient stock
+        std::string warehouse_id = get_warehouse_with_all_stock(txn, quantities);
+
+        if (!warehouse_id.empty())
+        {
+            // Warehouse found — assign it as the source and mark as ASSIGNED
+            set_transaction_source(txn, transaction_id, warehouse_id, "WAREHOUSE");
+            mark_transaction_assigned(txn, transaction_id);
+
+            result.warehouse_assigned = true;
+            result.assigned_warehouse_id = warehouse_id;
+        }
+
+        txn.commit();
     }
-
-    // Create transaction via mem_store (DB + cache)
-    int transaction_id =
-        m_store.create_transaction("STOCK_REQUEST", msg.source_id, msg.source_role, quantities, msg.timestamp);
-
-    if (transaction_id < 0)
+    catch (const std::exception& ex)
     {
-        std::cerr << "[INVENTORY_MANAGER] Failed to create stock request transaction for hub " << msg.source_id
-                  << std::endl;
-        return result;
+        std::cerr << "[INVENTORY_MANAGER] handle_stock_request error: " << ex.what() << std::endl;
+        result.success = false;
     }
-
-    result.transaction_id = transaction_id;
-    result.success = true;
-
-    // Try to find a warehouse with sufficient stock (cache-only scan)
-    std::string warehouse_id = m_store.find_warehouse_with_stock(quantities);
-
-    if (warehouse_id.empty())
-    {
-        return result;
-    }
-
-    // Warehouse found — assign it as the source and mark as ASSIGNED (not dispatched yet)
-    m_store.set_transaction_source(transaction_id, warehouse_id, "WAREHOUSE");
-    m_store.mark_transaction_assigned(transaction_id);
-
-    result.warehouse_assigned = true;
-    result.assigned_warehouse_id = warehouse_id;
 
     return result;
 }
@@ -123,56 +136,81 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
         }
     }
 
-    // Create transaction via mem_store
-    int transaction_id =
-        m_store.create_transaction("REPLENISH", msg.source_id, msg.source_role, quantities, msg.timestamp);
-
-    if (transaction_id < 0)
+    // ONE acquire, ONE transaction
+    try
     {
-        std::cerr << "[INVENTORY_MANAGER] Failed to create transaction for warehouse " << msg.source_id << std::endl;
-        return result;
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+
+        int transaction_id =
+            create_transaction(txn, "REPLENISH", msg.source_id, msg.source_role, quantities, msg.timestamp);
+
+        if (transaction_id < 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to create transaction for warehouse " << msg.source_id
+                      << std::endl;
+            return result;
+        }
+
+        // Mark as DISPATCHED directly — the server immediately authorizes the replenish
+        mark_transaction_dispatched(txn, transaction_id, msg.timestamp);
+
+        txn.commit();
+
+        result.transaction_id = transaction_id;
+        result.success = true;
+        result.warehouse_assigned = true;
+        result.assigned_warehouse_id = std::string(msg.source_id);
     }
-
-    // Mark as DISPATCHED directly — the server immediately authorizes the replenish,
-    // so the restock notice is sent right away (no intermediate ASSIGNED wait).
-    m_store.mark_transaction_dispatched(transaction_id, msg.timestamp);
-
-    result.transaction_id = transaction_id;
-    result.success = true;
-    result.warehouse_assigned = true;
-    result.assigned_warehouse_id = std::string(msg.source_id);
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] handle_replenish_request error: " << ex.what() << std::endl;
+    }
 
     return result;
 }
 
 int inventory_manager::handle_receipt_confirmation(const message_t& msg)
 {
-    // The sender of the confirmation is the DESTINATION of the transaction
-    // (hub confirms receiving stock, warehouse confirms receiving replenish)
-    int transaction_id = m_store.find_transaction("", std::string(msg.source_id), "DISPATCHED");
-
-    if (transaction_id < 0)
+    try
     {
-        std::cerr << "[INVENTORY_MANAGER] No dispatched transaction found for destination " << msg.source_id
-                  << std::endl;
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+
+        // The sender of the confirmation is the DESTINATION of the transaction
+        int transaction_id = ::find_transaction_id(txn, "", std::string(msg.source_id), "DISPATCHED");
+
+        if (transaction_id < 0)
+        {
+            // Idempotent: if already COMPLETED, this is a duplicate — return success silently
+            int dup_id = ::find_transaction_id(txn, "", std::string(msg.source_id), "COMPLETED");
+            if (dup_id >= 0)
+                return 0;
+            return -1;
+        }
+
+        // Extract quantities from the confirmation payload
+        int quantities[6] = {0};
+        extract_quantities_from_payload(msg.payload.receipt_confirmation, quantities);
+
+        // Add the received items to the client's inventory
+        if (adjust_client_inventory(txn, std::string(msg.source_id), quantities, true) != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to add inventory for " << msg.source_id << std::endl;
+            return -1;
+        }
+
+        // Mark transaction as COMPLETED
+        complete_transaction(txn, transaction_id, msg.timestamp);
+
+        txn.commit();
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] handle_receipt_confirmation error: " << ex.what() << std::endl;
         return -1;
     }
-
-    // Extract quantities from the confirmation payload
-    int quantities[6] = {0};
-    extract_quantities_from_payload(msg.payload.receipt_confirmation, quantities);
-
-    // Add the received items to the client's inventory (cache + DB)
-    if (m_store.adjust_inventory(std::string(msg.source_id), quantities, true) != 0)
-    {
-        std::cerr << "[INVENTORY_MANAGER] Failed to add inventory for " << msg.source_id << std::endl;
-        return -1;
-    }
-
-    // Mark transaction as COMPLETED (cache + DB)
-    m_store.complete_transaction(transaction_id, msg.timestamp);
-
-    return 0;
 }
 
 stock_request_result inventory_manager::handle_shipment_notice(const message_t& msg)
@@ -183,59 +221,82 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
     result.warehouse_assigned = false;
     result.item_count = 0;
 
-    // Find the ASSIGNED transaction where this warehouse is the source (cache lookup)
-    int transaction_id = m_store.find_transaction(msg.source_id, "", "ASSIGNED");
-
-    if (transaction_id < 0)
+    try
     {
-        std::cerr << "[INVENTORY_MANAGER] No assigned transaction found for warehouse " << msg.source_id << std::endl;
-        return result;
-    }
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
 
-    // Extract shipped quantities from the shipment notice payload
-    int quantities[6] = {0};
-    extract_quantities_from_payload(msg.payload.shipment_notice, quantities);
+        // Find the ASSIGNED transaction where this warehouse is the source
+        int transaction_id = ::find_transaction_id(txn, msg.source_id, "", "ASSIGNED");
 
-    // Subtract shipped items from the warehouse's inventory (cache + DB)
-    if (m_store.adjust_inventory(std::string(msg.source_id), quantities, false) != 0)
-    {
-        std::cerr << "[INVENTORY_MANAGER] Failed to subtract inventory from warehouse " << msg.source_id << std::endl;
-        return result;
-    }
-
-    // Mark as DISPATCHED (cache + DB)
-    m_store.mark_transaction_dispatched(transaction_id, msg.timestamp);
-
-    // Get the full transaction record from cache to find the hub destination
-    transaction_record txn_record;
-    if (m_store.get_transaction(transaction_id, txn_record) != 0)
-    {
-        std::cerr << "[INVENTORY_MANAGER] Failed to get transaction " << transaction_id << " details" << std::endl;
-        // Still a partial success — stock was subtracted and marked DISPATCHED
-        result.success = true;
-        result.transaction_id = transaction_id;
-        return result;
-    }
-
-    // Populate result for message_handler to send INCOMING_STOCK_NOTICE to hub
-    result.transaction_id = transaction_id;
-    result.success = true;
-    result.warehouse_assigned = true;
-    result.assigned_warehouse_id = std::string(msg.source_id);
-    result.requesting_hub_id = txn_record.destination_id;
-
-    // Copy items from the payload
-    const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
-    result.item_count = 0;
-    for (int i = 0; i < 6; i++)
-    {
-        if (quantities[i] > 0)
+        if (transaction_id < 0)
         {
-            result.items[result.item_count].item_id = i + 1;
-            strncpy(result.items[result.item_count].item_name, item_names[i], ITEM_NAME_SIZE - 1);
-            result.items[result.item_count].quantity = quantities[i];
-            result.item_count++;
+            // Idempotent: if already DISPATCHED/COMPLETED, this is a duplicate — return success silently
+            int dup_id = ::find_transaction_id(txn, msg.source_id, "", "DISPATCHED");
+            if (dup_id < 0)
+                dup_id = ::find_transaction_id(txn, msg.source_id, "", "COMPLETED");
+            if (dup_id >= 0)
+            {
+                result.transaction_id = dup_id;
+                result.success = true;
+                return result;
+            }
+            return result;
         }
+
+        // Extract shipped quantities from the shipment notice payload
+        int quantities[6] = {0};
+        extract_quantities_from_payload(msg.payload.shipment_notice, quantities);
+
+        // Subtract shipped items from the warehouse's inventory
+        if (adjust_client_inventory(txn, std::string(msg.source_id), quantities, false) != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to subtract inventory from warehouse " << msg.source_id
+                      << std::endl;
+            return result;
+        }
+
+        // Mark as DISPATCHED
+        mark_transaction_dispatched(txn, transaction_id, msg.timestamp);
+
+        // Get the full transaction record to find the hub destination
+        transaction_record txn_record;
+        if (get_transaction_by_id(txn, transaction_id, txn_record) != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to get transaction " << transaction_id << " details" << std::endl;
+            // Still a partial success — stock was subtracted and marked DISPATCHED
+            txn.commit();
+            result.success = true;
+            result.transaction_id = transaction_id;
+            return result;
+        }
+
+        txn.commit();
+
+        // Populate result for message_handler to send INCOMING_STOCK_NOTICE to hub
+        result.transaction_id = transaction_id;
+        result.success = true;
+        result.warehouse_assigned = true;
+        result.assigned_warehouse_id = std::string(msg.source_id);
+        result.requesting_hub_id = txn_record.destination_id;
+
+        // Copy items from the payload
+        const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+        result.item_count = 0;
+        for (int i = 0; i < 6; i++)
+        {
+            if (quantities[i] > 0)
+            {
+                result.items[result.item_count].item_id = i + 1;
+                strncpy(result.items[result.item_count].item_name, item_names[i], ITEM_NAME_SIZE - 1);
+                result.items[result.item_count].quantity = quantities[i];
+                result.item_count++;
+            }
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] handle_shipment_notice error: " << ex.what() << std::endl;
     }
 
     return result;
@@ -245,59 +306,87 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
 {
     std::vector<stock_request_result> fulfilled;
 
-    // Get pending transactions from cache
-    transaction_record pending[MAX_PENDING_TRANSACTIONS];
-    int count = m_store.get_pending_transactions(pending, MAX_PENDING_TRANSACTIONS);
-
-    if (count == 0)
+    try
     {
-        return fulfilled;
-    }
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
 
-    // Item names corresponding to item_ids 1-6
-    const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
-
-    // Find the FIRST pending order that can be fulfilled — only one at a time
-    for (int i = 0; i < count; i++)
-    {
-        int quantities[6] = {pending[i].food,  pending[i].water, pending[i].medicine,
-                             pending[i].tools, pending[i].guns,  pending[i].ammo};
-
-        std::string available_warehouse = m_store.find_warehouse_with_stock(quantities);
-
-        if (!available_warehouse.empty())
+        // Get THIS warehouse's current inventory (1 query)
+        int stock[6] = {0};
+        if (get_client_inventory(txn, warehouse_id, "WAREHOUSE", stock) != 0)
         {
-            // Assign warehouse as the SOURCE and mark as ASSIGNED (cache + DB)
-            m_store.set_transaction_source(pending[i].transaction_id, available_warehouse, "WAREHOUSE");
-            m_store.mark_transaction_assigned(pending[i].transaction_id);
+            return fulfilled;
+        }
 
-            // Build stock_request_result for message_handler to send dispatch
-            stock_request_result result;
-            result.transaction_id = pending[i].transaction_id;
-            result.success = true;
-            result.warehouse_assigned = true;
-            result.assigned_warehouse_id = available_warehouse;
-            result.requesting_hub_id = pending[i].destination_id;
+        // Get pending transactions (1 query)
+        transaction_record pending[MAX_PENDING_TRANSACTIONS];
+        int count = get_pending_transactions(txn, pending, MAX_PENDING_TRANSACTIONS);
 
-            // Build inventory_item_t array from quantities
-            result.item_count = 0;
+        if (count == 0)
+        {
+            return fulfilled;
+        }
+
+        // Item names corresponding to item_ids 1-6
+        const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+
+        // Check if THIS warehouse can fulfill any pending order (in-memory, 0 queries)
+        for (int i = 0; i < count; i++)
+        {
+            int quantities[6] = {pending[i].food,  pending[i].water, pending[i].medicine,
+                                 pending[i].tools, pending[i].guns,  pending[i].ammo};
+
+            // Check if this warehouse has enough of every item
+            bool can_fulfill = true;
             for (int j = 0; j < 6; j++)
             {
-                if (quantities[j] > 0)
+                if (quantities[j] > stock[j])
                 {
-                    result.items[result.item_count].item_id = j + 1;
-                    strncpy(result.items[result.item_count].item_name, item_names[j],
-                            sizeof(result.items[result.item_count].item_name) - 1);
-                    result.items[result.item_count].quantity = quantities[j];
-                    result.item_count++;
+                    can_fulfill = false;
+                    break;
                 }
             }
 
-            fulfilled.push_back(result);
+            if (can_fulfill)
+            {
+                // Assign THIS warehouse as the SOURCE and mark as ASSIGNED
+                set_transaction_source(txn, pending[i].transaction_id, warehouse_id, "WAREHOUSE");
+                mark_transaction_assigned(txn, pending[i].transaction_id);
 
-            // Only fulfill ONE order per inventory update
-            break;
+                // Build stock_request_result for message_handler to send dispatch
+                stock_request_result result;
+                result.transaction_id = pending[i].transaction_id;
+                result.success = true;
+                result.warehouse_assigned = true;
+                result.assigned_warehouse_id = warehouse_id;
+                result.requesting_hub_id = pending[i].destination_id;
+
+                // Build inventory_item_t array from quantities
+                result.item_count = 0;
+                for (int j = 0; j < 6; j++)
+                {
+                    if (quantities[j] > 0)
+                    {
+                        result.items[result.item_count].item_id = j + 1;
+                        strncpy(result.items[result.item_count].item_name, item_names[j],
+                                sizeof(result.items[result.item_count].item_name) - 1);
+                        result.items[result.item_count].quantity = quantities[j];
+                        result.item_count++;
+                    }
+                }
+
+                fulfilled.push_back(result);
+
+                // Only fulfill ONE order per inventory update
+                break;
+            }
         }
+
+        txn.commit();
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] process_pending_orders error: " << ex.what() << std::endl;
     }
 
     return fulfilled;
@@ -326,18 +415,22 @@ void inventory_manager::extract_quantities_from_payload(const payload_items_list
 int inventory_manager::find_transaction_id(const std::string& source_id, const std::string& destination_id,
                                            const std::string& status)
 {
-    return m_store.find_transaction(source_id, destination_id, status);
+    auto guard = m_pool.acquire();
+    return ::find_transaction_id(guard.get(), source_id, destination_id, status);
 }
 
 bool inventory_manager::get_client_inventory_message(const std::string& client_id, const std::string& client_type,
                                                      message_t& out_msg)
 {
-    // Get inventory from cache (or DB on first access)
+    // Get inventory from DB
     int quantities[6] = {0};
-    if (!m_store.get_inventory(client_id, client_type, quantities))
     {
-        std::cerr << "[INVENTORY_MANAGER] Failed to get inventory for client " << client_id << std::endl;
-        return false;
+        auto guard = m_pool.acquire();
+        if (get_client_inventory(guard.get(), client_id, client_type, quantities) != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to get inventory for client " << client_id << std::endl;
+            return false;
+        }
     }
 
     // Determine message type based on client type

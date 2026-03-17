@@ -312,6 +312,19 @@ int create_inventory_tables(pqxx::connection& conn)
                                        ");";
 
         txn.exec(sql_transactions);
+
+        // Indexes for inventory_transactions — critical for performance at scale
+        txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_status "
+                 "ON inventory_transactions (status) WHERE status IN ('PENDING', 'ASSIGNED', 'DISPATCHED')");
+        txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_source_status "
+                 "ON inventory_transactions (source_id, status)");
+        txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_dest_status "
+                 "ON inventory_transactions (destination_id, status)");
+
+        // Index for warehouse stock lookups
+        txn.exec("CREATE INDEX IF NOT EXISTS idx_inventory_warehouse_type "
+                 "ON client_inventory (client_type) WHERE client_type = 'WAREHOUSE'");
+
         txn.commit();
         return 0;
     }
@@ -322,7 +335,7 @@ int create_inventory_tables(pqxx::connection& conn)
     }
 }
 
-int update_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+int update_client_inventory(pqxx::work& txn, const std::string& client_id, const std::string& client_type,
                             const int quantities[6], const std::string& timestamp)
 {
     if (client_id.empty() || client_type.empty())
@@ -331,36 +344,34 @@ int update_client_inventory(pqxx::connection& conn, const std::string& client_id
         return -1;
     }
 
+    std::string sql = "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, "
+                      "ammo, last_updated) "
+                      "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
+                      "ON CONFLICT (client_id) DO UPDATE SET "
+                      "client_type = EXCLUDED.client_type, "
+                      "food = EXCLUDED.food, "
+                      "water = EXCLUDED.water, "
+                      "medicine = EXCLUDED.medicine, "
+                      "tools = EXCLUDED.tools, "
+                      "guns = EXCLUDED.guns, "
+                      "ammo = EXCLUDED.ammo, "
+                      "last_updated = EXCLUDED.last_updated";
+
+    txn.exec(pqxx::zview(sql),
+             pqxx::params{client_id, client_type, quantities[0], quantities[1], quantities[2],
+                          quantities[3], quantities[4], quantities[5], timestamp});
+    return 0;
+}
+
+int update_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                            const int quantities[6], const std::string& timestamp)
+{
     try
     {
         pqxx::work txn(conn);
-
-        // quantities array: [food, water, medicine, tools, guns, ammo]
-        int food = quantities[0];
-        int water = quantities[1];
-        int medicine = quantities[2];
-        int tools = quantities[3];
-        int guns = quantities[4];
-        int ammo = quantities[5];
-
-        std::string sql = "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, "
-                          "ammo, last_updated) "
-                          "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) "
-                          "ON CONFLICT (client_id) DO UPDATE SET "
-                          "client_type = EXCLUDED.client_type, "
-                          "food = EXCLUDED.food, "
-                          "water = EXCLUDED.water, "
-                          "medicine = EXCLUDED.medicine, "
-                          "tools = EXCLUDED.tools, "
-                          "guns = EXCLUDED.guns, "
-                          "ammo = EXCLUDED.ammo, "
-                          "last_updated = EXCLUDED.last_updated";
-
-        txn.exec(pqxx::zview(sql),
-                 pqxx::params{client_id, client_type, food, water, medicine, tools, guns, ammo, timestamp});
-        txn.commit();
-
-        return 0;
+        int rc = update_client_inventory(txn, client_id, client_type, quantities, timestamp);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -369,34 +380,42 @@ int update_client_inventory(pqxx::connection& conn, const std::string& client_id
     }
 }
 
-std::string get_warehouse_with_all_stock(pqxx::connection& conn, const int quantities[6])
+std::string get_warehouse_with_all_stock(pqxx::work& txn, const int quantities[6])
 {
     if (!quantities)
     {
         return "";
     }
 
+    // Use TABLESAMPLE + filter for fast random pick; fall back to OFFSET if no match
+    std::string sql = "SELECT client_id FROM client_inventory "
+                      "WHERE client_type = 'WAREHOUSE' "
+                      "AND food >= $1 AND water >= $2 AND medicine >= $3 "
+                      "AND tools >= $4 AND guns >= $5 AND ammo >= $6 "
+                      "OFFSET floor(random() * ("
+                      "  SELECT COUNT(*) FROM client_inventory "
+                      "  WHERE client_type = 'WAREHOUSE' "
+                      "  AND food >= $1 AND water >= $2 AND medicine >= $3 "
+                      "  AND tools >= $4 AND guns >= $5 AND ammo >= $6"
+                      ")) LIMIT 1";
+
+    pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{quantities[0], quantities[1], quantities[2],
+                                                                  quantities[3], quantities[4], quantities[5]});
+
+    if (result.empty())
+    {
+        return "";
+    }
+
+    return result[0][0].as<std::string>();
+}
+
+std::string get_warehouse_with_all_stock(pqxx::connection& conn, const int quantities[6])
+{
     try
     {
         pqxx::work txn(conn);
-        // Find warehouses with sufficient stock for ALL requested items
-        // quantities array: [food, water, medicine, tools, guns, ammo]
-        std::string sql = "SELECT client_id FROM client_inventory "
-                          "WHERE client_type = 'WAREHOUSE' "
-                          "AND food >= $1 AND water >= $2 AND medicine >= $3 "
-                          "AND tools >= $4 AND guns >= $5 AND ammo >= $6 "
-                          "ORDER BY RANDOM() LIMIT 1";
-
-        pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{quantities[0], quantities[1], quantities[2],
-                                                                      quantities[3], quantities[4], quantities[5]});
-
-        if (result.empty())
-        {
-            return "";
-        }
-
-        std::string warehouse_id = result[0][0].as<std::string>();
-        return warehouse_id;
+        return get_warehouse_with_all_stock(txn, quantities);
     }
     catch (const std::exception& ex)
     {
@@ -405,7 +424,7 @@ std::string get_warehouse_with_all_stock(pqxx::connection& conn, const int quant
     }
 }
 
-int create_transaction(pqxx::connection& conn, const std::string& transaction_type, const std::string& destination_id,
+int create_transaction(pqxx::work& txn, const std::string& transaction_type, const std::string& destination_id,
                        const std::string& destination_type, const int quantities[6], const std::string& order_timestamp)
 {
     if (transaction_type.empty() || destination_id.empty() || destination_type.empty())
@@ -414,31 +433,28 @@ int create_transaction(pqxx::connection& conn, const std::string& transaction_ty
         return -1;
     }
 
+    std::string sql = "INSERT INTO inventory_transactions (transaction_type, destination_id, destination_type, "
+                      "food, water, medicine, "
+                      "tools, guns, ammo, order_timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
+                      "RETURNING transaction_id";
+
+    pqxx::result result =
+        txn.exec(pqxx::zview(sql), pqxx::params{transaction_type, destination_id, destination_type,
+                                                quantities[0], quantities[1], quantities[2],
+                                                quantities[3], quantities[4], quantities[5], order_timestamp});
+
+    return result[0][0].as<int>();
+}
+
+int create_transaction(pqxx::connection& conn, const std::string& transaction_type, const std::string& destination_id,
+                       const std::string& destination_type, const int quantities[6], const std::string& order_timestamp)
+{
     try
     {
         pqxx::work txn(conn);
-
-        // quantities array: [food, water, medicine, tools, guns, ammo]
-        int food = quantities[0];
-        int water = quantities[1];
-        int medicine = quantities[2];
-        int tools = quantities[3];
-        int guns = quantities[4];
-        int ammo = quantities[5];
-
-        std::string sql = "INSERT INTO inventory_transactions (transaction_type, destination_id, destination_type, "
-                          "food, water, medicine, "
-                          "tools, guns, ammo, order_timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
-                          "RETURNING transaction_id";
-
-        pqxx::result result =
-            txn.exec(pqxx::zview(sql), pqxx::params{transaction_type, destination_id, destination_type, food, water,
-                                                    medicine, tools, guns, ammo, order_timestamp});
-
-        int transaction_id = result[0][0].as<int>();
-        txn.commit();
-
-        return transaction_id;
+        int id = create_transaction(txn, transaction_type, destination_id, destination_type, quantities, order_timestamp);
+        if (id >= 0) txn.commit();
+        return id;
     }
     catch (const std::exception& ex)
     {
@@ -473,20 +489,24 @@ int set_transaction_destination(pqxx::connection& conn, int transaction_id, cons
     }
 }
 
+int set_transaction_source(pqxx::work& txn, int transaction_id, const std::string& client_id,
+                           const std::string& client_type)
+{
+    std::string sql = "UPDATE inventory_transactions SET source_id = $1, source_type = $2 "
+                      "WHERE transaction_id = $3";
+    txn.exec(pqxx::zview(sql), pqxx::params{client_id, client_type, transaction_id});
+    return 0;
+}
+
 int set_transaction_source(pqxx::connection& conn, int transaction_id, const std::string& client_id,
                            const std::string& client_type)
 {
     try
     {
         pqxx::work txn(conn);
-
-        std::string sql = "UPDATE inventory_transactions SET source_id = $1, source_type = $2 "
-                          "WHERE transaction_id = $3";
-
-        txn.exec(pqxx::zview(sql), pqxx::params{client_id, client_type, transaction_id});
-        txn.commit();
-
-        return 0;
+        int rc = set_transaction_source(txn, transaction_id, client_id, client_type);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -495,19 +515,22 @@ int set_transaction_source(pqxx::connection& conn, int transaction_id, const std
     }
 }
 
+int mark_transaction_dispatched(pqxx::work& txn, int transaction_id, const std::string& dispatch_timestamp)
+{
+    std::string sql = "UPDATE inventory_transactions SET status = 'DISPATCHED', dispatch_timestamp = $1 WHERE "
+                      "transaction_id = $2";
+    txn.exec(pqxx::zview(sql), pqxx::params{dispatch_timestamp, transaction_id});
+    return 0;
+}
+
 int mark_transaction_dispatched(pqxx::connection& conn, int transaction_id, const std::string& dispatch_timestamp)
 {
     try
     {
         pqxx::work txn(conn);
-
-        std::string sql = "UPDATE inventory_transactions SET status = 'DISPATCHED', dispatch_timestamp = $1 WHERE "
-                          "transaction_id = $2";
-
-        txn.exec(pqxx::zview(sql), pqxx::params{dispatch_timestamp, transaction_id});
-        txn.commit();
-
-        return 0;
+        int rc = mark_transaction_dispatched(txn, transaction_id, dispatch_timestamp);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -516,18 +539,21 @@ int mark_transaction_dispatched(pqxx::connection& conn, int transaction_id, cons
     }
 }
 
+int mark_transaction_assigned(pqxx::work& txn, int transaction_id)
+{
+    std::string sql = "UPDATE inventory_transactions SET status = 'ASSIGNED' WHERE transaction_id = $1";
+    txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
+    return 0;
+}
+
 int mark_transaction_assigned(pqxx::connection& conn, int transaction_id)
 {
     try
     {
         pqxx::work txn(conn);
-
-        std::string sql = "UPDATE inventory_transactions SET status = 'ASSIGNED' WHERE transaction_id = $1";
-
-        txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
-        txn.commit();
-
-        return 0;
+        int rc = mark_transaction_assigned(txn, transaction_id);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -536,19 +562,22 @@ int mark_transaction_assigned(pqxx::connection& conn, int transaction_id)
     }
 }
 
+int complete_transaction(pqxx::work& txn, int transaction_id, const std::string& reception_timestamp)
+{
+    std::string sql = "UPDATE inventory_transactions SET status = 'COMPLETED', reception_timestamp = $1 WHERE "
+                      "transaction_id = $2";
+    txn.exec(pqxx::zview(sql), pqxx::params{reception_timestamp, transaction_id});
+    return 0;
+}
+
 int complete_transaction(pqxx::connection& conn, int transaction_id, const std::string& reception_timestamp)
 {
     try
     {
         pqxx::work txn(conn);
-
-        std::string sql = "UPDATE inventory_transactions SET status = 'COMPLETED', reception_timestamp = $1 WHERE "
-                          "transaction_id = $2";
-
-        txn.exec(pqxx::zview(sql), pqxx::params{reception_timestamp, transaction_id});
-        txn.commit();
-
-        return 0;
+        int rc = complete_transaction(txn, transaction_id, reception_timestamp);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -557,47 +586,55 @@ int complete_transaction(pqxx::connection& conn, int transaction_id, const std::
     }
 }
 
+static int parse_transaction_rows(const pqxx::result& result, transaction_record* out_transactions, int max_count)
+{
+    int count = 0;
+    for (const auto& row : result)
+    {
+        if (count >= max_count)
+            break;
+
+        out_transactions[count].transaction_id = row[0].as<int>();
+        out_transactions[count].transaction_type = row[1].as<std::string>();
+        out_transactions[count].source_id = row[2].is_null() ? "" : row[2].as<std::string>();
+        out_transactions[count].source_type = row[3].is_null() ? "" : row[3].as<std::string>();
+        out_transactions[count].destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
+        out_transactions[count].destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
+        out_transactions[count].status = row[6].as<std::string>();
+        out_transactions[count].food = row[7].as<int>();
+        out_transactions[count].water = row[8].as<int>();
+        out_transactions[count].medicine = row[9].as<int>();
+        out_transactions[count].tools = row[10].as<int>();
+        out_transactions[count].guns = row[11].as<int>();
+        out_transactions[count].ammo = row[12].as<int>();
+
+        count++;
+    }
+    return count;
+}
+
+int get_pending_transactions(pqxx::work& txn, transaction_record* out_transactions, int max_count)
+{
+    if (!out_transactions || max_count <= 0)
+        return 0;
+
+    std::string sql = "SELECT transaction_id, transaction_type, source_id, source_type, destination_id, "
+                      "destination_type, status, food, water, medicine, tools, guns, ammo FROM "
+                      "inventory_transactions WHERE status = 'PENDING' ORDER BY order_timestamp ASC";
+
+    pqxx::result result = txn.exec(sql);
+    return parse_transaction_rows(result, out_transactions, max_count);
+}
+
 int get_pending_transactions(pqxx::connection& conn, transaction_record* out_transactions, int max_count)
 {
     if (!out_transactions || max_count <= 0)
-    {
-        std::cerr << "Invalid parameters for get_pending_transactions" << std::endl;
         return 0;
-    }
 
     try
     {
         pqxx::work txn(conn);
-        std::string sql = "SELECT transaction_id, transaction_type, source_id, source_type, destination_id, "
-                          "destination_type, status, food, water, medicine, tools, guns, ammo FROM "
-                          "inventory_transactions WHERE status = 'PENDING' ORDER BY order_timestamp ASC";
-
-        pqxx::result result = txn.exec(sql);
-
-        int count = 0;
-        for (const auto& row : result)
-        {
-            if (count >= max_count)
-                break;
-
-            out_transactions[count].transaction_id = row[0].as<int>();
-            out_transactions[count].transaction_type = row[1].as<std::string>();
-            out_transactions[count].source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-            out_transactions[count].source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-            out_transactions[count].destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-            out_transactions[count].destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-            out_transactions[count].status = row[6].as<std::string>();
-            out_transactions[count].food = row[7].as<int>();
-            out_transactions[count].water = row[8].as<int>();
-            out_transactions[count].medicine = row[9].as<int>();
-            out_transactions[count].tools = row[10].as<int>();
-            out_transactions[count].guns = row[11].as<int>();
-            out_transactions[count].ammo = row[12].as<int>();
-
-            count++;
-        }
-
-        return count;
+        return get_pending_transactions(txn, out_transactions, max_count);
     }
     catch (const std::exception& ex)
     {
@@ -606,31 +643,35 @@ int get_pending_transactions(pqxx::connection& conn, transaction_record* out_tra
     }
 }
 
+int find_transaction_id(pqxx::work& txn, const std::string& source_id, const std::string& destination_id,
+                        const std::string& status)
+{
+    std::string sql = "SELECT transaction_id FROM inventory_transactions WHERE 1=1";
+
+    if (!source_id.empty())
+        sql += " AND source_id = " + txn.quote(source_id);
+    if (!destination_id.empty())
+        sql += " AND destination_id = " + txn.quote(destination_id);
+    if (!status.empty())
+        sql += " AND status = " + txn.quote(status);
+
+    sql += " ORDER BY order_timestamp DESC LIMIT 1";
+
+    pqxx::result result = txn.exec(sql);
+
+    if (result.empty())
+        return -1;
+
+    return result[0][0].as<int>();
+}
+
 int find_transaction_id(pqxx::connection& conn, const std::string& source_id, const std::string& destination_id,
                         const std::string& status)
 {
     try
     {
         pqxx::work txn(conn);
-        std::string sql = "SELECT transaction_id FROM inventory_transactions WHERE 1=1";
-
-        if (!source_id.empty())
-            sql += " AND source_id = " + txn.quote(source_id);
-        if (!destination_id.empty())
-            sql += " AND destination_id = " + txn.quote(destination_id);
-        if (!status.empty())
-            sql += " AND status = " + txn.quote(status);
-
-        sql += " ORDER BY order_timestamp DESC LIMIT 1";
-
-        pqxx::result result = txn.exec(sql);
-
-        if (result.empty())
-        {
-            return -1;
-        }
-
-        return result[0][0].as<int>();
+        return find_transaction_id(txn, source_id, destination_id, status);
     }
     catch (const std::exception& ex)
     {
@@ -639,38 +680,41 @@ int find_transaction_id(pqxx::connection& conn, const std::string& source_id, co
     }
 }
 
+int get_transaction_by_id(pqxx::work& txn, int transaction_id, transaction_record& out)
+{
+    std::string sql = "SELECT transaction_id, transaction_type, source_id, source_type, destination_id, "
+                      "destination_type, status, food, water, medicine, tools, guns, ammo FROM "
+                      "inventory_transactions WHERE transaction_id = $1";
+
+    pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
+
+    if (result.empty())
+        return -1;
+
+    const auto& row = result[0];
+    out.transaction_id = row[0].as<int>();
+    out.transaction_type = row[1].as<std::string>();
+    out.source_id = row[2].is_null() ? "" : row[2].as<std::string>();
+    out.source_type = row[3].is_null() ? "" : row[3].as<std::string>();
+    out.destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
+    out.destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
+    out.status = row[6].as<std::string>();
+    out.food = row[7].as<int>();
+    out.water = row[8].as<int>();
+    out.medicine = row[9].as<int>();
+    out.tools = row[10].as<int>();
+    out.guns = row[11].as<int>();
+    out.ammo = row[12].as<int>();
+
+    return 0;
+}
+
 int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transaction_record& out)
 {
     try
     {
         pqxx::work txn(conn);
-        std::string sql = "SELECT transaction_id, transaction_type, source_id, source_type, destination_id, "
-                          "destination_type, status, food, water, medicine, tools, guns, ammo FROM "
-                          "inventory_transactions WHERE transaction_id = $1";
-
-        pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
-
-        if (result.empty())
-        {
-            return -1;
-        }
-
-        const auto& row = result[0];
-        out.transaction_id = row[0].as<int>();
-        out.transaction_type = row[1].as<std::string>();
-        out.source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-        out.source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-        out.destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-        out.destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-        out.status = row[6].as<std::string>();
-        out.food = row[7].as<int>();
-        out.water = row[8].as<int>();
-        out.medicine = row[9].as<int>();
-        out.tools = row[10].as<int>();
-        out.guns = row[11].as<int>();
-        out.ammo = row[12].as<int>();
-
-        return 0;
+        return get_transaction_by_id(txn, transaction_id, out);
     }
     catch (const std::exception& ex)
     {
@@ -679,7 +723,7 @@ int get_transaction_by_id(pqxx::connection& conn, int transaction_id, transactio
     }
 }
 
-int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+int get_client_inventory(pqxx::work& txn, const std::string& client_id, const std::string& client_type,
                          int quantities_out[6])
 {
     if (client_id.empty() || client_type.empty() || !quantities_out)
@@ -688,39 +732,41 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
         return -1;
     }
 
-    // Initialize to default stock based on role (warehouse gets more stock than hub)
     int initial_stock = (client_type == "WAREHOUSE") ? INITIAL_STOCK_WAREHOUSE : INITIAL_STOCK_HUB;
     for (int i = 0; i < 6; i++)
-    {
         quantities_out[i] = initial_stock;
+
+    std::string sql = "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1";
+    pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{client_id});
+
+    if (result.empty())
+    {
+        std::string insert_sql =
+            "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
+            "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
+        txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, initial_stock});
+        return 0;
     }
 
+    quantities_out[0] = result[0][0].as<int>();
+    quantities_out[1] = result[0][1].as<int>();
+    quantities_out[2] = result[0][2].as<int>();
+    quantities_out[3] = result[0][3].as<int>();
+    quantities_out[4] = result[0][4].as<int>();
+    quantities_out[5] = result[0][5].as<int>();
+
+    return 0;
+}
+
+int get_client_inventory(pqxx::connection& conn, const std::string& client_id, const std::string& client_type,
+                         int quantities_out[6])
+{
     try
     {
         pqxx::work txn(conn);
-        std::string sql = "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1";
-
-        pqxx::result result = txn.exec(pqxx::zview(sql), pqxx::params{client_id});
-
-        if (result.empty())
-        {
-            std::string insert_sql =
-                "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
-                "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
-            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, initial_stock});
-            txn.commit();
-            // quantities_out already initialized to initial_stock above
-            return 0;
-        }
-
-        quantities_out[0] = result[0][0].as<int>();
-        quantities_out[1] = result[0][1].as<int>();
-        quantities_out[2] = result[0][2].as<int>();
-        quantities_out[3] = result[0][3].as<int>();
-        quantities_out[4] = result[0][4].as<int>();
-        quantities_out[5] = result[0][5].as<int>();
-
-        return 0;
+        int rc = get_client_inventory(txn, client_id, client_type, quantities_out);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {
@@ -729,7 +775,7 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
     }
 }
 
-int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id, const int quantities[6], bool add)
+int adjust_client_inventory(pqxx::work& txn, const std::string& client_id, const int quantities[6], bool add)
 {
     if (client_id.empty() || !quantities)
     {
@@ -737,34 +783,38 @@ int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id
         return -1;
     }
 
+    std::string sql;
+    if (add)
+    {
+        sql = "UPDATE client_inventory SET "
+              "food = food + $2, water = water + $3, medicine = medicine + $4, "
+              "tools = tools + $5, guns = guns + $6, ammo = ammo + $7, "
+              "last_updated = CURRENT_TIMESTAMP "
+              "WHERE client_id = $1";
+    }
+    else
+    {
+        sql = "UPDATE client_inventory SET "
+              "food = GREATEST(0, food - $2), water = GREATEST(0, water - $3), "
+              "medicine = GREATEST(0, medicine - $4), tools = GREATEST(0, tools - $5), "
+              "guns = GREATEST(0, guns - $6), ammo = GREATEST(0, ammo - $7), "
+              "last_updated = CURRENT_TIMESTAMP "
+              "WHERE client_id = $1";
+    }
+
+    txn.exec(pqxx::zview(sql), pqxx::params{client_id, quantities[0], quantities[1], quantities[2], quantities[3],
+                                            quantities[4], quantities[5]});
+    return 0;
+}
+
+int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id, const int quantities[6], bool add)
+{
     try
     {
         pqxx::work txn(conn);
-
-        std::string sql;
-        if (add)
-        {
-            sql = "UPDATE client_inventory SET "
-                  "food = food + $2, water = water + $3, medicine = medicine + $4, "
-                  "tools = tools + $5, guns = guns + $6, ammo = ammo + $7, "
-                  "last_updated = CURRENT_TIMESTAMP "
-                  "WHERE client_id = $1";
-        }
-        else
-        {
-            sql = "UPDATE client_inventory SET "
-                  "food = GREATEST(0, food - $2), water = GREATEST(0, water - $3), "
-                  "medicine = GREATEST(0, medicine - $4), tools = GREATEST(0, tools - $5), "
-                  "guns = GREATEST(0, guns - $6), ammo = GREATEST(0, ammo - $7), "
-                  "last_updated = CURRENT_TIMESTAMP "
-                  "WHERE client_id = $1";
-        }
-
-        txn.exec(pqxx::zview(sql), pqxx::params{client_id, quantities[0], quantities[1], quantities[2], quantities[3],
-                                                quantities[4], quantities[5]});
-        txn.commit();
-
-        return 0;
+        int rc = adjust_client_inventory(txn, client_id, quantities, add);
+        if (rc == 0) txn.commit();
+        return rc;
     }
     catch (const std::exception& ex)
     {

@@ -1,10 +1,10 @@
 #include "auth_module.hpp"
-#include "mem_store.hpp"
+#include "connection_pool.hpp"
 
 #include <iostream>
 
 // AUTH MODULE CONSTRUCTOR
-auth_module::auth_module(mem_store& store) : m_store(store)
+auth_module::auth_module(connection_pool& pool) : m_pool(pool)
 {
 }
 
@@ -22,18 +22,16 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
 
     try
     {
-        auto cred = m_store.get_credential(username);
+        auto guard = m_pool.acquire();
+        auto cred = query_credentials_by_username(guard.get(), username);
 
         if (!cred)
         {
-            // User not found
             result.status_code = auth_result_code::INVALID_CREDENTIALS;
             result.error_message = "Invalid username or password";
             return result;
         }
 
-        // Compare password hash (assuming password is already hashed when sent)
-        // TODO: If passwords are sent in plain text, implement hashing here
         if (cred->password_hash != password)
         {
             result.status_code = auth_result_code::INVALID_CREDENTIALS;
@@ -46,8 +44,8 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
         result.client_type = cred->client_type;
         result.username = cred->username;
 
-        // Mark client as active (cache + DB write-through)
-        m_store.set_active(username, true);
+        // Mark client as active in the database
+        set_client_active(guard.get(), username, true);
 
         return result;
     }
@@ -62,5 +60,13 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
 
 void auth_module::deactivate_client(const std::string& username)
 {
-    m_store.set_active(username, false);
+    try
+    {
+        auto guard = m_pool.acquire();
+        set_client_active(guard.get(), username, false);
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "Error deactivating client " << username << ": " << ex.what() << std::endl;
+    }
 }

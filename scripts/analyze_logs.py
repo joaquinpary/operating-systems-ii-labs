@@ -10,6 +10,7 @@ Usage:
              Defaults to ../logs/server/
 """
 
+import io
 import os
 import re
 import sys
@@ -67,20 +68,37 @@ class LogAnalyzer:
         # Worker delays (time from reactor receive to worker process)
         self.worker_delays_ms = []
         
+        # Time-series tracking (per-minute buckets)
+        self.reactor_recv_per_minute = defaultdict(int)   # minute -> count of TCP recv
+        self.worker_done_per_minute = defaultdict(int)    # minute -> count of DONE messages
+        self.disconnect_per_minute = defaultdict(int)     # minute -> disconnect count
+        self.delays_per_minute = defaultdict(list)        # minute -> [delay_ms, ...]
+        self.msg_type_per_minute = defaultdict(lambda: defaultdict(int))  # minute -> {type: count}
+        self.ack_retries_per_minute = defaultdict(int)    # minute -> ACK retry count
+        self.processing_per_minute = defaultdict(list)    # minute -> [proc_time_ms, ...]
+        
         # Session lifetimes
         self.session_connects = {}  # session -> connect time
         self.session_disconnects = {}  # session -> disconnect time
         
+        # Per-message-type processing times (IN -> DONE per thread)
+        self.processing_times = defaultdict(list)  # msg_type -> [duration_ms, ...]
+        
     def find_log_files(self, prefix: str) -> list:
         """Find all log files matching prefix, sorted by age (oldest first)"""
-        files = []
         base = self.log_dir / f"{prefix}.log"
         
-        # Find numbered backups first (oldest)
-        for i in range(10, 0, -1):
-            f = self.log_dir / f"{prefix}.log.{i}"
-            if f.exists():
-                files.append(f)
+        # Discover all numbered backups dynamically
+        numbered = []
+        for f in self.log_dir.glob(f"{prefix}.log.*"):
+            # Extract the number suffix
+            suffix = f.name[len(f"{prefix}.log."):]
+            if suffix.isdigit():
+                numbered.append((int(suffix), f))
+        
+        # Sort by number descending (highest = oldest)
+        numbered.sort(key=lambda x: x[0], reverse=True)
+        files = [f for _, f in numbered]
         
         # Then current log (newest)
         if base.exists():
@@ -117,7 +135,10 @@ class LogAnalyzer:
                     m = tcp_recv.search(line)
                     if m:
                         ts, sess = m.groups()
-                        self.reactor_events.append(('recv', parse_timestamp(ts), sess))
+                        parsed_ts = parse_timestamp(ts)
+                        self.reactor_events.append(('recv', parsed_ts, sess))
+                        minute = parsed_ts.strftime("%Y-%m-%d %H:%M")
+                        self.reactor_recv_per_minute[minute] += 1
                         continue
                     
                     # TCP connect
@@ -132,7 +153,10 @@ class LogAnalyzer:
                     if m:
                         ts, user, sess = m.groups()
                         self.disconnects += 1
-                        self.session_disconnects[sess] = parse_timestamp(ts)
+                        parsed_ts = parse_timestamp(ts)
+                        self.session_disconnects[sess] = parsed_ts
+                        minute = parsed_ts.strftime("%Y-%m-%d %H:%M")
+                        self.disconnect_per_minute[minute] += 1
                         continue
                     
                     # Keepalive timeout
@@ -146,6 +170,9 @@ class LogAnalyzer:
                         sess, ts_key, retry, max_retry = m.groups()
                         self.ack_timeouts += 1
                         self.retry_counts[sess] += 1
+                        ts_match2 = re.match(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', line)
+                        if ts_match2:
+                            self.ack_retries_per_minute[ts_match2.group(1)] += 1
                         continue
                     
                     # ACK timeout max retries (blacklist)
@@ -172,6 +199,13 @@ class LogAnalyzer:
         worker_in = re.compile(
             r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+Z?)\].*\[T(\d+)\] IN type=(\S+) ts=(\S+) from=(\S+) sess=(\S+)'
         )
+        # Pattern: [timestamp] [INFO] [T0] DONE type=... sess=...
+        worker_done = re.compile(
+            r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+Z?)\].*\[T(\d+)\] DONE type=(\S+) sess=(\S+)'
+        )
+        
+        # Per-thread state for IN->DONE correlation
+        thread_state = {}  # thread_id -> (in_time, msg_type)
         
         for f in files:
             print(f"  Parsing {f.name}...")
@@ -192,6 +226,29 @@ class LogAnalyzer:
                         # Store for delay calculation
                         key = (sess, msg_ts)
                         self.msg_worker_times[key] = worker_time
+                        
+                        # Track IN for processing time calculation
+                        thread_state[thread_id] = (worker_time, msg_type)
+                        
+                        # Track message type per minute
+                        minute = worker_time.strftime("%Y-%m-%d %H:%M")
+                        self.msg_type_per_minute[minute][msg_type] += 1
+                        continue
+                    
+                    # DONE line — correlate with IN on same thread
+                    m = worker_done.search(line)
+                    if m:
+                        log_ts, thread_id, msg_type, sess = m.groups()
+                        done_time = parse_timestamp(log_ts)
+                        minute = done_time.strftime("%Y-%m-%d %H:%M")
+                        self.worker_done_per_minute[minute] += 1
+                        if thread_id in thread_state:
+                            in_time, in_type = thread_state.pop(thread_id)
+                            duration_ms = (done_time - in_time).total_seconds() * 1000
+                            if 0 <= duration_ms < 300000:  # sanity: 0-5 min
+                                self.processing_times[in_type].append(duration_ms)
+                                self.processing_per_minute[minute].append(duration_ms)
+                        continue
     
     def calculate_worker_delays(self):
         """
@@ -213,12 +270,11 @@ class LogAnalyzer:
             sess, msg_ts = key
             try:
                 msg_time = parse_msg_timestamp(msg_ts)
-                # The msg_ts is when the CLIENT created the message
-                # reactor should receive it almost immediately
-                # delay = worker_ts - msg_time gives us total client->worker latency
                 delay_ms = (worker_ts - msg_time).total_seconds() * 1000
                 if 0 < delay_ms < 300000:  # sanity check: 0-5 minutes
                     self.worker_delays_ms.append(delay_ms)
+                    minute = worker_ts.strftime("%Y-%m-%d %H:%M")
+                    self.delays_per_minute[minute].append(delay_ms)
             except:
                 pass
     
@@ -329,6 +385,57 @@ class LogAnalyzer:
         for ts, count in busiest:
             print(f"  {ts}: {count} events")
         
+        # Worker processing time per message type
+        print("\n" + "-"*40)
+        print("WORKER PROCESSING TIME PER MESSAGE TYPE")
+        print("-"*40)
+        if self.processing_times:
+            # Summary table sorted by total time (biggest consumer first)
+            type_stats = []
+            for msg_type, times in self.processing_times.items():
+                s = sorted(times)
+                type_stats.append({
+                    'type': msg_type,
+                    'count': len(s),
+                    'total': sum(s),
+                    'min': min(s),
+                    'max': max(s),
+                    'avg': sum(s) / len(s),
+                    'median': s[len(s) // 2],
+                    'p95': s[int(len(s) * 0.95)] if len(s) >= 20 else s[-1],
+                    'p99': s[int(len(s) * 0.99)] if len(s) >= 100 else s[-1],
+                })
+            type_stats.sort(key=lambda x: -x['total'])
+            
+            grand_total = sum(t['total'] for t in type_stats)
+            total_msgs = sum(t['count'] for t in type_stats)
+            print(f"Total messages:  {total_msgs}")
+            print(f"Total time:      {grand_total:.0f} ms ({grand_total/1000:.1f} s)")
+            
+            print(f"\n{'Type':<50} {'Count':>7} {'Avg ms':>8} {'Med ms':>8} {'P95 ms':>8} {'P99 ms':>8} {'Max ms':>8} {'Total%':>7}")
+            print("-" * 115)
+            for t in type_stats:
+                pct = 100 * t['total'] / grand_total if grand_total > 0 else 0
+                print(f"{t['type']:<50} {t['count']:>7} {t['avg']:>8.1f} {t['median']:>8.1f} {t['p95']:>8.1f} {t['p99']:>8.1f} {t['max']:>8.1f} {pct:>6.1f}%")
+            
+            # Distribution of ALL processing times
+            all_times = sorted(t for times in self.processing_times.values() for t in times)
+            buckets = [0, 1, 5, 10, 50, 100, 500, 1000, float('inf')]
+            bucket_names = ['<1ms', '1-5ms', '5-10ms', '10-50ms', '50-100ms', '100-500ms', '500ms-1s', '>1s']
+            bucket_counts = [0] * len(bucket_names)
+            for d in all_times:
+                for i in range(len(buckets) - 1):
+                    if buckets[i] <= d < buckets[i+1]:
+                        bucket_counts[i] += 1
+                        break
+            print(f"\nProcessing time distribution (all types):")
+            for name, count in zip(bucket_names, bucket_counts):
+                pct = 100 * count / len(all_times)
+                bar = '#' * int(pct / 2)
+                print(f"  {name:>12}: {count:>6} ({pct:5.1f}%) {bar}")
+        else:
+            print("No DONE lines found (requires updated server with DONE logging)")
+        
         # Cascade detection
         print("\n" + "-"*40)
         print("CASCADE DETECTION")
@@ -351,7 +458,111 @@ class LogAnalyzer:
             else:
                 print(f"No cascade detected (max {max_disc_sec} disconnects/second)")
         
+        # Time-series per-minute breakdown
+        self.print_timeseries()
+        
         print("\n" + "="*70)
+    
+    def print_timeseries(self):
+        """Print per-minute time-series showing input/output rate, delay, disconnects, and message breakdown"""
+        all_minutes = sorted(set(
+            list(self.reactor_recv_per_minute.keys()) +
+            list(self.worker_done_per_minute.keys()) +
+            list(self.disconnect_per_minute.keys()) +
+            list(self.delays_per_minute.keys()) +
+            list(self.msg_type_per_minute.keys())
+        ))
+        
+        if not all_minutes:
+            return
+        
+        print("\n" + "-"*40)
+        print("TIME-SERIES (per minute)")
+        print("-"*40)
+        print(f"{'Min':<6} {'Recv':>7} {'Done':>7} {'Delta':>7} {'DlyAvg':>7} {'DlyP95':>7} {'ProcAvg':>8} {'Retries':>7} {'Disc':>5}")
+        print("-" * 73)
+        
+        for minute in all_minutes:
+            recv = self.reactor_recv_per_minute.get(minute, 0)
+            done = self.worker_done_per_minute.get(minute, 0)
+            delta = recv - done
+            disc = self.disconnect_per_minute.get(minute, 0)
+            retries = self.ack_retries_per_minute.get(minute, 0)
+            
+            delays = self.delays_per_minute.get(minute, [])
+            if delays:
+                avg_delay = sum(delays) / len(delays)
+                sorted_d = sorted(delays)
+                p95_delay = sorted_d[int(len(sorted_d) * 0.95)] if len(sorted_d) >= 20 else sorted_d[-1]
+                delay_avg_str = f"{avg_delay:.0f}"
+                delay_p95_str = f"{p95_delay:.0f}"
+            else:
+                delay_avg_str = "-"
+                delay_p95_str = "-"
+            
+            procs = self.processing_per_minute.get(minute, [])
+            if procs:
+                proc_avg_str = f"{sum(procs)/len(procs):.1f}"
+            else:
+                proc_avg_str = "-"
+            
+            # Flag warning
+            flag = ""
+            if delta > 500:
+                flag += " <<<BACKLOG"
+            if disc > 10:
+                flag += " <<<DISCON"
+            
+            short_min = minute[-5:]
+            print(f"{short_min:<6} {recv:>7} {done:>7} {delta:>+7} {delay_avg_str:>7} {delay_p95_str:>7} {proc_avg_str:>8} {retries:>7} {disc:>5}{flag}")
+        
+        # Message type breakdown per minute
+        print("\n" + "-"*40)
+        print("MESSAGE TYPE BREAKDOWN (per minute)")
+        print("-"*40)
+        
+        # Collect all message types that appeared, use short names
+        all_types = set()
+        for minute_types in self.msg_type_per_minute.values():
+            all_types.update(minute_types.keys())
+        
+        # Short name mapping
+        def short_name(t):
+            t = t.replace("WAREHOUSE_TO_SERVER__", "W:")
+            t = t.replace("HUB_TO_SERVER__", "H:")
+            t = t.replace("STOCK_RECEIPT_CONFIRMATION", "RECEIPT")
+            t = t.replace("INVENTORY_UPDATE", "INV_UPD")
+            t = t.replace("STOCK_REQUEST", "STK_REQ")
+            t = t.replace("SHIPMENT_NOTICE", "SHIP")
+            t = t.replace("REPLENISH_REQUEST", "REPLENISH")
+            t = t.replace("AUTH_REQUEST", "AUTH")
+            return t
+        
+        # Sort types by total volume
+        type_totals = defaultdict(int)
+        for minute_types in self.msg_type_per_minute.values():
+            for t, c in minute_types.items():
+                type_totals[t] += c
+        sorted_types = sorted(type_totals.keys(), key=lambda t: -type_totals[t])
+        
+        # Only show top types (skip ACK/KEEPALIVE for clarity)
+        important_types = [t for t in sorted_types if "ACK" not in t and "KEEPALIVE" not in t][:6]
+        
+        # Header
+        header = f"{'Min':<6}"
+        for t in important_types:
+            sn = short_name(t)
+            header += f" {sn:>12}"
+        print(header)
+        print("-" * (6 + 13 * len(important_types)))
+        
+        for minute in all_minutes:
+            types = self.msg_type_per_minute.get(minute, {})
+            row = f"{minute[-5:]:<6}"
+            for t in important_types:
+                count = types.get(t, 0)
+                row += f" {count:>12}"
+            print(row)
     
     def run(self):
         """Run full analysis"""
@@ -362,6 +573,31 @@ class LogAnalyzer:
         self.parse_worker_logs()
         self.calculate_worker_delays()
         self.print_report()
+
+
+def next_analysis_filename(base_dir: Path) -> Path:
+    """Find the next available data_analysis_X.txt filename"""
+    i = 1
+    while True:
+        candidate = base_dir / f"data_analysis_{i}.txt"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+class TeeStream:
+    """Write to both stdout and a file simultaneously"""
+    def __init__(self, file_obj, original_stdout):
+        self.file_obj = file_obj
+        self.stdout = original_stdout
+
+    def write(self, data):
+        self.stdout.write(data)
+        self.file_obj.write(data)
+
+    def flush(self):
+        self.stdout.flush()
+        self.file_obj.flush()
 
 
 def main():
@@ -376,8 +612,21 @@ def main():
         print(f"Error: Log directory not found: {log_dir}")
         sys.exit(1)
     
-    analyzer = LogAnalyzer(log_dir)
-    analyzer.run()
+    # Determine output file
+    project_root = Path(__file__).parent.parent
+    out_file = next_analysis_filename(project_root)
+    
+    # Tee stdout to both console and file
+    original_stdout = sys.stdout
+    with open(out_file, 'w') as f:
+        sys.stdout = TeeStream(f, original_stdout)
+        try:
+            analyzer = LogAnalyzer(log_dir)
+            analyzer.run()
+        finally:
+            sys.stdout = original_stdout
+    
+    print(f"\nReport saved to: {out_file}")
 
 
 if __name__ == "__main__":

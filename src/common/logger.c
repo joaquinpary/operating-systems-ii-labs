@@ -22,6 +22,7 @@ static logger_config_t g_config;
 static FILE* g_log_file = NULL;
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_initialized = 0;
+static int g_next_index = 1; // Next backup number to use (append-forward: .1=oldest, .N=newest)
 
 // ==================== PRIVATE FUNCTIONS ====================
 
@@ -57,48 +58,50 @@ static long get_file_size(const char* filename)
 }
 
 /**
- * @brief Rotate log files: app.log -> app.log.1 -> app.log.2 -> ... -> delete oldest
+ * @brief Scan existing backup files to find the next available index.
+ * Called once at init so rotate_files() can be O(1).
+ */
+static void scan_existing_backups(void)
+{
+    char path[LOG_PATH_BUFFER_SIZE];
+    g_next_index = 1;
+    while (1)
+    {
+        snprintf(path, sizeof(path), "%s.%d", g_config.log_file_path, g_next_index);
+        if (access(path, F_OK) != 0)
+            break;
+        g_next_index++;
+    }
+}
+
+/**
+ * @brief Rotate log files using O(1) append-forward scheme.
+ * app.log -> app.log.N (single rename, no shifting).
+ * .1 = oldest, .N = newest. Deletes excess old backups.
  */
 static int rotate_files(void)
 {
-    char old_name[LOG_PATH_BUFFER_SIZE];
     char new_name[LOG_PATH_BUFFER_SIZE];
 
-    // Delete the oldest file if it exists (e.g., app.log.5)
-    if (g_config.max_backup_files > 0)
-    {
-        snprintf(old_name, sizeof(old_name), "%s.%d", g_config.log_file_path, g_config.max_backup_files);
-        if (access(old_name, F_OK) == 0)
-        {
-            if (remove(old_name) != 0)
-            {
-                fprintf(stderr, "[LOGGER] Failed to remove oldest log file: %s\n", old_name);
-            }
-        }
-    }
-
-    // Rename existing backup files: app.log.3 -> app.log.4, app.log.2 -> app.log.3, etc.
-    for (int i = g_config.max_backup_files - 1; i >= 1; i--)
-    {
-        snprintf(old_name, sizeof(old_name), "%s.%d", g_config.log_file_path, i);
-        snprintf(new_name, sizeof(new_name), "%s.%d", g_config.log_file_path, i + 1);
-
-        if (access(old_name, F_OK) == 0)
-        {
-            if (rename(old_name, new_name) != 0)
-            {
-                fprintf(stderr, "[LOGGER] Failed to rename %s -> %s: %s\n", old_name, new_name, strerror(errno));
-                return -1;
-            }
-        }
-    }
-
-    // Rename current log file to .1
-    snprintf(new_name, sizeof(new_name), "%s.1", g_config.log_file_path);
+    // Single rename: app.log -> app.log.{next}
+    snprintf(new_name, sizeof(new_name), "%s.%d", g_config.log_file_path, g_next_index);
     if (rename(g_config.log_file_path, new_name) != 0)
     {
         fprintf(stderr, "[LOGGER] Failed to rename current log file: %s\n", strerror(errno));
         return -1;
+    }
+    g_next_index++;
+
+    // Delete the oldest backup if we exceeded max_backup_files
+    if (g_config.max_backup_files > 0)
+    {
+        int oldest = g_next_index - g_config.max_backup_files - 1;
+        if (oldest >= 1)
+        {
+            char old_name[LOG_PATH_BUFFER_SIZE];
+            snprintf(old_name, sizeof(old_name), "%s.%d", g_config.log_file_path, oldest);
+            remove(old_name); // Best-effort
+        }
     }
 
     return 0;
@@ -195,6 +198,9 @@ int log_init(const logger_config_t* config)
     {
         g_config.max_backup_files = 5; // Default: 5 backup files
     }
+
+    // Scan existing backups so rotate_files() knows where to continue
+    scan_existing_backups();
 
     // Open log file in append mode
     g_log_file = fopen(g_config.log_file_path, "a");

@@ -1,5 +1,7 @@
+#define _POSIX_C_SOURCE 200809L
 #include "shared_state.h"
 #include "json_manager.h"
+#include "timers.h"
 #include "unity.h"
 #include <string.h>
 #include <time.h>
@@ -7,6 +9,7 @@
 
 void setUp(void)
 {
+    load_timer_config();
     // Initialize IPC for each test
     ipc_init("test_client");
 }
@@ -137,7 +140,7 @@ void test_add_duplicate_ack_updates_timestamp(void)
 
     sem_wait(inventory_sem);
     shared_data->pending_acks[0].retry_count = 1;
-    time_t first_time = shared_data->pending_acks[0].send_time;
+    struct timespec first_time = shared_data->pending_acks[0].send_time;
     sem_post(inventory_sem);
 
     sleep(1); // Wait 1 second
@@ -148,7 +151,9 @@ void test_add_duplicate_ack_updates_timestamp(void)
     // Verify timestamp was updated but retry_count unchanged
     sem_wait(inventory_sem);
     TEST_ASSERT_EQUAL(1, shared_data->pending_acks[0].retry_count);
-    TEST_ASSERT_GREATER_THAN(first_time, shared_data->pending_acks[0].send_time);
+    struct timespec second_time = shared_data->pending_acks[0].send_time;
+    TEST_ASSERT_TRUE(second_time.tv_sec > first_time.tv_sec ||
+                     (second_time.tv_sec == first_time.tv_sec && second_time.tv_nsec > first_time.tv_nsec));
     sem_post(inventory_sem);
 }
 
@@ -227,7 +232,10 @@ void test_check_ack_timeouts_with_timeout(void)
     sem_t* inventory_sem = get_inventory_sem();
 
     sem_wait(inventory_sem);
-    shared_data->pending_acks[0].send_time = time(NULL) - (ACK_TIMEOUT_SECONDS + 1);
+    const timer_config_t* cfg = get_timer_config();
+    int ack_timeout_sec = cfg->ack_timeout_ms / 1000;
+    clock_gettime(CLOCK_MONOTONIC, &shared_data->pending_acks[0].send_time);
+    shared_data->pending_acks[0].send_time.tv_sec -= (ack_timeout_sec + 1);
     sem_post(inventory_sem);
 
     // Check for timeout - should detect and increment retry
@@ -252,11 +260,14 @@ void test_check_ack_timeouts_max_retries(void)
     shared_data_t* shared_data = get_shared_data();
     sem_t* inventory_sem = get_inventory_sem();
 
-    // Simulate MAX_RETRIES-1 attempts
-    for (int i = 0; i < MAX_RETRIES - 1; i++)
+    const timer_config_t* cfg2 = get_timer_config();
+    int ack_timeout_sec2 = cfg2->ack_timeout_ms / 1000;
+    // Simulate max_retries-1 attempts
+    for (int i = 0; i < cfg2->max_retries - 1; i++)
     {
         sem_wait(inventory_sem);
-        shared_data->pending_acks[0].send_time = time(NULL) - (ACK_TIMEOUT_SECONDS + 1);
+        clock_gettime(CLOCK_MONOTONIC, &shared_data->pending_acks[0].send_time);
+        shared_data->pending_acks[0].send_time.tv_sec -= (ack_timeout_sec2 + 1);
         sem_post(inventory_sem);
 
         int result = check_ack_timeouts();
@@ -265,7 +276,8 @@ void test_check_ack_timeouts_max_retries(void)
 
     // Final timeout - should trigger disconnect
     sem_wait(inventory_sem);
-    shared_data->pending_acks[0].send_time = time(NULL) - (ACK_TIMEOUT_SECONDS + 1);
+    clock_gettime(CLOCK_MONOTONIC, &shared_data->pending_acks[0].send_time);
+    shared_data->pending_acks[0].send_time.tv_sec -= (ack_timeout_sec2 + 1);
     sem_post(inventory_sem);
 
     int result = check_ack_timeouts();

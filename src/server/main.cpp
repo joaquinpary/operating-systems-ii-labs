@@ -88,7 +88,7 @@ int main()
             if (!log_dir)
                 log_dir = "logs/server";
             logger_config_t log_cfg = {
-                .max_file_size = 10 * 1024 * 1024, .max_backup_files = 5, .min_level = LOG_DEBUG};
+                .max_file_size = 50 * 1024 * 1024, .max_backup_files = 1000, .min_level = LOG_DEBUG};
             snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_reactor.log", log_dir);
             log_init(&log_cfg);
         }

@@ -13,6 +13,20 @@ services:
       - dhl_net
     volumes:
       - pgdata:/var/lib/postgresql/data
+    command:
+      - "postgres"
+      - "-c" 
+      - "shared_buffers=256MB"
+      - "-c"
+      - "checkpoint_timeout=15min"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "max_wal_size=1GB"
+      - "-c"
+      - "wal_buffers=16MB"
+      - "-c"
+      - "synchronous_commit=off"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U dhl_user -d dhl_db"]
       interval: 10s
@@ -60,19 +74,6 @@ services:
       - NUM_CLIENTS=${NUM_CLIENTS:-10}
       - CONFIG_BASE_PATH=/etc/client/client_%s.conf
       - LOG_DIR=/var/log/dhl
-      - CLIENT_INVENTORY_INTERVAL_MS=${CLIENT_INVENTORY_INTERVAL_MS:-60000}
-      - CLIENT_CONSUME_MIN_MS=${CLIENT_CONSUME_MIN_MS:-10000}
-      - CLIENT_CONSUME_MAX_MS=${CLIENT_CONSUME_MAX_MS:-30000}
-      - CLIENT_CONSUME_MIN_AMOUNT=${CLIENT_CONSUME_MIN_AMOUNT:-1}
-      - CLIENT_CONSUME_MAX_AMOUNT=${CLIENT_CONSUME_MAX_AMOUNT:-20}
-      - CLIENT_LOW_STOCK_THRESHOLD=${CLIENT_LOW_STOCK_THRESHOLD:-20}
-      - CLIENT_CRITICAL_STOCK_THRESHOLD=${CLIENT_CRITICAL_STOCK_THRESHOLD:-5}
-      - CLIENT_MAX_STOCK_PER_ITEM=${CLIENT_MAX_STOCK_PER_ITEM:-100}
-      - CLIENT_EMERGENCY_INTERVAL_MS=${CLIENT_EMERGENCY_INTERVAL_MS:-30000}
-      - CLIENT_ACK_TIMEOUT_MS=${CLIENT_ACK_TIMEOUT_MS:-5000}
-      - CLIENT_MAX_RETRIES=${CLIENT_MAX_RETRIES:-3}
-      - CLIENT_RESPONSE_DELAY_MIN_MS=${CLIENT_RESPONSE_DELAY_MIN_MS:-50}
-      - CLIENT_RESPONSE_DELAY_MAX_MS=${CLIENT_RESPONSE_DELAY_MAX_MS:-500}
     networks:
       - dhl_net
     volumes:

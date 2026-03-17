@@ -163,8 +163,8 @@ TEST_F(InventoryManagerTest, HandleShipmentNotice)
     strcpy(msg.source_role, "WAREHOUSE");
     strcpy(msg.timestamp, "2026-02-26T12:00:00Z");
 
-    int ret = inv_mgr->handle_shipment_notice(msg);
-    EXPECT_EQ(ret, 0);
+    stock_request_result ret = inv_mgr->handle_shipment_notice(msg);
+    EXPECT_TRUE(ret.success);
 
     // Verify status changed to DISPATCHED
     pqxx::work txn(*db_conn);

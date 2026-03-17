@@ -205,6 +205,7 @@ std::optional<response_slot_t> message_handler::generate_ack(const request_slot_
 std::vector<response_slot_t> message_handler::process_request(const request_slot_t& request)
 {
     std::vector<response_slot_t> responses;
+    std::string sess_id(request.session_id);
 
     // Handle disconnect notifications (reactor signals client disconnected)
     if (request.is_disconnect)
@@ -212,10 +213,28 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         std::string username(request.username);
         if (!username.empty())
         {
-            LOG_INFO_MSG("[WORKER] disconnect user=%s", username.c_str());
+            LOG_INFO_MSG("[WORKER] disconnect user=%s sess=%s", username.c_str(), request.session_id);
             m_auth_module.deactivate_client(username);
         }
+        // Mark session as dead so queued messages behind this one are skipped
+        if (!sess_id.empty())
+        {
+            std::unique_lock lock(m_dead_sessions_mutex);
+            m_dead_sessions.insert(sess_id);
+        }
         return responses;
+    }
+
+    // Skip messages for sessions already known to be dead (disconnect was
+    // processed earlier). This avoids wasting DB queries on stale messages.
+    if (!sess_id.empty())
+    {
+        std::shared_lock lock(m_dead_sessions_mutex);
+        if (m_dead_sessions.count(sess_id))
+        {
+            LOG_DEBUG_MSG("[WORKER] skipped dead sess=%s", request.session_id);
+            return responses;
+        }
     }
 
     // Reject messages from blacklisted sessions
