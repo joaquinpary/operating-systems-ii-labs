@@ -90,6 +90,15 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.max_retries = static_cast<std::uint32_t>(max_retries->valueint);
 
+    // Validate and parse keepalive_timeout
+    cJSON* keepalive_timeout = cJSON_GetObjectItemCaseSensitive(json, "keepalive_timeout");
+    if (!keepalive_timeout || !cJSON_IsNumber(keepalive_timeout))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'keepalive_timeout' field in config file");
+    }
+    config.keepalive_timeout = static_cast<std::uint32_t>(keepalive_timeout->valueint);
+
     // Validate and parse pool_size
     cJSON* pool_size = cJSON_GetObjectItemCaseSensitive(json, "pool_size");
     if (!pool_size || !cJSON_IsNumber(pool_size))

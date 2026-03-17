@@ -5,8 +5,9 @@
     "ack_timeout": 3,
     "max_auth_attempts": 3,
     "max_retries": 3,
-    "pool_size": 8,
-    "worker_threads": 4,
+    "keepalive_timeout": 120,
+    "pool_size": 24,
+    "worker_threads": 12,
     "credentials_path": "/etc/server/clients"
 }
 

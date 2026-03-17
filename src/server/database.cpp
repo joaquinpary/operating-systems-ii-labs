@@ -8,7 +8,8 @@
 #include <stdexcept>
 
 #define DEFAULT_DB_PORT 5432
-#define INITIAL_STOCK 100
+#define INITIAL_STOCK_HUB 100
+#define INITIAL_STOCK_WAREHOUSE 500
 
 namespace
 {
@@ -108,7 +109,6 @@ std::unique_ptr<pqxx::connection> connect_to_database()
 
         if (conn->is_open())
         {
-            std::cout << "Successfully connected to PostgreSQL database: " << conn->dbname() << std::endl;
             return conn;
         }
         else
@@ -142,10 +142,8 @@ int initialize_database(pqxx::connection& conn, const std::string& credentials_d
 
         if (populate_credentials_table(conn, credentials_dir_path) != 0)
         {
-            std::cout << "Note: Could not populate credentials table from " << credentials_dir_path << std::endl;
         }
 
-        std::cout << "Database initialized successfully." << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -170,7 +168,6 @@ int create_credentials_table(pqxx::connection& conn)
 
         txn.exec(sql);
         txn.commit();
-        std::cout << "Credentials table created successfully." << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -266,8 +263,6 @@ int populate_credentials_table(pqxx::connection& conn, const std::string& creden
         }
 
         txn.commit();
-        std::cout << "Populated " << count << " credentials into database from " << conf_count << " .conf files."
-                  << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -296,8 +291,6 @@ int create_inventory_tables(pqxx::connection& conn)
                                     ");";
 
         txn.exec(sql_inventory);
-        std::cout << "client_inventory table created successfully." << std::endl;
-
         // Create inventory_transactions table - audit trail with embedded items
         std::string sql_transactions = "CREATE TABLE IF NOT EXISTS inventory_transactions ("
                                        "transaction_id SERIAL PRIMARY KEY, "
@@ -319,8 +312,6 @@ int create_inventory_tables(pqxx::connection& conn)
                                        ");";
 
         txn.exec(sql_transactions);
-        std::cout << "inventory_transactions table created successfully." << std::endl;
-
         txn.commit();
         return 0;
     }
@@ -369,7 +360,6 @@ int update_client_inventory(pqxx::connection& conn, const std::string& client_id
                  pqxx::params{client_id, client_type, food, water, medicine, tools, guns, ammo, timestamp});
         txn.commit();
 
-        std::cout << "Updated inventory for client " << client_id << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -402,12 +392,10 @@ std::string get_warehouse_with_all_stock(pqxx::connection& conn, const int quant
 
         if (result.empty())
         {
-            std::cout << "No warehouse found with sufficient stock for all items" << std::endl;
             return "";
         }
 
         std::string warehouse_id = result[0][0].as<std::string>();
-        std::cout << "Found warehouse " << warehouse_id << " with sufficient stock" << std::endl;
         return warehouse_id;
     }
     catch (const std::exception& ex)
@@ -450,8 +438,6 @@ int create_transaction(pqxx::connection& conn, const std::string& transaction_ty
         int transaction_id = result[0][0].as<int>();
         txn.commit();
 
-        std::cout << "Created transaction " << transaction_id << " for " << destination_id << " (" << destination_type
-                  << ")" << std::endl;
         return transaction_id;
     }
     catch (const std::exception& ex)
@@ -478,8 +464,6 @@ int set_transaction_destination(pqxx::connection& conn, int transaction_id, cons
         txn.exec(pqxx::zview(sql), pqxx::params{client_id, client_type, transaction_id});
         txn.commit();
 
-        std::cout << "Set destination " << client_id << " (" << client_type << ") for transaction " << transaction_id
-                  << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -502,8 +486,6 @@ int set_transaction_source(pqxx::connection& conn, int transaction_id, const std
         txn.exec(pqxx::zview(sql), pqxx::params{client_id, client_type, transaction_id});
         txn.commit();
 
-        std::cout << "Set source " << client_id << " (" << client_type << ") for transaction " << transaction_id
-                  << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -525,7 +507,6 @@ int mark_transaction_dispatched(pqxx::connection& conn, int transaction_id, cons
         txn.exec(pqxx::zview(sql), pqxx::params{dispatch_timestamp, transaction_id});
         txn.commit();
 
-        std::cout << "Marked transaction " << transaction_id << " as dispatched" << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -546,7 +527,6 @@ int mark_transaction_assigned(pqxx::connection& conn, int transaction_id)
         txn.exec(pqxx::zview(sql), pqxx::params{transaction_id});
         txn.commit();
 
-        std::cout << "Marked transaction " << transaction_id << " as assigned" << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -568,7 +548,6 @@ int complete_transaction(pqxx::connection& conn, int transaction_id, const std::
         txn.exec(pqxx::zview(sql), pqxx::params{reception_timestamp, transaction_id});
         txn.commit();
 
-        std::cout << "Completed transaction " << transaction_id << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -618,7 +597,6 @@ int get_pending_transactions(pqxx::connection& conn, transaction_record* out_tra
             count++;
         }
 
-        std::cout << "Found " << count << " pending transactions" << std::endl;
         return count;
     }
     catch (const std::exception& ex)
@@ -710,10 +688,11 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
         return -1;
     }
 
-    // Initialize to max stock (default for clients with no inventory row — full stock on first run)
+    // Initialize to default stock based on role (warehouse gets more stock than hub)
+    int initial_stock = (client_type == "WAREHOUSE") ? INITIAL_STOCK_WAREHOUSE : INITIAL_STOCK_HUB;
     for (int i = 0; i < 6; i++)
     {
-        quantities_out[i] = INITIAL_STOCK;
+        quantities_out[i] = initial_stock;
     }
 
     try
@@ -725,14 +704,12 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
 
         if (result.empty())
         {
-            std::cout << "No inventory found for client " << client_id << ", inserting initial stock (" << INITIAL_STOCK
-                      << ")" << std::endl;
             std::string insert_sql =
                 "INSERT INTO client_inventory (client_id, client_type, food, water, medicine, tools, guns, ammo) "
                 "VALUES ($1, $2, $3, $3, $3, $3, $3, $3)";
-            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, INITIAL_STOCK});
+            txn.exec(pqxx::zview(insert_sql), pqxx::params{client_id, client_type, initial_stock});
             txn.commit();
-            // quantities_out already initialized to INITIAL_STOCK above
+            // quantities_out already initialized to initial_stock above
             return 0;
         }
 
@@ -743,7 +720,6 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
         quantities_out[4] = result[0][4].as<int>();
         quantities_out[5] = result[0][5].as<int>();
 
-        std::cout << "Retrieved inventory for client " << client_id << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -788,7 +764,6 @@ int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id
                                                 quantities[4], quantities[5]});
         txn.commit();
 
-        std::cout << (add ? "Added" : "Subtracted") << " inventory for client " << client_id << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -813,7 +788,6 @@ int set_client_active(pqxx::connection& conn, const std::string& username, bool 
         txn.exec(pqxx::zview(sql), pqxx::params{active, username});
         txn.commit();
 
-        std::cout << "Set client " << username << " active = " << (active ? "true" : "false") << std::endl;
         return 0;
     }
     catch (const std::exception& ex)
@@ -831,7 +805,6 @@ int reset_all_clients_inactive(pqxx::connection& conn)
         txn.exec("UPDATE credentials SET is_active = false");
         txn.commit();
 
-        std::cout << "Reset all clients to inactive." << std::endl;
         return 0;
     }
     catch (const std::exception& ex)

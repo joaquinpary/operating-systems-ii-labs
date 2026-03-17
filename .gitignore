@@ -41,3 +41,7 @@ external/
 # Configuration files
 config/clients/
 config/credentials.json
+.env
+
+# Logs and databases
+logs/

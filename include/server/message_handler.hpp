@@ -6,6 +6,7 @@
 #include "ipc.hpp"
 #include <common/json_manager.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ enum class message_category
 {
     AUTH_REQUEST,
     ACK_MESSAGE,
+    KEEPALIVE_MSG,
     INV_UPDATE,
     STOCK_REQ,
     RECEIPT_CONFIRM,
@@ -36,11 +38,20 @@ class message_handler
 {
   public:
     message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                    std::uint32_t max_retries);
+                    std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds);
     ~message_handler();
 
     /**
-     * Process a request slot and produce responses.
+     * Generate an immediate ACK for the request if applicable.
+     * This is a lightweight operation (JSON parse + ACK build, no DB access)
+     * and should be called and sent BEFORE process_request to avoid ACK timeouts.
+     * @return The ACK response slot, or std::nullopt if no ACK is needed.
+     */
+    std::optional<response_slot_t> generate_ack(const request_slot_t& request);
+
+    /**
+     * Process a request slot and produce responses (heavy business logic).
+     * ACK is NOT included — call generate_ack() separately before this.
      * @return vector of response commands to post back to the reactor via shared_queue.
      */
     std::vector<response_slot_t> process_request(const request_slot_t& request);
@@ -73,11 +84,14 @@ class message_handler
     response_slot_t make_clear_timers(const char* session_id);
     response_slot_t make_blacklist(const char* session_id);
     response_slot_t make_mark_authenticated(const char* session_id, const char* client_type, const char* username);
+    response_slot_t make_start_keepalive_timer(const char* session_id);
+    response_slot_t make_reset_keepalive_timer(const char* session_id);
 
     auth_module& m_auth_module;
     inventory_manager& m_inventory_manager;
     std::uint32_t m_ack_timeout_seconds;
     std::uint32_t m_max_retries;
+    std::uint32_t m_keepalive_timeout_seconds;
 };
 
 #endif // MESSAGE_HANDLER_HPP

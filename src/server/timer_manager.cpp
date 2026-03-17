@@ -1,5 +1,7 @@
 #include "timer_manager.hpp"
 
+#include <common/logger.h>
+
 #include <cstring>
 #include <iostream>
 #include <sys/timerfd.h>
@@ -7,29 +9,157 @@
 
 timer_manager::timer_manager(event_loop& loop) : m_loop(loop)
 {
-    std::cout << "[TIMER_MANAGER] Initialized" << std::endl;
+    m_timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
+    if (m_timerfd == -1)
+    {
+        std::cerr << "[TIMER] timerfd_create fail: " << strerror(errno) << '\n';
+        LOG_ERROR_MSG("[TIMER] timerfd_create fail: %s", strerror(errno));
+        return;
+    }
+
+    m_loop.add_fd(m_timerfd, EPOLLIN, [this](std::uint32_t /*events*/) { on_timerfd_ready(); });
+
+    LOG_INFO_MSG("[TIMER] init timerfd=%d", m_timerfd);
 }
 
 timer_manager::~timer_manager()
 {
-    // Cancel all ACK timers
-    for (auto& [session_id, timer_map] : m_ack_timers)
+    m_heap.clear();
+    m_index.clear();
+
+    if (m_timerfd != -1)
     {
-        for (auto& [msg_ts, tfd] : timer_map)
+        m_loop.remove_fd(m_timerfd);
+        ::close(m_timerfd);
+    }
+
+    LOG_INFO_MSG("[TIMER] destroyed");
+}
+
+// ==================== INTERNAL HELPERS ====================
+
+void timer_manager::insert_timer(const timer_key& key, int timeout_seconds, std::function<void()> callback)
+{
+    // Cancel any existing timer with the same key
+    cancel_timer(key);
+
+    auto deadline = clock_t::now() + std::chrono::seconds(timeout_seconds);
+
+    timer_entry entry;
+    entry.key = key;
+    entry.callback = std::move(callback);
+
+    auto it = m_heap.emplace(deadline, std::move(entry));
+    m_index[key] = it;
+
+    rearm_timerfd();
+}
+
+bool timer_manager::cancel_timer(const timer_key& key)
+{
+    auto idx_it = m_index.find(key);
+    if (idx_it == m_index.end())
+    {
+        return false;
+    }
+
+    bool was_earliest = (idx_it->second == m_heap.begin());
+
+    m_heap.erase(idx_it->second);
+    m_index.erase(idx_it);
+
+    // Only re-arm if we removed the earliest timer (otherwise the timerfd is still correct)
+    if (was_earliest)
+    {
+        rearm_timerfd();
+    }
+
+    return true;
+}
+
+void timer_manager::rearm_timerfd()
+{
+    struct itimerspec ts
+    {
+    };
+
+    if (m_heap.empty())
+    {
+        // Disarm: setting both fields to 0 disarms the timerfd
+        timerfd_settime(m_timerfd, 0, &ts, nullptr);
+        return;
+    }
+
+    auto now = clock_t::now();
+    auto earliest = m_heap.begin()->first;
+    auto delta = std::chrono::duration_cast<std::chrono::nanoseconds>(earliest - now);
+
+    if (delta.count() <= 0)
+    {
+        // Already expired — fire as soon as possible
+        ts.it_value.tv_nsec = 1;
+    }
+    else
+    {
+        auto secs = std::chrono::duration_cast<std::chrono::seconds>(delta);
+        auto nsecs = delta - secs;
+        ts.it_value.tv_sec = secs.count();
+        ts.it_value.tv_nsec = nsecs.count();
+        if (ts.it_value.tv_sec == 0 && ts.it_value.tv_nsec == 0)
         {
-            close_timerfd(tfd);
+            ts.it_value.tv_nsec = 1;
         }
     }
-    m_ack_timers.clear();
 
-    // Cancel all keepalive timers
-    for (auto& [session_id, tfd] : m_keepalive_timers)
+    // One-shot (it_interval stays zero)
+    if (timerfd_settime(m_timerfd, 0, &ts, nullptr) == -1)
     {
-        close_timerfd(tfd);
+        std::cerr << "[TIMER] settime fail: " << strerror(errno) << '\n';
+        LOG_ERROR_MSG("[TIMER] settime fail: %s", strerror(errno));
     }
-    m_keepalive_timers.clear();
+}
 
-    std::cout << "[TIMER_MANAGER] Destroyed" << std::endl;
+void timer_manager::on_timerfd_ready()
+{
+    // Read the timerfd to acknowledge expiry (required to disarm)
+    std::uint64_t expirations;
+    (void)read(m_timerfd, &expirations, sizeof(expirations));
+
+    auto now = clock_t::now();
+
+    // Pop and fire all expired timers.
+    // We collect callbacks first, then invoke them, because a callback
+    // might insert or cancel other timers (mutating m_heap / m_index).
+    std::vector<std::function<void()>> to_fire;
+
+    while (!m_heap.empty())
+    {
+        auto it = m_heap.begin();
+        if (it->first > now)
+        {
+            break; // No more expired entries
+        }
+
+        // Remove from index
+        m_index.erase(it->second.key);
+
+        to_fire.push_back(std::move(it->second.callback));
+        m_heap.erase(it);
+    }
+
+    // Re-arm BEFORE firing callbacks so that any timers created inside callbacks
+    // can further adjust the timerfd.
+    rearm_timerfd();
+
+    if (!to_fire.empty())
+    {
+        LOG_DEBUG_MSG("[TIMER] fired %zu expired timers", to_fire.size());
+    }
+
+    for (auto& cb : to_fire)
+    {
+        cb();
+    }
 }
 
 // ==================== ACK TIMERS ====================
@@ -37,182 +167,94 @@ timer_manager::~timer_manager()
 void timer_manager::start_ack_timer(const std::string& session_id, const std::string& msg_timestamp,
                                     int timeout_seconds, std::function<void()> on_timeout)
 {
-    // Cancel existing timer for this session/timestamp if any
-    cancel_ack_timer(session_id, msg_timestamp);
+    timer_key key{"ack", session_id, msg_timestamp};
+    insert_timer(key, timeout_seconds, std::move(on_timeout));
 
-    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    if (tfd == -1)
-    {
-        std::cerr << "[TIMER] timerfd_create failed: " << strerror(errno) << std::endl;
-        return;
-    }
-
-    struct itimerspec ts
-    {
-    };
-    ts.it_value.tv_sec = timeout_seconds;
-    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
-    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
-    ts.it_interval.tv_sec = 0; // One-shot
-    ts.it_interval.tv_nsec = 0;
-
-    if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
-    {
-        std::cerr << "[TIMER] timerfd_settime failed: " << strerror(errno) << std::endl;
-        ::close(tfd);
-        return;
-    }
-
-    // Register with event loop (level-triggered for timerfd)
-    m_loop.add_fd(tfd, EPOLLIN, [this, tfd, session_id, msg_timestamp, on_timeout](std::uint32_t /*events*/) {
-        // Read the timerfd to acknowledge expiry
-        std::uint64_t expirations;
-        ssize_t n = read(tfd, &expirations, sizeof(expirations));
-        (void)n; // We don't need the count
-
-        std::cout << "[TIMER] ACK timeout for session: " << session_id << ", message: " << msg_timestamp << std::endl;
-
-        // Clean up this timerfd from our map and epoll before calling callback
-        close_timerfd(tfd);
-
-        auto session_it = m_ack_timers.find(session_id);
-        if (session_it != m_ack_timers.end())
-        {
-            session_it->second.erase(msg_timestamp);
-            if (session_it->second.empty())
-            {
-                m_ack_timers.erase(session_it);
-            }
-        }
-
-        // Execute timeout callback
-        on_timeout();
-    });
-
-    m_ack_timers[session_id][msg_timestamp] = tfd;
-
-    std::cout << "[TIMER] Started ACK timer for session: " << session_id << ", message: " << msg_timestamp
-              << " (timeout: " << timeout_seconds << "s)" << std::endl;
+    LOG_INFO_MSG("[TIMER] +ACK sess=%s ts=%s timeout=%ds", session_id.c_str(), msg_timestamp.c_str(), timeout_seconds);
 }
 
 bool timer_manager::cancel_ack_timer(const std::string& session_id, const std::string& msg_timestamp)
 {
-    auto session_it = m_ack_timers.find(session_id);
-    if (session_it == m_ack_timers.end())
+    timer_key key{"ack", session_id, msg_timestamp};
+    bool found = cancel_timer(key);
+
+    if (found)
     {
-        return false;
+        LOG_INFO_MSG("[TIMER] -ACK sess=%s ts=%s", session_id.c_str(), msg_timestamp.c_str());
     }
 
-    auto timer_it = session_it->second.find(msg_timestamp);
-    if (timer_it == session_it->second.end())
-    {
-        return false;
-    }
-
-    close_timerfd(timer_it->second);
-    session_it->second.erase(timer_it);
-
-    if (session_it->second.empty())
-    {
-        m_ack_timers.erase(session_it);
-    }
-
-    std::cout << "[TIMER] Cancelled ACK timer for session: " << session_id << ", message: " << msg_timestamp
-              << std::endl;
-    return true;
+    return found;
 }
 
-// ==================== KEEPALIVE TIMERS (PLACEHOLDER) ====================
+// ==================== KEEPALIVE TIMERS ====================
 
 void timer_manager::start_keepalive_timer(const std::string& session_id, int timeout_seconds,
                                           std::function<void()> on_timeout)
 {
-    // Cancel existing
+    // Cancel existing keepalive for this session
     cancel_keepalive_timer(session_id);
 
-    int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
-    if (tfd == -1)
-    {
-        std::cerr << "[TIMER] timerfd_create failed: " << strerror(errno) << std::endl;
-        return;
-    }
+    // Store timeout + callback for future resets
+    m_keepalive_timeouts[session_id] = timeout_seconds;
+    m_keepalive_callbacks[session_id] = on_timeout;
 
-    struct itimerspec ts
-    {
-    };
-    ts.it_value.tv_sec = timeout_seconds;
-    // timerfd disarms when both tv_sec and tv_nsec are 0; use 1ns for immediate fire
-    ts.it_value.tv_nsec = (timeout_seconds == 0) ? 1 : 0;
-    ts.it_interval.tv_sec = 0;
-    ts.it_interval.tv_nsec = 0;
+    timer_key key{"keepalive", session_id, ""};
+    insert_timer(key, timeout_seconds, on_timeout);
 
-    if (timerfd_settime(tfd, 0, &ts, nullptr) == -1)
-    {
-        std::cerr << "[TIMER] timerfd_settime failed: " << strerror(errno) << std::endl;
-        ::close(tfd);
-        return;
-    }
-
-    m_loop.add_fd(tfd, EPOLLIN, [this, tfd, session_id, on_timeout](std::uint32_t /*events*/) {
-        std::uint64_t expirations;
-        ssize_t n = read(tfd, &expirations, sizeof(expirations));
-        (void)n;
-
-        std::cout << "[TIMER] Keepalive timeout for session: " << session_id << std::endl;
-
-        close_timerfd(tfd);
-        m_keepalive_timers.erase(session_id);
-
-        on_timeout();
-    });
-
-    m_keepalive_timers[session_id] = tfd;
-
-    std::cout << "[TIMER] Started keepalive timer for session: " << session_id << " (timeout: " << timeout_seconds
-              << "s)" << std::endl;
+    LOG_INFO_MSG("[TIMER] +KA sess=%s timeout=%ds", session_id.c_str(), timeout_seconds);
 }
 
 void timer_manager::reset_keepalive_timer(const std::string& session_id)
 {
-    auto it = m_keepalive_timers.find(session_id);
-    if (it != m_keepalive_timers.end())
+    auto timeout_it = m_keepalive_timeouts.find(session_id);
+    if (timeout_it == m_keepalive_timeouts.end())
     {
-        std::cout << "[TIMER] Reset keepalive timer for session: " << session_id << " (PLACEHOLDER)" << std::endl;
+        return;
     }
+
+    auto cb_it = m_keepalive_callbacks.find(session_id);
+    if (cb_it == m_keepalive_callbacks.end())
+    {
+        return;
+    }
+
+    timer_key key{"keepalive", session_id, ""};
+    insert_timer(key, timeout_it->second, cb_it->second);
+
+    LOG_DEBUG_MSG("[TIMER] ~KA sess=%s reset=%ds", session_id.c_str(), timeout_it->second);
 }
 
 void timer_manager::cancel_keepalive_timer(const std::string& session_id)
 {
-    auto it = m_keepalive_timers.find(session_id);
-    if (it != m_keepalive_timers.end())
+    timer_key key{"keepalive", session_id, ""};
+    if (cancel_timer(key))
     {
-        close_timerfd(it->second);
-        m_keepalive_timers.erase(it);
-        std::cout << "[TIMER] Cancelled keepalive timer for session: " << session_id << std::endl;
+        LOG_INFO_MSG("[TIMER] -KA sess=%s", session_id.c_str());
     }
+    m_keepalive_timeouts.erase(session_id);
+    m_keepalive_callbacks.erase(session_id);
 }
 
 // ==================== SESSION CLEANUP ====================
 
 void timer_manager::clear_session_timers(const std::string& session_id)
 {
-    auto ack_it = m_ack_timers.find(session_id);
-    if (ack_it != m_ack_timers.end())
+    // Collect all timer_keys belonging to this session, then erase them.
+    // We can't erase while iterating m_index because cancel_timer mutates it.
+    std::vector<timer_key> to_cancel;
+    for (auto& [key, _] : m_index)
     {
-        for (auto& [msg_ts, tfd] : ack_it->second)
+        if (key.session == session_id)
         {
-            close_timerfd(tfd);
+            to_cancel.push_back(key);
         }
-        m_ack_timers.erase(ack_it);
     }
 
-    cancel_keepalive_timer(session_id);
-}
+    for (auto& key : to_cancel)
+    {
+        cancel_timer(key);
+    }
 
-// ==================== Helper ====================
-
-void timer_manager::close_timerfd(int fd)
-{
-    m_loop.remove_fd(fd);
-    ::close(fd);
+    m_keepalive_timeouts.erase(session_id);
+    m_keepalive_callbacks.erase(session_id);
 }

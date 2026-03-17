@@ -9,15 +9,13 @@
 
 // Configuration constants
 #define MAX_PENDING_ACKS 10
-#define ACK_TIMEOUT_SECONDS 5
-#define MAX_RETRIES 3
 
 // ==================== DATA STRUCTURES ====================
 
 // Structure to track pending ACKs
 typedef struct
 {
-    time_t send_time;
+    struct timespec send_time;
     char msg_id[TIMESTAMP_SIZE];
     char msg_type[MESSAGE_TYPE_SIZE];
     char message_json[BUFFER_SIZE];
@@ -171,6 +169,25 @@ int count_items_above_threshold(int threshold);
  */
 int get_low_stock_report(int low_threshold, int critical_threshold, int max_stock, inventory_item_t* out_low_items,
                          int* out_item_indices, int* out_critical_count);
+
+/**
+ * Log the current inventory state at DEBUG level
+ * @param context Label shown in the log line to identify the call site
+ */
+void log_inventory_snapshot(const char* context);
+
+/**
+ * Build a full QUANTITY_ITEMS payload from a low-stock subset
+ *
+ * Preserves canonical inventory item identity (item_id + item_name) for all items.
+ * Items present in low_items keep their requested quantity; the rest are set to 0.
+ *
+ * @param low_items Subset array returned by get_low_stock_report
+ * @param low_count Number of entries in low_items
+ * @param out_full_items Output array with QUANTITY_ITEMS entries
+ * @return 0 on success, -1 on error
+ */
+int build_full_request_payload(const inventory_item_t* low_items, int low_count, inventory_item_t* out_full_items);
 
 /**
  * Mark requested items as pending replenishment

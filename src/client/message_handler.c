@@ -1,9 +1,27 @@
 #include "message_handler.h"
+#include "timers.h"
 #include "json_manager.h"
 #include "logger.h"
 #include "shared_state.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+static void random_response_delay(void)
+{
+    const timer_config_t* cfg = get_timer_config();
+    static int seeded = 0;
+    if (!seeded)
+    {
+        srand((unsigned)(time(NULL) ^ getpid()));
+        seeded = 1;
+    }
+    int delay_ms = cfg->response_delay_min_ms + (rand() % (cfg->response_delay_max_ms - cfg->response_delay_min_ms + 1));
+    struct timespec ts = {0, (long)delay_ms * 1000000L};
+    nanosleep(&ts, NULL);
+}
 
 /**
  * @brief Helper function to create and enqueue an ACK message
@@ -77,6 +95,8 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        log_inventory_snapshot("INVENTORY_UPDATE recv");
+
         if (send_ack_to_server(msg->timestamp) != 0)
         {
             return -1;
@@ -98,6 +118,9 @@ int handle_server_message(const message_t* msg)
         }
         LOG_DEBUG_MSG("ACK sent for dispatch order");
 
+        // Delay before processing dispatch to avoid burst traffic
+        random_response_delay();
+
         // Reduce inventory
         const payload_order_stock* order = &msg->payload.order_stock;
         if (modify_inventory(order->items, INVENTORY_REDUCE) != 0)
@@ -105,6 +128,8 @@ int handle_server_message(const message_t* msg)
             LOG_ERROR_MSG("Failed to reduce inventory for dispatch order");
             return -1;
         }
+
+        log_inventory_snapshot("ORDER_TO_DISPATCH recv");
 
         // Send shipment notice
         message_t shipment_msg;
@@ -122,6 +147,51 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
         LOG_INFO_MSG("Shipment notice sent, dispatching to HUB %s", msg->target_id);
+
+        // Delay before checking replenishment to avoid burst traffic
+        random_response_delay();
+
+        // Check if dispatch left warehouse below stock threshold
+        inventory_item_t low_items[QUANTITY_ITEMS];
+        int low_indices[QUANTITY_ITEMS];
+        int critical_count = 0;
+
+        const timer_config_t* cfg = get_timer_config();
+        int low_count = get_low_stock_report(cfg->low_stock_threshold, cfg->critical_stock_threshold,
+                             cfg->max_stock_per_item, low_items, low_indices, &critical_count);
+
+        if (low_count > 0)
+        {
+            LOG_INFO_MSG("Post-dispatch: %d items below threshold, requesting replenishment", low_count);
+
+            message_t replenish_msg;
+            inventory_item_t full_request_items[QUANTITY_ITEMS];
+
+            if (build_full_request_payload(low_items, low_count, full_request_items) != 0)
+            {
+                LOG_ERROR_MSG("Failed to build full warehouse replenish payload");
+                return -1;
+            }
+
+            if (create_items_message(&replenish_msg, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, shared_data->client_id,
+                                     SERVER, full_request_items, QUANTITY_ITEMS, NULL) == 0)
+            {
+                if (enqueue_pending_message(&replenish_msg) == 0)
+                {
+                    mark_pending_stock_requests(low_indices, low_count);
+                    LOG_INFO_MSG("Warehouse replenish request enqueued for %d items", low_count);
+                }
+                else
+                {
+                    LOG_ERROR_MSG("Failed to enqueue warehouse replenish request");
+                }
+            }
+            else
+            {
+                LOG_ERROR_MSG("Failed to create warehouse replenish request");
+            }
+        }
+
         return 0;
     }
 
@@ -146,7 +216,12 @@ int handle_server_message(const message_t* msg)
             return -1;
         }
 
+        log_inventory_snapshot("RESTOCK recv");
+
         clear_pending_stock_requests(restock->items, QUANTITY_ITEMS);
+
+        // Delay before sending receipt confirmation to avoid burst traffic
+        random_response_delay();
 
         // Send receipt confirmation (role-specific message type)
         message_t receipt_msg;
@@ -155,7 +230,7 @@ int handle_server_message(const message_t* msg)
                                        : WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION;
 
         if (create_items_message(&receipt_msg, receipt_type, shared_data->client_id, SERVER, restock->items,
-                                 QUANTITY_ITEMS, msg->timestamp) != 0)
+                                 QUANTITY_ITEMS, restock->order_timestamp) != 0)
         {
             LOG_ERROR_MSG("Failed to create receipt confirmation message");
             return -1;

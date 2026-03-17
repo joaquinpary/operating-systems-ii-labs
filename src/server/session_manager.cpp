@@ -59,9 +59,19 @@ void session_manager::mark_authenticated(const std::string& session_id, const st
     auto it = m_sessions.find(session_id);
     if (it != m_sessions.end())
     {
+        // Remove old reverse mapping if username was already set
+        if (!it->second.username.empty())
+        {
+            m_username_to_session.erase(it->second.username);
+        }
         it->second.is_authenticated = true;
         it->second.client_type = client_type;
         it->second.username = username;
+        // Add reverse mapping
+        if (!username.empty())
+        {
+            m_username_to_session[username] = session_id;
+        }
     }
 }
 
@@ -91,7 +101,11 @@ void session_manager::blacklist_session(const std::string& session_id)
     if (it != m_sessions.end())
     {
         it->second.is_blacklisted = true;
-        std::cout << "[SESSION] Blacklisted session: " << session_id << std::endl;
+        // Remove from reverse index so find_session_by_username won't find blacklisted sessions
+        if (!it->second.username.empty())
+        {
+            m_username_to_session.erase(it->second.username);
+        }
     }
 }
 
@@ -109,7 +123,15 @@ std::unique_ptr<session_info> session_manager::get_session_info(const std::strin
 
 void session_manager::remove_session(const std::string& session_id)
 {
-    m_sessions.erase(session_id);
+    auto it = m_sessions.find(session_id);
+    if (it != m_sessions.end())
+    {
+        if (!it->second.username.empty())
+        {
+            m_username_to_session.erase(it->second.username);
+        }
+        m_sessions.erase(it);
+    }
 }
 
 std::string session_manager::get_client_type(const std::string& session_id) const
@@ -124,14 +146,21 @@ std::string session_manager::get_client_type(const std::string& session_id) cons
 
 std::string session_manager::find_session_by_username(const std::string& username) const
 {
-    for (const auto& [session_id, info] : m_sessions)
+    auto it = m_username_to_session.find(username);
+    if (it != m_username_to_session.end())
     {
-        if (info.is_authenticated && !info.is_blacklisted && info.username == username)
+        auto sess_it = m_sessions.find(it->second);
+        if (sess_it != m_sessions.end() && sess_it->second.is_authenticated && !sess_it->second.is_blacklisted)
         {
-            return session_id;
+            return it->second;
         }
     }
     return "";
+}
+
+bool session_manager::has_session(const std::string& session_id) const
+{
+    return m_sessions.find(session_id) != m_sessions.end();
 }
 
 std::optional<posix_address> session_manager::get_udp_endpoint(const std::string& session_id) const

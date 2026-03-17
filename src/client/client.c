@@ -1,4 +1,5 @@
 #include "client.h"
+#include "timers.h"
 #include "connection.h"
 #include "logger.h"
 #include "logic.h"
@@ -171,30 +172,40 @@ int run_client(const char* config_path)
     client_context ctx;
     client_credentials creds;
 
-    if (parse_conf(config_path, &config, &creds) != 0)
-    {
-        fprintf(stderr, "Failed to parse config file '%s'\n", config_path);
-        return 1;
-    }
-
-    // Initialize logger with per-client log file
+    // Initialize logger before parse_conf so any early errors are captured.
+    // Derive log name from the config filename (e.g. client_0001.conf → client_0001.log).
     const char* log_dir = getenv("LOG_DIR");
     if (!log_dir)
         log_dir = "/tmp";
 
-    char log_path[FILE_PATH];
-    snprintf(log_path, sizeof(log_path), "%s/%s.log", log_dir, creds.username);
+    // Extract basename without extension from config_path
+    const char* slash = strrchr(config_path, '/');
+    const char* basename = slash ? slash + 1 : config_path;
+    char log_stem[FILE_PATH];
+    strncpy(log_stem, basename, sizeof(log_stem) - 1);
+    log_stem[sizeof(log_stem) - 1] = '\0';
+    char* dot = strrchr(log_stem, '.');
+    if (dot)
+        *dot = '\0';
 
     logger_config_t log_config = {.max_file_size = 10 * 1024 * 1024, // 10 MB
                                   .max_backup_files = 5,
                                   .min_level = LOG_DEBUG};
 
-    strncpy(log_config.log_file_path, log_path, FILE_PATH - 1);
-    log_config.log_file_path[FILE_PATH - 1] = '\0';
+    snprintf(log_config.log_file_path, sizeof(log_config.log_file_path), "%s/%s.log", log_dir, log_stem);
 
     if (log_init(&log_config) != 0)
     {
-        fprintf(stderr, "Failed to initialize logger\n");
+        fprintf(stderr, "Failed to initialize logger for '%s'\n", config_path);
+        return 1;
+    }
+
+    load_timer_config();
+
+    if (parse_conf(config_path, &config, &creds) != 0)
+    {
+        fprintf(stderr, "Failed to parse config file '%s'\n", config_path);
+        log_close();
         return 1;
     }
 

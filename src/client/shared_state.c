@@ -1,6 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
+#include "timers.h"
 #include "shared_state.h"
 #include "json_manager.h"
+#include "logger.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,7 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define ITEMS_NAME "FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"
+#define ITEMS_NAME "food", "water", "medicine", "tools", "guns", "ammo"
 #define IPC_NAME_BUFFER_SIZE 64
 
 static int shm_fd = -1;
@@ -22,6 +24,13 @@ static sem_t* message_available_sem = NULL;
 static char shm_name[IPC_NAME_BUFFER_SIZE];
 static char inventory_sem_name[IPC_NAME_BUFFER_SIZE];
 static char message_sem_name[IPC_NAME_BUFFER_SIZE];
+
+static long elapsed_ms(const struct timespec* start, const struct timespec* end)
+{
+    long sec_ms = (long)(end->tv_sec - start->tv_sec) * 1000L;
+    long nsec_ms = (long)(end->tv_nsec - start->tv_nsec) / 1000000L;
+    return sec_ms + nsec_ms;
+}
 
 int ipc_init(const char* client_id)
 {
@@ -209,17 +218,28 @@ int modify_inventory(const inventory_item_t* items, inventory_operation_t operat
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        if (operation == INVENTORY_ADD)
-        {
-            shared_data->inventory_item[i].quantity += items[i].quantity;
-        }
-        else if (operation == INVENTORY_REDUCE)
-        {
-            int requested_qty = items[i].quantity;
-            int available_qty = shared_data->inventory_item[i].quantity;
-            int actual_qty = (requested_qty <= available_qty) ? requested_qty : available_qty;
+        if (items[i].item_id == 0 || items[i].quantity == 0)
+            continue;
 
-            shared_data->inventory_item[i].quantity -= actual_qty;
+        // Match incoming item to local slot by item_id, not by index
+        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        {
+            if (shared_data->inventory_item[j].item_id != items[i].item_id)
+                continue;
+
+            if (operation == INVENTORY_ADD)
+            {
+                shared_data->inventory_item[j].quantity += items[i].quantity;
+            }
+            else if (operation == INVENTORY_REDUCE)
+            {
+                int requested_qty = items[i].quantity;
+                int available_qty = shared_data->inventory_item[j].quantity;
+                int actual_qty = (requested_qty <= available_qty) ? requested_qty : available_qty;
+
+                shared_data->inventory_item[j].quantity -= actual_qty;
+            }
+            break;
         }
     }
 
@@ -326,6 +346,55 @@ int get_low_stock_report(int low_threshold, int critical_threshold, int max_stoc
     return low_count;
 }
 
+void log_inventory_snapshot(const char* context)
+{
+    inventory_item_t snapshot[QUANTITY_ITEMS];
+    if (get_inventory_snapshot(snapshot) != 0)
+    {
+        LOG_DEBUG_MSG("[%s] inventory snapshot unavailable", context ? context : "?");
+        return;
+    }
+
+    LOG_DEBUG_MSG("[%s] Current inventory:", context ? context : "?");
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        LOG_DEBUG_MSG("  item_id=%d  %-10s  qty=%d", snapshot[i].item_id, snapshot[i].item_name, snapshot[i].quantity);
+    }
+}
+
+int build_full_request_payload(const inventory_item_t* low_items, int low_count, inventory_item_t* out_full_items)
+{
+    if (out_full_items == NULL || low_items == NULL || low_count < 0)
+    {
+        return -1;
+    }
+
+    if (get_inventory_snapshot(out_full_items) != 0)
+    {
+        return -1;
+    }
+
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        out_full_items[i].quantity = 0;
+    }
+
+    for (int i = 0; i < low_count; i++)
+    {
+        int low_item_id = low_items[i].item_id;
+        for (int j = 0; j < QUANTITY_ITEMS; j++)
+        {
+            if (out_full_items[j].item_id == low_item_id)
+            {
+                out_full_items[j].quantity = low_items[i].quantity;
+                break;
+            }
+        }
+    }
+
+    return 0;
+}
+
 void mark_pending_stock_requests(const int* item_indices, int count)
 {
     if (item_indices == NULL || count <= 0)
@@ -426,6 +495,13 @@ void wake_sender_thread(void)
 
 int add_pending_ack(const char* msg_id, const char* msg_type, const char* message_json)
 {
+    const timer_config_t* cfg = get_timer_config();
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        return -1;
+    }
+
     sem_wait(inventory_sem);
 
     for (int i = 0; i < MAX_PENDING_ACKS; i++)
@@ -433,10 +509,10 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
         if (shared_data->pending_acks[i].active && strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0 &&
             strcmp(shared_data->pending_acks[i].msg_type, msg_type) == 0)
         {
-            shared_data->pending_acks[i].send_time = time(NULL);
+            shared_data->pending_acks[i].send_time = now;
             sem_post(inventory_sem);
             printf("[ACK_TRACK] Updated send_time for existing msg_id: %s, type: %s (retry %d/%d)\n", msg_id, msg_type,
-                   shared_data->pending_acks[i].retry_count, MAX_RETRIES);
+                   shared_data->pending_acks[i].retry_count, cfg->max_retries);
             return 0;
         }
     }
@@ -446,7 +522,7 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
         if (!shared_data->pending_acks[i].active)
         {
             shared_data->pending_acks[i].active = 1;
-            shared_data->pending_acks[i].send_time = time(NULL);
+            shared_data->pending_acks[i].send_time = now;
             shared_data->pending_acks[i].retry_count = 0;
             strncpy(shared_data->pending_acks[i].msg_id, msg_id, sizeof(shared_data->pending_acks[i].msg_id) - 1);
             strncpy(shared_data->pending_acks[i].msg_type, msg_type, sizeof(shared_data->pending_acks[i].msg_type) - 1);
@@ -484,7 +560,13 @@ int remove_pending_ack(const char* msg_id)
 
 int check_ack_timeouts(void)
 {
-    time_t now = time(NULL);
+    const timer_config_t* cfg = get_timer_config();
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+    {
+        return -1;
+    }
+
     int needs_retransmission = 0;
 
     sem_wait(inventory_sem);
@@ -493,22 +575,23 @@ int check_ack_timeouts(void)
     {
         if (shared_data->pending_acks[i].active)
         {
-            time_t elapsed = now - shared_data->pending_acks[i].send_time;
-            if (elapsed >= ACK_TIMEOUT_SECONDS)
+            long elapsed = elapsed_ms(&shared_data->pending_acks[i].send_time, &now);
+            if (elapsed >= cfg->ack_timeout_ms)
             {
                 shared_data->pending_acks[i].retry_count++;
 
-                if (shared_data->pending_acks[i].retry_count >= MAX_RETRIES)
+                if (shared_data->pending_acks[i].retry_count >= cfg->max_retries)
                 {
                     fprintf(stderr, "[ACK_TRACK] MAX RETRIES (%d) reached for msg_id: %s - Disconnecting\n",
-                            MAX_RETRIES, shared_data->pending_acks[i].msg_id);
+                            cfg->max_retries, shared_data->pending_acks[i].msg_id);
                     shared_data->ack_timeout_occurred = 1;
                     sem_post(inventory_sem);
                     return -1; // Signal disconnection
                 }
 
-                fprintf(stderr, "[ACK_TRACK] TIMEOUT! No ACK for msg_id: %s (retry %d/%d)\n",
-                        shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count, MAX_RETRIES);
+                fprintf(stderr, "[ACK_TRACK] TIMEOUT! No ACK for msg_id: %s (retry %d/%d, timeout=%dms)\n",
+                        shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count,
+                        cfg->max_retries, cfg->ack_timeout_ms);
 
                 shared_data->pending_acks[i].send_time = now;
                 needs_retransmission = 1;

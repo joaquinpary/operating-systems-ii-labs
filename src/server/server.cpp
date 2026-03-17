@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <common/json_manager.h>
+#include <common/logger.h>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
@@ -45,9 +46,13 @@ void tcp_session::notify_disconnect()
     req.is_authenticated = true;
     std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
     std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
-    m_shm.push_request(req);
+    if (!m_shm.push_request(req))
+    {
+        LOG_WARNING_MSG("[TCP] IPC queue full, disconnect dropped user=%s sess=%s", info->username.c_str(),
+                        m_session_id.c_str());
+    }
 
-    std::cout << "[TCP] Disconnect notification pushed for " << info->username << std::endl;
+    LOG_INFO_MSG("[TCP] disconnect user=%s sess=%s", info->username.c_str(), m_session_id.c_str());
 }
 
 void tcp_session::start()
@@ -110,7 +115,7 @@ void tcp_session::on_readable()
             // We have a complete BUFFER_SIZE read — process it
             m_read_buf[BUFFER_SIZE - 1] = '\0';
             std::string json_input(m_read_buf.data());
-            std::cout << "\n\n[TCP] <- " << json_input << std::endl;
+            LOG_INFO_MSG("[TCP] <- sess=%s len=%zu", m_session_id.c_str(), m_read_offset);
 
             // Fill request slot and push to workers
             request_slot_t req{};
@@ -130,7 +135,10 @@ void tcp_session::on_readable()
                 std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
             }
 
-            m_shm.push_request(req);
+            if (!m_shm.push_request(req))
+            {
+                LOG_WARNING_MSG("[TCP] IPC queue full, dropping message sess=%s", m_session_id.c_str());
+            }
 
             m_read_offset = 0;
             m_read_buf.fill(0);
@@ -145,7 +153,7 @@ void tcp_session::on_readable()
         else if (n == 0)
         {
             // EOF
-            std::cout << "[TCP] Connection closed by peer (session: " << m_session_id << ")" << std::endl;
+            LOG_INFO_MSG("[TCP] closed by peer sess=%s", m_session_id.c_str());
             notify_disconnect();
             m_session_manager.remove_session(m_session_id);
             close();
@@ -157,7 +165,8 @@ void tcp_session::on_readable()
             {
                 break; // No more data right now
             }
-            std::cerr << "[TCP] recv error: " << strerror(errno) << std::endl;
+            std::cerr << "[TCP] recv err=" << strerror(errno) << '\n';
+            LOG_ERROR_MSG("[TCP] recv err=%s sess=%s", strerror(errno), m_session_id.c_str());
             notify_disconnect();
             m_session_manager.remove_session(m_session_id);
             close();
@@ -208,7 +217,8 @@ void tcp_session::do_write_next()
                 // Put remaining data back (partial write scenario is unlikely for small buffers)
                 break;
             }
-            std::cerr << "[TCP] send error: " << strerror(errno) << std::endl;
+            std::cerr << "[TCP] send err=" << strerror(errno) << '\n';
+            LOG_ERROR_MSG("[TCP] send err=%s sess=%s", strerror(errno), m_session_id.c_str());
             m_writing = false;
             return;
         }
@@ -216,7 +226,7 @@ void tcp_session::do_write_next()
 
     if (total_sent == BUFFER_SIZE)
     {
-        std::cout << "\n\n[TCP] -> " << data << std::endl;
+        LOG_INFO_MSG("[TCP] -> sess=%s len=%zu", m_session_id.c_str(), data.size());
         do_write_next();
     }
     // If partial, EPOLLOUT will trigger on_writable which retries
@@ -300,7 +310,7 @@ void udp_server::on_readable()
         std::string json_input(m_read_buf.data(), static_cast<std::size_t>(n));
         posix_address sender_addr(sender_storage, sender_len);
 
-        std::cout << "\n\n[UDP] <- " << json_input << std::endl;
+        LOG_INFO_MSG("[UDP] <- from=%s len=%zd", sender_addr.to_string().c_str(), n);
 
         // Get or create session
         std::string session_id = m_session_manager.get_or_create_udp_session(sender_addr);
@@ -323,7 +333,10 @@ void udp_server::on_readable()
             std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
         }
 
-        m_shm.push_request(req);
+        if (!m_shm.push_request(req))
+        {
+            LOG_WARNING_MSG("[UDP] IPC queue full, dropping message from=%s", sender_addr.to_string().c_str());
+        }
     }
 }
 
@@ -332,7 +345,8 @@ void udp_server::send_to_session(const std::string& session_id, const std::strin
     auto endpoint = m_session_manager.get_udp_endpoint(session_id);
     if (!endpoint)
     {
-        std::cerr << "[UDP] ERROR: No endpoint found for session: " << session_id << std::endl;
+        std::cerr << "[UDP] no endpoint sess=" << session_id << '\n';
+        LOG_ERROR_MSG("[UDP] no endpoint sess=%s", session_id.c_str());
         return;
     }
 
@@ -345,11 +359,12 @@ void udp_server::send_to_session(const std::string& session_id, const std::strin
     ssize_t sent = sendto(m_fd, buf.data(), BUFFER_SIZE, 0, endpoint->sockaddr_ptr(), endpoint->sockaddr_len());
     if (sent == -1)
     {
-        std::cerr << "[UDP] sendto error: " << strerror(errno) << " -> " << endpoint->to_string() << std::endl;
+        std::cerr << "[UDP] sendto err=" << strerror(errno) << '\n';
+        LOG_ERROR_MSG("[UDP] sendto err=%s sess=%s", strerror(errno), session_id.c_str());
     }
     else
     {
-        std::cout << "\n\n[UDP] -> " << endpoint->to_string() << " | data=" << data << std::endl;
+        LOG_INFO_MSG("[UDP] -> sess=%s to=%s len=%zu", session_id.c_str(), endpoint->to_string().c_str(), copy_len);
     }
 }
 
@@ -390,11 +405,8 @@ void server::start()
     // Register eventfd for worker → reactor responses
     m_loop.add_fd(m_response_efd, EPOLLIN, [this](std::uint32_t /*events*/) { on_response_ready(); });
 
-    std::cout << "Server started:\n"
-              << "  TCP IPv4: " << m_config.ip_v4 << ":" << m_config.network_port << '\n'
-              << "  TCP IPv6: " << m_config.ip_v6 << ":" << m_config.network_port << '\n'
-              << "  UDP IPv4: " << m_config.ip_v4 << ":" << m_config.network_port << '\n'
-              << "  UDP IPv6: " << m_config.ip_v6 << ":" << m_config.network_port << '\n';
+    LOG_INFO_MSG("[SERVER] started tcp4=%s tcp6=%s udp port=%u", m_config.ip_v4.c_str(), m_config.ip_v6.c_str(),
+                 m_config.network_port);
 }
 
 void server::stop()
@@ -473,14 +485,16 @@ void server::on_accept(int listen_fd)
             {
                 break; // No more pending connections
             }
-            std::cerr << "[SERVER] accept4 error: " << strerror(errno) << std::endl;
+            std::cerr << "[SERVER] accept4 err=" << strerror(errno) << '\n';
+            LOG_ERROR_MSG("[SERVER] accept4 err=%s", strerror(errno));
             break;
         }
 
         posix_address peer(client_addr, addr_len);
-        std::cout << "Accepted TCP connection from " << peer.to_string() << '\n';
 
         auto session = std::make_shared<tcp_session>(client_fd, m_loop, m_shm, *m_session_manager);
+        LOG_INFO_MSG("[TCP] connect from=%s sess=%s", peer.to_string().c_str(), session->session_id().c_str());
+
         m_tcp_sessions[client_fd] = session;
         session->start();
     }
@@ -496,7 +510,8 @@ void server::on_response_ready()
     {
         if (errno != EAGAIN)
         {
-            std::cerr << "[SERVER] eventfd read error: " << strerror(errno) << std::endl;
+            std::cerr << "[SERVER] eventfd read err=" << strerror(errno) << '\n';
+            LOG_ERROR_MSG("[SERVER] eventfd read err=%s", strerror(errno));
         }
     }
 
@@ -513,6 +528,16 @@ void server::dispatch_response(const response_slot_t& resp)
     std::string session_id(resp.session_id);
     auto cmd = static_cast<response_command>(resp.command);
 
+    // Early exit: if the response targets a specific session that no longer exists, skip it entirely.
+    // This avoids wasting reactor time on send_to_session + timer creation for dead clients.
+    if (!session_id.empty() && cmd != response_command::MARK_AUTHENTICATED)
+    {
+        if (!m_session_manager->has_session(session_id))
+        {
+            return;
+        }
+    }
+
     switch (cmd)
     {
     case response_command::SEND: {
@@ -524,11 +549,13 @@ void server::dispatch_response(const response_slot_t& resp)
             target_session = m_session_manager->find_session_by_username(std::string(resp.target_username));
             if (target_session.empty())
             {
-                std::cerr << "[REACTOR] Cannot resolve session for username: " << resp.target_username << std::endl;
+                std::cerr << "[REACTOR] no session for user=" << resp.target_username << '\n';
+                LOG_ERROR_MSG("[DISPATCH] SEND no session for user=%s", resp.target_username);
                 break;
             }
         }
         send_to_session(target_session, data);
+        LOG_DEBUG_MSG("[DISPATCH] SEND sess=%s len=%u", target_session.c_str(), resp.payload_len);
 
         // If the worker requested an ACK timer, start it now that we have the resolved session_id
         if (resp.start_ack_timer && resp.timer_timeout > 0)
@@ -544,7 +571,8 @@ void server::dispatch_response(const response_slot_t& resp)
                 [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
                     handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
                 });
-            std::cout << "[REACTOR] Started ACK timer for " << target_session << " / " << timer_key << std::endl;
+            LOG_INFO_MSG("[DISPATCH] SEND+ACK_TIMER sess=%s ts=%s timeout=%u", target_session.c_str(),
+                         timer_key.c_str(), timeout);
         }
         break;
     }
@@ -566,7 +594,7 @@ void server::dispatch_response(const response_slot_t& resp)
         std::string timer_key(resp.timer_key);
         if (m_timer_manager->cancel_ack_timer(session_id, timer_key))
         {
-            std::cout << "[REACTOR] Cancelled ACK timer for " << session_id << " / " << timer_key << std::endl;
+            LOG_DEBUG_MSG("[DISPATCH] -ACK sess=%s ts=%s", session_id.c_str(), timer_key.c_str());
         }
         break;
     }
@@ -584,24 +612,70 @@ void server::dispatch_response(const response_slot_t& resp)
         m_session_manager->mark_authenticated(session_id, client_type, username);
         break;
     }
+    case response_command::START_KEEPALIVE_TIMER: {
+        std::uint32_t timeout = resp.timer_timeout;
+        m_timer_manager->start_keepalive_timer(session_id, static_cast<int>(timeout),
+                                               [this, session_id]() { handle_keepalive_timeout(session_id); });
+        break;
     }
+    case response_command::RESET_KEEPALIVE_TIMER: {
+        m_timer_manager->reset_keepalive_timer(session_id);
+        break;
+    }
+    case response_command::DISCONNECT: {
+        handle_keepalive_timeout(session_id);
+        break;
+    }
+    }
+}
+
+void server::handle_keepalive_timeout(const std::string& session_id)
+{
+    LOG_WARNING_MSG("[KEEPALIVE_TIMEOUT] sess=%s disconnecting", session_id.c_str());
+    // Clear all timers for this session
+    m_timer_manager->clear_session_timers(session_id);
+
+    auto info = m_session_manager->get_session_info(session_id);
+    if (!info)
+    {
+        std::cerr << "[REACTOR] sess=" << session_id << " not found\n";
+        LOG_ERROR_MSG("[KEEPALIVE_TIMEOUT] sess=%s not found", session_id.c_str());
+        return;
+    }
+
+    // If TCP, close the session (notify_disconnect + close are handled by tcp_session)
+    if (info->type == session_info::connection_type::TCP)
+    {
+        if (auto tcp_sess = info->tcp_session_ref.lock())
+        {
+            tcp_sess->notify_disconnect();
+            tcp_sess->close();
+        }
+    }
+
+    m_session_manager->remove_session(session_id);
 }
 
 void server::handle_ack_timeout(const std::string& session_id, const std::string& timer_key, const std::string& payload,
                                 std::uint32_t retry_count, std::uint32_t max_retries)
 {
+    // If the session is already gone, don't retry — just clean up
+    if (!m_session_manager->has_session(session_id))
+    {
+        return;
+    }
+
     if (retry_count >= max_retries - 1)
     {
-        std::cout << "[ACK_TIMEOUT] Max retries (" << max_retries << ") reached for session: " << session_id
-                  << " - blacklisting" << std::endl;
+        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u blacklisting", session_id.c_str(),
+                        timer_key.c_str(), max_retries);
         m_timer_manager->clear_session_timers(session_id);
         m_session_manager->blacklist_session(session_id);
         return;
     }
 
-    std::cout << "[ACK_TIMEOUT] Timeout for message " << timer_key << " (retry " << (retry_count + 1) << "/"
-              << max_retries << ")" << std::endl;
-
+    LOG_WARNING_MSG("[ACK_TIMEOUT] sess=%s ts=%s retry=%u/%u resending", session_id.c_str(), timer_key.c_str(),
+                    retry_count + 1, max_retries);
     // Resend
     send_to_session(session_id, payload);
 
@@ -618,7 +692,8 @@ void server::send_to_session(const std::string& session_id, const std::string& d
     auto info = m_session_manager->get_session_info(session_id);
     if (!info)
     {
-        std::cerr << "[SERVER] Cannot send to session " << session_id << ": session not found" << std::endl;
+        std::cerr << "[SERVER] send fail sess=" << session_id << " not found\n";
+        LOG_ERROR_MSG("[SERVER] send fail sess=%s not found", session_id.c_str());
         return;
     }
 
@@ -643,7 +718,8 @@ void server::send_to_session(const std::string& session_id, const std::string& d
         }
         else
         {
-            std::cerr << "[SERVER] WARNING: TCP session " << session_id << " expired" << std::endl;
+            std::cerr << "[SERVER] TCP sess=" << session_id << " expired\n";
+            LOG_WARNING_MSG("[SERVER] TCP sess=%s expired (weak_ptr)", session_id.c_str());
         }
     }
 }
