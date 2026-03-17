@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: DHL Dashboards
+    orgId: 1
+    folder: DHL
+    type: file
+    disableDeletion: false
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards
