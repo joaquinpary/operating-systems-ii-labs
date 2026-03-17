@@ -75,7 +75,7 @@ class MessageHandlerTest : public ::testing::Test
         db_pool = std::make_shared<connection_pool>(build_connection_string(), 1);
         auth_mod = std::make_unique<auth_module>(*db_pool);
         inv_mgr = std::make_unique<inventory_manager>(*db_pool);
-        msg_handler = std::make_unique<message_handler>(*auth_mod, *inv_mgr, 5, 3);
+        msg_handler = std::make_unique<message_handler>(*auth_mod, *inv_mgr, 5, 3, 120);
     }
 
     void TearDown() override

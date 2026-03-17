@@ -11,7 +11,7 @@ for i in $(seq -f "%04g" 1 "$NUM_CLIENTS"); do
     /app/dhl_client --config "$i" &
     
     # Small delay to avoid overwhelming the server on startup
-    sleep 0.05
+    sleep 0.02
 done
 
 echo "All $NUM_CLIENTS clients started. Waiting for processes..."

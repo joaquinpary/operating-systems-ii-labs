@@ -7,7 +7,9 @@
 #include <common/json_manager.h>
 #include <cstdint>
 #include <optional>
+#include <shared_mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 enum class message_category
@@ -92,6 +94,11 @@ class message_handler
     std::uint32_t m_ack_timeout_seconds;
     std::uint32_t m_max_retries;
     std::uint32_t m_keepalive_timeout_seconds;
+
+    // Dead-session tracking: sessions that have been disconnected.
+    // Worker threads check this before doing heavy DB work.
+    mutable std::shared_mutex m_dead_sessions_mutex;
+    std::unordered_set<std::string> m_dead_sessions;
 };
 
 #endif // MESSAGE_HANDLER_HPP

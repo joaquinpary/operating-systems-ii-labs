@@ -33,6 +33,8 @@ void setUp(void)
                               .min_level = LOG_DEBUG};
     log_init(&config);
 
+    load_timer_config();
+
     // Initialize IPC for shared state
     if (ipc_init("test_logic_static") != 0)
     {
@@ -70,8 +72,9 @@ void test_get_random_consume_interval(void)
     {
         int interval = get_random_consume_interval();
         
-        TEST_ASSERT_TRUE(interval >= CONSUME_STOCK_MIN_SEC);
-        TEST_ASSERT_TRUE(interval <= CONSUME_STOCK_MAX_SEC);
+        const timer_config_t* cfg = get_timer_config();
+        TEST_ASSERT_TRUE(interval >= cfg->consume_stock_min_ms);
+        TEST_ASSERT_TRUE(interval <= cfg->consume_stock_max_ms);
     }
 }
 
@@ -88,8 +91,9 @@ void test_get_random_consume_amount(void)
         if (amount < min_seen) min_seen = amount;
         if (amount > max_seen) max_seen = amount;
         
-        TEST_ASSERT_TRUE(amount >= CONSUME_MIN_AMOUNT);
-        TEST_ASSERT_TRUE(amount <= CONSUME_MAX_AMOUNT);
+        const timer_config_t* cfg = get_timer_config();
+        TEST_ASSERT_TRUE(amount >= cfg->consume_min_amount);
+        TEST_ASSERT_TRUE(amount <= cfg->consume_max_amount);
     }
 }
 

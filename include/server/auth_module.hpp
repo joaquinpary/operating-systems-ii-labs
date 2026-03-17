@@ -1,11 +1,10 @@
 #ifndef AUTH_MODULE_HPP
 #define AUTH_MODULE_HPP
 
+#include "connection_pool.hpp"
 #include "database.hpp"
 #include <memory>
 #include <string>
-
-class mem_store;
 
 // Authentication result codes
 enum class auth_result_code
@@ -27,7 +26,7 @@ struct auth_result
 class auth_module
 {
   public:
-    explicit auth_module(mem_store& store);
+    explicit auth_module(connection_pool& pool);
     ~auth_module();
 
     // Authenticate a user with username and password
@@ -38,7 +37,7 @@ class auth_module
     void deactivate_client(const std::string& username);
 
   private:
-    mem_store& m_store;
+    connection_pool& m_pool;
 };
 
 #endif // AUTH_MODULE_HPP

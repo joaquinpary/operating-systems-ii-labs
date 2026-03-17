@@ -652,6 +652,23 @@ void server::handle_keepalive_timeout(const std::string& session_id)
             tcp_sess->close();
         }
     }
+    else if (!info->username.empty())
+    {
+        // UDP: no socket to close, but we still need to tell the worker
+        // to mark is_active = false in the database.
+        request_slot_t req{};
+        std::strncpy(req.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
+        req.is_disconnect = true;
+        req.is_authenticated = true;
+        std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
+        std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
+        if (!m_shm.push_request(req))
+        {
+            LOG_WARNING_MSG("[UDP] IPC queue full, disconnect dropped user=%s sess=%s", info->username.c_str(),
+                            session_id.c_str());
+        }
+        LOG_INFO_MSG("[UDP] disconnect user=%s sess=%s", info->username.c_str(), session_id.c_str());
+    }
 
     m_session_manager->remove_session(session_id);
 }

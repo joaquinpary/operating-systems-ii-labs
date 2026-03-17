@@ -8,7 +8,7 @@
 #define MAX_PENDING_TRANSACTIONS 100
 
 // Forward declaration
-class mem_store;
+class connection_pool;
 
 // Result of handle_stock_request — tells message_handler what happened and what to send
 struct stock_request_result
@@ -31,7 +31,7 @@ struct stock_request_result
 class inventory_manager
 {
   public:
-    inventory_manager(mem_store& store);
+    inventory_manager(connection_pool& pool);
     ~inventory_manager();
 
     // Handle inventory update from hub or warehouse
@@ -62,7 +62,7 @@ class inventory_manager
     bool get_client_inventory_message(const std::string& client_id, const std::string& client_type, message_t& out_msg);
 
   private:
-    mem_store& m_store;
+    connection_pool& m_pool;
 
     // Helper: Extract quantities from message payload
     void extract_quantities_from_payload(const payload_items_list& payload, int quantities[6]);
