@@ -10,6 +10,12 @@
 
 #define LOCALHOST "127.0.0.1"
 #define INVALID_HOST "invalid.host.that.does.not.exist.local"
+#define TEST_TCP_PORT "8081"
+#define TEST_TCP_DISCONNECT_PORT "8083"
+#define TEST_UDP_PORT "8082"
+#define TEST_UDP_ECHO_PORT "8084"
+#define TEST_CLOSE_PORT "8085"
+#define TEST_UNUSED_PORT "59999"
 
 void setUp(void)
 {
@@ -33,13 +39,13 @@ void test_client_tcp_connection(void)
     };
 
     pthread_create(&server_thread, NULL, mock_tcp_server, &args);
-    sem_wait(&ready_sem);  // Wait for server to be ready (no more sleep!)
+    sem_wait(&ready_sem);
 
     client_context ctx;
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "8081", sizeof(config.port));
+    strncpy(config.port, TEST_TCP_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
@@ -76,17 +82,16 @@ void test_client_tcp_server_disconnect(void)
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "8083", sizeof(config.port));
+    strncpy(config.port, TEST_TCP_DISCONNECT_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
     TEST_ASSERT_EQUAL(0, client_init(&ctx, &config));
 
-    // -1 (ECONNRESET) or -2 (graceful close/EOF)
     char response[BUFFER_SIZE];
     TEST_ASSERT_EQUAL(0, client_send(&ctx, "Hello"));
     int result = client_receive(&ctx, response, sizeof(response));
-    TEST_ASSERT_TRUE(result == -1 || result == -2);  // Either error is valid
+    TEST_ASSERT_TRUE(result == -1 || result == -2);
 
     client_close(&ctx);
     pthread_join(server_thread, NULL);
@@ -99,7 +104,7 @@ void test_client_udp_connection(void)
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "8082", sizeof(config.port));
+    strncpy(config.port, TEST_UDP_PORT, sizeof(config.port));
     config.protocol = PROTO_UDP;
     config.ip_version = AF_INET;
 
@@ -129,7 +134,7 @@ void test_client_udp_send_receive(void)
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "8084", sizeof(config.port));
+    strncpy(config.port, TEST_UDP_ECHO_PORT, sizeof(config.port));
     config.protocol = PROTO_UDP;
     config.ip_version = AF_INET;
 
@@ -152,11 +157,10 @@ void test_client_init_invalid_host(void)
     client_config config;
 
     strncpy(config.host, INVALID_HOST, sizeof(config.host));
-    strncpy(config.port, "8081", sizeof(config.port));
+    strncpy(config.port, TEST_TCP_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
-    // getaddrinfo should fail with invalid host
     TEST_ASSERT_EQUAL(-1, client_init(&ctx, &config));
 }
 
@@ -166,7 +170,7 @@ void test_client_init_connection_refused(void)
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "59999", sizeof(config.port));  // Port with no server
+    strncpy(config.port, TEST_UNUSED_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
@@ -193,7 +197,7 @@ void test_client_close_valid_socket(void)
     client_config config;
 
     strncpy(config.host, LOCALHOST, sizeof(config.host));
-    strncpy(config.port, "8085", sizeof(config.port));
+    strncpy(config.port, TEST_CLOSE_PORT, sizeof(config.port));
     config.protocol = PROTO_TCP;
     config.ip_version = AF_INET;
 
@@ -201,7 +205,7 @@ void test_client_close_valid_socket(void)
     TEST_ASSERT_GREATER_OR_EQUAL(0, ctx.sockfd);
 
     client_close(&ctx);
-    TEST_ASSERT_EQUAL(-1, ctx.sockfd);  // Should be set to -1 after close
+    TEST_ASSERT_EQUAL(-1, ctx.sockfd);
 
     pthread_join(server_thread, NULL);
     sem_destroy(&ready_sem);
@@ -210,7 +214,7 @@ void test_client_close_valid_socket(void)
 void test_client_close_already_closed(void)
 {
     client_context ctx;
-    ctx.sockfd = -1;  // Already closed/invalid
+    ctx.sockfd = -1;
 
     client_close(&ctx);
     TEST_ASSERT_EQUAL(-1, ctx.sockfd);
@@ -220,19 +224,15 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    // TCP tests
     RUN_TEST(test_client_tcp_connection);
     RUN_TEST(test_client_tcp_server_disconnect);
 
-    // UDP tests
     RUN_TEST(test_client_udp_connection);
     RUN_TEST(test_client_udp_send_receive);
 
-    // Error handling tests
     RUN_TEST(test_client_init_invalid_host);
     RUN_TEST(test_client_init_connection_refused);
 
-    // client_close tests
     RUN_TEST(test_client_close_valid_socket);
     RUN_TEST(test_client_close_already_closed);
 

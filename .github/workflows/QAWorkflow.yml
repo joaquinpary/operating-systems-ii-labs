@@ -33,10 +33,10 @@ jobs:
           submodules: recursive
 
       - name: Install dependencies
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: doxygen gcovr lcov cppcheck graphviz clang-format valgrind bc cmake build-essential libpq-dev pkg-config
-          version: 1.0
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen gcovr lcov cppcheck graphviz clang-format valgrind bc cmake build-essential libpq-dev pkg-config
 
       - name: Build project
         uses: ./.github/actions/building

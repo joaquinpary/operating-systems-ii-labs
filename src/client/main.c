@@ -6,6 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 
+/**
+ * @brief Close logging resources and terminate on process shutdown signals.
+ */
 static void handle_shutdown(int sig)
 {
     (void)sig;

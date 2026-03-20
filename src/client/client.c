@@ -1,8 +1,9 @@
 #include "client.h"
-#include "timers.h"
 #include "connection.h"
 #include "logger.h"
 #include "logic.h"
+#include "timers.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,7 +11,48 @@
 
 #define MAX_ATTEMPTS 3
 #define LINE_SIZE 512
+#define MAX_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define MAX_LOG_BACKUPS 5
+#define LOG_PATH_SUFFIX ".log"
 
+/**
+ * @brief Build the client log file path from a directory and config stem.
+ * @param destination Output buffer for the log path.
+ * @param destination_size Size of the output buffer.
+ * @param log_dir Directory where the log file will be stored.
+ * @param log_stem Base file name without extension.
+ * @return 0 on success, -1 if the path does not fit in the buffer.
+ */
+static int build_log_file_path(char* destination, size_t destination_size, const char* log_dir, const char* log_stem)
+{
+    size_t log_dir_len = strnlen(log_dir, destination_size);
+    size_t log_stem_len = strnlen(log_stem, destination_size);
+    size_t suffix_len = sizeof(LOG_PATH_SUFFIX) - 1;
+
+    while (log_dir_len > 0 && log_dir[log_dir_len - 1] == '/')
+    {
+        log_dir_len--;
+    }
+
+    if (log_dir_len + 1 + log_stem_len + suffix_len >= destination_size)
+    {
+        return -1;
+    }
+
+    memcpy(destination, log_dir, log_dir_len);
+    destination[log_dir_len] = '/';
+    memcpy(destination + log_dir_len + 1, log_stem, log_stem_len);
+    memcpy(destination + log_dir_len + 1 + log_stem_len, LOG_PATH_SUFFIX, suffix_len + 1);
+    return 0;
+}
+
+/**
+ * @brief Parse a client configuration file into runtime config structures.
+ * @param path Path to the configuration file.
+ * @param config Output configuration for connection settings.
+ * @param creds Output configuration for authentication credentials.
+ * @return 0 on success, -1 if the file is invalid or cannot be read.
+ */
 static int parse_conf(const char* path, client_config* config, client_credentials* creds)
 {
     FILE* f = fopen(path, "r");
@@ -81,6 +123,12 @@ static int parse_conf(const char* path, client_config* config, client_credential
     return 0;
 }
 
+/**
+ * @brief Authenticate the client against the server.
+ * @param ctx Initialized client connection context.
+ * @param creds Client credentials loaded from the config file.
+ * @return 0 on successful authentication, -1 on error or rejection.
+ */
 int authenticate(client_context* ctx, client_credentials* creds)
 {
     message_t msg;
@@ -150,7 +198,6 @@ int authenticate(client_context* ctx, client_credentials* creds)
                     return -1;
                 }
                 LOG_INFO_MSG("Authentication successful");
-                printf("[AUTH] Authentication successful\n");
                 return 0;
             }
             else
@@ -172,13 +219,10 @@ int run_client(const char* config_path)
     client_context ctx;
     client_credentials creds;
 
-    // Initialize logger before parse_conf so any early errors are captured.
-    // Derive log name from the config filename (e.g. client_0001.conf → client_0001.log).
     const char* log_dir = getenv("LOG_DIR");
     if (!log_dir)
         log_dir = "/tmp";
 
-    // Extract basename without extension from config_path
     const char* slash = strrchr(config_path, '/');
     const char* basename = slash ? slash + 1 : config_path;
     char log_stem[FILE_PATH];
@@ -188,11 +232,14 @@ int run_client(const char* config_path)
     if (dot)
         *dot = '\0';
 
-    logger_config_t log_config = {.max_file_size = 10 * 1024 * 1024, // 10 MB
-                                  .max_backup_files = 5,
-                                  .min_level = LOG_DEBUG};
+    logger_config_t log_config = {
+        .max_file_size = MAX_LOG_FILE_SIZE, .max_backup_files = MAX_LOG_BACKUPS, .min_level = LOG_DEBUG};
 
-    snprintf(log_config.log_file_path, sizeof(log_config.log_file_path), "%s/%s.log", log_dir, log_stem);
+    if (build_log_file_path(log_config.log_file_path, sizeof(log_config.log_file_path), log_dir, log_stem) != 0)
+    {
+        fprintf(stderr, "Log path is too long for config '%s'\n", config_path);
+        return 1;
+    }
 
     if (log_init(&log_config) != 0)
     {
@@ -212,9 +259,6 @@ int run_client(const char* config_path)
     LOG_INFO_MSG("=== DHL Client Starting ===");
     LOG_INFO_MSG("Configuration loaded from: %s", config_path);
 
-    printf("Initializing client from %s (%s:%s %s) ...\n", config_path, config.host, config.port,
-           (config.protocol == PROTO_TCP ? "tcp" : "udp"));
-
     LOG_INFO_MSG("Connecting to %s:%s (%s)", config.host, config.port, config.protocol == PROTO_TCP ? "TCP" : "UDP");
 
     if (client_init(&ctx, &config) == 0)
@@ -223,19 +267,16 @@ int run_client(const char* config_path)
 
         if (authenticate(&ctx, &creds) != 0)
         {
-            printf("Authentication failed.\n");
             LOG_ERROR_MSG("Authentication failed, closing connection");
             client_close(&ctx);
             log_close();
             return -1;
         }
 
-        printf("Connection successful.\n");
         LOG_INFO_MSG("Starting client logic");
 
         if (logic_init(&ctx, creds.type, creds.username) != 0)
         {
-            printf("Client logic encountered an error.\n");
             LOG_ERROR_MSG("Client logic failed");
             client_close(&ctx);
             log_close();

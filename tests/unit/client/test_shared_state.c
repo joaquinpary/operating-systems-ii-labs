@@ -1,30 +1,43 @@
 #define _POSIX_C_SOURCE 200809L
 #include "shared_state.h"
 #include "json_manager.h"
+#include "logger.h"
 #include "timers.h"
 #include "unity.h"
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 
+#define TEST_QUEUE_CAPACITY 10
+#define TEST_SLEEP_SEC 1
+#define TEST_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define TEST_LOG_BACKUPS 3
+
 void setUp(void)
 {
+    logger_config_t config = {.log_file_path = "/tmp/test_shared_state.log",
+                              .max_file_size = TEST_LOG_FILE_SIZE,
+                              .max_backup_files = TEST_LOG_BACKUPS,
+                              .min_level = LOG_DEBUG};
+    log_init(&config);
+
     load_timer_config();
-    // Initialize IPC for each test
-    ipc_init("test_client");
+    if (ipc_init("test_client") != 0)
+    {
+        TEST_FAIL_MESSAGE("Failed to initialize IPC in setUp");
+    }
 }
 
 void tearDown(void)
 {
-    // Cleanup IPC after each test
     ipc_cleanup();
+    log_close();
 }
 
 void test_enqueue_and_pop_message(void)
 {
     message_t msg_in, msg_out;
 
-    // Create a test message
     strncpy(msg_in.msg_type, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, sizeof(msg_in.msg_type) - 1);
     strncpy(msg_in.timestamp, "2025-12-09T20:00:00Z", sizeof(msg_in.timestamp) - 1);
     strncpy(msg_in.source_role, "WAREHOUSE", sizeof(msg_in.source_role) - 1);
@@ -32,15 +45,12 @@ void test_enqueue_and_pop_message(void)
     strncpy(msg_in.target_role, "SERVER", sizeof(msg_in.target_role) - 1);
     strncpy(msg_in.target_id, "SERVER", sizeof(msg_in.target_id) - 1);
 
-    // Enqueue message
     TEST_ASSERT_EQUAL(0, enqueue_pending_message(&msg_in));
     TEST_ASSERT_EQUAL(1, has_pending_messages());
 
-    // Pop message
     TEST_ASSERT_EQUAL(0, pop_pending_message(&msg_out));
     TEST_ASSERT_EQUAL(0, has_pending_messages());
 
-    // Verify message content
     TEST_ASSERT_EQUAL_STRING(msg_in.msg_type, msg_out.msg_type);
     TEST_ASSERT_EQUAL_STRING(msg_in.timestamp, msg_out.timestamp);
     TEST_ASSERT_EQUAL_STRING(msg_in.source_id, msg_out.source_id);
@@ -52,13 +62,11 @@ void test_message_queue_full(void)
     strncpy(msg.msg_type, "TEST_MESSAGE", sizeof(msg.msg_type) - 1);
     strncpy(msg.timestamp, "2025-12-09T20:00:00Z", sizeof(msg.timestamp) - 1);
 
-    // Fill queue (max 10 messages)
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < TEST_QUEUE_CAPACITY; i++)
     {
         TEST_ASSERT_EQUAL(0, enqueue_pending_message(&msg));
     }
 
-    // Try to enqueue 11th message - should fail
     TEST_ASSERT_EQUAL(-1, enqueue_pending_message(&msg));
 }
 
@@ -66,7 +74,6 @@ void test_message_queue_fifo_order(void)
 {
     message_t msg_in[3], msg_out;
 
-    // Enqueue 3 messages with different timestamps
     for (int i = 0; i < 3; i++)
     {
         snprintf(msg_in[i].timestamp, sizeof(msg_in[i].timestamp), "2025-12-09T20:00:0%dZ", i);
@@ -74,7 +81,6 @@ void test_message_queue_fifo_order(void)
         TEST_ASSERT_EQUAL(0, enqueue_pending_message(&msg_in[i]));
     }
 
-    // Pop and verify FIFO order
     for (int i = 0; i < 3; i++)
     {
         TEST_ASSERT_EQUAL(0, pop_pending_message(&msg_out));
@@ -90,11 +96,9 @@ void test_enqueue_pending_message_json(void)
     const char* json_msg = "{\"msg_type\":\"TEST\",\"timestamp\":\"2025-12-09T20:00:00Z\"}";
     message_t msg_out;
 
-    // Enqueue JSON directly
     TEST_ASSERT_EQUAL(0, enqueue_pending_message_json(json_msg));
     TEST_ASSERT_EQUAL(1, has_pending_messages());
 
-    // Pop and verify
     TEST_ASSERT_EQUAL(0, pop_pending_message(&msg_out));
     TEST_ASSERT_EQUAL_STRING("TEST", msg_out.msg_type);
     TEST_ASSERT_EQUAL_STRING("2025-12-09T20:00:00Z", msg_out.timestamp);
@@ -104,7 +108,6 @@ void test_pop_from_empty_queue(void)
 {
     message_t msg;
 
-    // Pop from empty queue should fail
     TEST_ASSERT_EQUAL(-1, pop_pending_message(&msg));
     TEST_ASSERT_EQUAL(0, has_pending_messages());
 }
@@ -131,10 +134,8 @@ void test_add_duplicate_ack_updates_timestamp(void)
     const char* msg_type = WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
     const char* json_msg = "{\"msg_type\":\"WAREHOUSE_TO_SERVER__INVENTORY_UPDATE\"}";
 
-    // Add ACK first time
     TEST_ASSERT_EQUAL(0, add_pending_ack(msg_id, msg_type, json_msg));
 
-    // Simulate retry by incrementing retry_count manually
     shared_data_t* shared_data = get_shared_data();
     sem_t* inventory_sem = get_inventory_sem();
 
@@ -143,12 +144,10 @@ void test_add_duplicate_ack_updates_timestamp(void)
     struct timespec first_time = shared_data->pending_acks[0].send_time;
     sem_post(inventory_sem);
 
-    sleep(1); // Wait 1 second
+    sleep(TEST_SLEEP_SEC);
 
-    // Add same msg_id + msg_type again (retransmission)
     TEST_ASSERT_EQUAL(0, add_pending_ack(msg_id, msg_type, json_msg));
 
-    // Verify timestamp was updated but retry_count unchanged
     sem_wait(inventory_sem);
     TEST_ASSERT_EQUAL(1, shared_data->pending_acks[0].retry_count);
     struct timespec second_time = shared_data->pending_acks[0].send_time;
@@ -320,7 +319,7 @@ void test_inventory_initialization(void)
     // Verify inventory is initialized with 6 items in correct order
     shared_data_t* shared_data = get_shared_data();
 
-    const char* expected_names[] = {"FOOD", "WATER", "MEDICINE", "TOOLS", "GUNS", "AMMO"};
+    const char* expected_names[] = {"food", "water", "medicine", "tools", "guns", "ammo"};
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
@@ -489,14 +488,12 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    // Message queue tests
     RUN_TEST(test_enqueue_and_pop_message);
     RUN_TEST(test_message_queue_full);
     RUN_TEST(test_message_queue_fifo_order);
     RUN_TEST(test_enqueue_pending_message_json);
     RUN_TEST(test_pop_from_empty_queue);
 
-    // ACK tracking tests
     RUN_TEST(test_add_and_remove_pending_ack);
     RUN_TEST(test_add_duplicate_ack_updates_timestamp);
     RUN_TEST(test_add_different_msg_type_same_timestamp);
@@ -505,11 +502,9 @@ int main(void)
     RUN_TEST(test_check_ack_timeouts_with_timeout);
     RUN_TEST(test_check_ack_timeouts_max_retries);
 
-    // Shared data access tests
     RUN_TEST(test_get_shared_data);
     RUN_TEST(test_get_semaphores);
 
-    // Inventory tests
     RUN_TEST(test_inventory_initialization);
     RUN_TEST(test_modify_inventory_add);
     RUN_TEST(test_modify_inventory_add_accumulates);

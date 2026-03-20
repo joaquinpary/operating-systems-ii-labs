@@ -1,7 +1,8 @@
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 
 #include "connection.h"
 #include "json_manager.h"
+#include "logger.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <netdb.h>
@@ -12,6 +13,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+static const char* protocol_to_string(protocol_type protocol)
+{
+    return protocol == PROTO_TCP ? "TCP" : "UDP";
+}
+
+/**
+ * @brief Initialize the client socket and server addressing data.
+ */
 int client_init(client_context* ctx, client_config* config)
 {
     struct addrinfo hints, *res, *p;
@@ -23,7 +32,7 @@ int client_init(client_context* ctx, client_config* config)
 
     if ((status = getaddrinfo(config->host, config->port, &hints, &res)) != 0)
     {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        LOG_ERROR_MSG("getaddrinfo failed for %s:%s: %s", config->host, config->port, gai_strerror(status));
         return -1;
     }
 
@@ -31,7 +40,7 @@ int client_init(client_context* ctx, client_config* config)
     {
         if ((ctx->sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1)
         {
-            perror("client: socket");
+            LOG_ERROR_MSG("socket creation failed: %s", strerror(errno));
             continue;
         }
 
@@ -40,7 +49,7 @@ int client_init(client_context* ctx, client_config* config)
             if (connect(ctx->sockfd, p->ai_addr, p->ai_addrlen) == -1)
             {
                 close(ctx->sockfd);
-                perror("client: connect");
+                LOG_ERROR_MSG("connect failed for %s:%s: %s", config->host, config->port, strerror(errno));
                 continue;
             }
         }
@@ -54,16 +63,21 @@ int client_init(client_context* ctx, client_config* config)
 
     if (p == NULL)
     {
-        fprintf(stderr, "client: failed to create socket\n");
+        LOG_ERROR_MSG("Unable to establish %s connection to %s:%s", protocol_to_string(config->protocol), config->host,
+                      config->port);
         freeaddrinfo(res);
         return -1;
     }
 
     ctx->protocol = config->protocol;
     freeaddrinfo(res);
+    LOG_INFO_MSG("Connected to %s:%s using %s", config->host, config->port, protocol_to_string(config->protocol));
     return 0;
 }
 
+/**
+ * @brief Send a serialized message to the configured server.
+ */
 int client_send(client_context* ctx, const char* msg)
 {
     if (ctx->protocol == PROTO_TCP)
@@ -71,14 +85,14 @@ int client_send(client_context* ctx, const char* msg)
         char* tcp_msg = malloc(BUFFER_SIZE);
         if (!tcp_msg)
         {
-            perror("malloc");
+            LOG_ERROR_MSG("Failed to allocate TCP send buffer: %s", strerror(errno));
             return -1;
         }
         memset(tcp_msg, 0, BUFFER_SIZE);
         snprintf(tcp_msg, BUFFER_SIZE, "%s", msg);
         if (send(ctx->sockfd, tcp_msg, BUFFER_SIZE, MSG_NOSIGNAL) == -1)
         {
-            perror("send");
+            LOG_ERROR_MSG("send failed: %s", strerror(errno));
             free(tcp_msg);
             return -1;
         }
@@ -89,13 +103,16 @@ int client_send(client_context* ctx, const char* msg)
     {
         if (sendto(ctx->sockfd, msg, strlen(msg), 0, (struct sockaddr*)&ctx->server_addr, ctx->addr_len) == -1)
         {
-            perror("sendto");
+            LOG_ERROR_MSG("sendto failed: %s", strerror(errno));
             return -1;
         }
     }
     return 0;
 }
 
+/**
+ * @brief Receive a serialized message from the server.
+ */
 int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
 {
     ssize_t num_bytes;
@@ -111,7 +128,7 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
             {
                 if (errno != EAGAIN && errno != EWOULDBLOCK)
                 {
-                    perror("recv");
+                    LOG_ERROR_MSG("recv failed: %s", strerror(errno));
                 }
                 return -1;
             }
@@ -133,7 +150,7 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
         {
             if (errno != EAGAIN && errno != EWOULDBLOCK)
             {
-                perror("recvfrom");
+                LOG_ERROR_MSG("recvfrom failed: %s", strerror(errno));
             }
             return -1;
         }
@@ -146,6 +163,9 @@ int client_receive(client_context* ctx, char* buffer, size_t buffer_size)
     return (int)num_bytes;
 }
 
+/**
+ * @brief Close the active client socket if present.
+ */
 void client_close(client_context* ctx)
 {
     if (ctx->sockfd >= 0)

@@ -6,9 +6,11 @@
 
 #define LIB_VERSION "1.0.0"
 
-// Seeded once per process lifetime
 static int seeded = 0;
 
+/**
+ * @brief Seed the pseudo-random generator once per process lifetime.
+ */
 static void ensure_seeded(void)
 {
     if (!seeded)
@@ -50,8 +52,7 @@ emergency_result_t evaluate_emergency(const emergency_config_t* config)
         return result;
     }
 
-    // Emergency triggered: choose type uniformly at random
-    int type_roll = rand() % 3;
+    int type_roll = rand() % EMERGENCY_TYPE_COUNT;
 
     switch (type_roll)
     {

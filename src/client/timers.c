@@ -5,20 +5,34 @@
 #include <limits.h>
 #include <stdlib.h>
 
+#define TIMER_INVENTORY_INTERVAL_MS 60000
+#define TIMER_CONSUME_MIN_MS 10000
+#define TIMER_CONSUME_MAX_MS 30000
+#define TIMER_CONSUME_MIN_AMOUNT 1
+#define TIMER_CONSUME_MAX_AMOUNT 20
+#define TIMER_LOW_STOCK_THRESHOLD 20
+#define TIMER_CRITICAL_STOCK_THRESHOLD 5
+#define TIMER_MAX_STOCK_PER_ITEM 100
+#define TIMER_EMERGENCY_CHECK_INTERVAL_MS 30000
+#define TIMER_ACK_TIMEOUT_MS 5000
+#define TIMER_MAX_RETRIES 3
+#define TIMER_RESPONSE_DELAY_MIN_MS 50
+#define TIMER_RESPONSE_DELAY_MAX_MS 500
+
 static timer_config_t timer_config = {
-    .inventory_update_interval_ms = 60000,
-    .consume_stock_min_ms = 10000,
-    .consume_stock_max_ms = 30000,
-    .consume_min_amount = 1,
-    .consume_max_amount = 20,
-    .low_stock_threshold = 20,
-    .critical_stock_threshold = 5,
-    .max_stock_per_item = 100,
-    .emergency_check_interval_ms = 30000,
-    .ack_timeout_ms = 5000,
-    .max_retries = 3,
-    .response_delay_min_ms = 50,
-    .response_delay_max_ms = 500,
+    .inventory_update_interval_ms = TIMER_INVENTORY_INTERVAL_MS,
+    .consume_stock_min_ms = TIMER_CONSUME_MIN_MS,
+    .consume_stock_max_ms = TIMER_CONSUME_MAX_MS,
+    .consume_min_amount = TIMER_CONSUME_MIN_AMOUNT,
+    .consume_max_amount = TIMER_CONSUME_MAX_AMOUNT,
+    .low_stock_threshold = TIMER_LOW_STOCK_THRESHOLD,
+    .critical_stock_threshold = TIMER_CRITICAL_STOCK_THRESHOLD,
+    .max_stock_per_item = TIMER_MAX_STOCK_PER_ITEM,
+    .emergency_check_interval_ms = TIMER_EMERGENCY_CHECK_INTERVAL_MS,
+    .ack_timeout_ms = TIMER_ACK_TIMEOUT_MS,
+    .max_retries = TIMER_MAX_RETRIES,
+    .response_delay_min_ms = TIMER_RESPONSE_DELAY_MIN_MS,
+    .response_delay_max_ms = TIMER_RESPONSE_DELAY_MAX_MS,
 };
 
 static int parse_positive_env(const char* key, int fallback)
