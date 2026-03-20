@@ -233,7 +233,7 @@ int run_client(const char* config_path)
         *dot = '\0';
 
     logger_config_t log_config = {
-        .max_file_size = MAX_LOG_FILE_SIZE, .max_backup_files = MAX_LOG_BACKUPS, .min_level = LOG_DEBUG};
+        .max_file_size = MAX_LOG_FILE_SIZE, .max_backup_files = MAX_LOG_BACKUPS, .min_level = LOG_INFO};
 
     if (build_log_file_path(log_config.log_file_path, sizeof(log_config.log_file_path), log_dir, log_stem) != 0)
     {

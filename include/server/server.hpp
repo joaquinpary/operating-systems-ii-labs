@@ -23,12 +23,17 @@
 class tcp_session : public std::enable_shared_from_this<tcp_session>
 {
   public:
+    /** Create a TCP session wrapper for one accepted socket. */
     tcp_session(int fd, event_loop& loop, shared_queue& shm, session_manager& session_mgr);
     ~tcp_session();
 
+    /** Register I/O callbacks and begin processing the session. */
     void start();
+    /** Queue serialized data for asynchronous delivery to the client. */
     void send(const std::string& data);
+    /** Close the underlying socket and unregister the session from the reactor. */
     void close();
+    /** Push a disconnect marker into the worker queue. */
     void notify_disconnect();
 
     const std::string& session_id() const
@@ -66,9 +71,11 @@ class tcp_session : public std::enable_shared_from_this<tcp_session>
 class udp_server
 {
   public:
+    /** Create a UDP reactor endpoint bound to a specific address family. */
     udp_server(event_loop& loop, shared_queue& shm, session_manager& session_mgr, const posix_address& bind_addr);
     ~udp_server();
 
+    /** Send serialized data to the endpoint currently associated with a session id. */
     void send_to_session(const std::string& session_id, const std::string& data);
     int fd() const
     {
@@ -93,11 +100,14 @@ class udp_server
 class server
 {
   public:
+    /** Construct the reactor-side server with its shared subsystems. */
     server(event_loop& loop, shared_queue& shm, int response_efd, const config::server_config& config,
            std::unique_ptr<session_manager> session_mgr, std::unique_ptr<timer_manager> timer_mgr);
     ~server();
 
+    /** Start listening sockets, timers and response dispatchers. */
     void start();
+    /** Stop accepting traffic and tear down reactor resources. */
     void stop();
 
   private:

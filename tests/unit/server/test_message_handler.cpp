@@ -38,6 +38,21 @@ static const response_slot_t* find_response(const std::vector<response_slot_t>& 
     return nullptr;
 }
 
+static void expect_ack_for_request(message_handler& handler, const request_slot_t& req, const char* expected_type,
+                                   const char* expected_timestamp)
+{
+    auto ack = handler.generate_ack(req);
+    ASSERT_TRUE(ack.has_value());
+    EXPECT_EQ(static_cast<response_command>(ack->command), response_command::SEND);
+
+    message_t ack_msg;
+    std::string payload(ack->payload, ack->payload_len);
+    ASSERT_EQ(deserialize_message_from_json(payload.c_str(), &ack_msg), 0);
+    EXPECT_STREQ(ack_msg.msg_type, expected_type);
+    EXPECT_EQ(ack_msg.payload.acknowledgment.status_code, 200);
+    EXPECT_STREQ(ack_msg.payload.acknowledgment.ack_for_timestamp, expected_timestamp);
+}
+
 class MessageHandlerTest : public ::testing::Test
 {
   protected:
@@ -226,11 +241,12 @@ TEST_F(MessageHandlerTest, ProcessMessageAfterAuthentication)
 
     // Simulate authenticated session
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_user");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, status_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    // Should get an ACK response (SEND)
-    auto* send = find_response(responses, response_command::SEND);
-    ASSERT_NE(send, nullptr);
+    auto* reset = find_response(responses, response_command::RESET_KEEPALIVE_TIMER);
+    ASSERT_NE(reset, nullptr);
 }
 
 // ==================== ACK GENERATION TESTS ====================
@@ -247,19 +263,8 @@ TEST_F(MessageHandlerTest, GenerateAckForAuthenticatedKeepalive)
     serialize_message_to_json(&keepalive_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_user");
-    auto responses = msg_handler->process_request(req);
 
-    // First response should be the ACK
-    ASSERT_FALSE(responses.empty());
-    auto& ack = responses[0];
-    EXPECT_EQ(static_cast<response_command>(ack.command), response_command::SEND);
-
-    message_t ack_msg;
-    std::string payload(ack.payload, ack.payload_len);
-    ASSERT_EQ(deserialize_message_from_json(payload.c_str(), &ack_msg), 0);
-    EXPECT_STREQ(ack_msg.msg_type, SERVER_TO_HUB__ACK);
-    EXPECT_EQ(ack_msg.payload.acknowledgment.status_code, 200);
-    EXPECT_STREQ(ack_msg.payload.acknowledgment.ack_for_timestamp, keepalive_msg.timestamp);
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, keepalive_msg.timestamp);
 }
 
 TEST_F(MessageHandlerTest, NoAckForAuthRequest)
@@ -407,10 +412,11 @@ TEST_F(MessageHandlerTest, AcceptAuthenticatedInventoryUpdate)
     serialize_message_to_json(&inventory_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_user");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, inventory_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    // Should at least have an ACK SEND
-    EXPECT_FALSE(responses.empty());
+    EXPECT_TRUE(responses.empty());
 }
 
 TEST_F(MessageHandlerTest, RejectBlacklistedSession)
@@ -444,9 +450,10 @@ TEST_F(MessageHandlerTest, ProcessStockRequestHubToServer)
     serialize_message_to_json(&stock_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, stock_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    // Should at least have an ACK
     EXPECT_FALSE(responses.empty());
 }
 
@@ -464,6 +471,8 @@ TEST_F(MessageHandlerTest, ProcessReplenishRequestWarehouseToServer)
     serialize_message_to_json(&replenish_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "WAREHOUSE", "warehouse_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_WAREHOUSE__ACK, replenish_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
     EXPECT_FALSE(responses.empty());
@@ -491,9 +500,10 @@ TEST_F(MessageHandlerTest, ProcessShipmentNoticeWarehouseToServer)
     serialize_message_to_json(&shipment_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "WAREHOUSE", "warehouse_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_WAREHOUSE__ACK, shipment_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    // Should at least have an ACK
     EXPECT_FALSE(responses.empty());
 }
 
@@ -519,6 +529,8 @@ TEST_F(MessageHandlerTest, InventoryUpdateTriggersPendingFulfillment)
     serialize_message_to_json(&update_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "WAREHOUSE", "warehouse_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_WAREHOUSE__ACK, update_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
     EXPECT_FALSE(responses.empty());
@@ -543,10 +555,12 @@ TEST_F(MessageHandlerTest, ProcessKeepaliveHubToServer)
     serialize_message_to_json(&keepalive_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, keepalive_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    // Should get an ACK
-    EXPECT_FALSE(responses.empty());
+    auto* reset = find_response(responses, response_command::RESET_KEEPALIVE_TIMER);
+    ASSERT_NE(reset, nullptr);
 }
 
 TEST_F(MessageHandlerTest, ProcessReceiptConfirmationHubToServer)
@@ -563,9 +577,11 @@ TEST_F(MessageHandlerTest, ProcessReceiptConfirmationHubToServer)
     serialize_message_to_json(&receipt_msg, json_input);
 
     auto req = make_request("tcp_session_1", json_input, true, false, "HUB", "hub_1");
+    expect_ack_for_request(*msg_handler, req, SERVER_TO_HUB__ACK, receipt_msg.timestamp);
+
     auto responses = msg_handler->process_request(req);
 
-    EXPECT_FALSE(responses.empty());
+    EXPECT_TRUE(responses.empty());
 }
 
 int main(int argc, char** argv)

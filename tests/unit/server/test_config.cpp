@@ -42,6 +42,7 @@ class ConfigTest : public ::testing::Test
              << "  \"ack_timeout\": 5000,\n"
              << "  \"max_auth_attempts\": 3,\n"
              << "  \"max_retries\": 3,\n"
+             << "  \"keepalive_timeout\": 120,\n"
              << "  \"pool_size\": 8,\n"
              << "  \"worker_threads\": 4,\n"
              << "  \"credentials_path\": \"config/clients\"\n"
@@ -80,6 +81,7 @@ TEST_F(ConfigTest, LoadValidConfig)
     EXPECT_EQ(cfg.ack_timeout, 5000);
     EXPECT_EQ(cfg.max_auth_attempts, 3);
     EXPECT_EQ(cfg.max_retries, 3);
+    EXPECT_EQ(cfg.keepalive_timeout, 120);
     EXPECT_EQ(cfg.pool_size, 8);
     EXPECT_EQ(cfg.credentials_path, "config/clients");
 }

@@ -123,9 +123,11 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
         try
         {
             insert_txn.exec(
-                pqxx::zview("INSERT INTO credentials (username, password_hash, client_type) VALUES ($1, $2, $3) "
-                            "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash"),
-                pqxx::params{"test_user", "test_hash", "HUB"});
+                pqxx::zview("INSERT INTO credentials (username, password_hash, client_type, is_active) "
+                            "VALUES ($1, $2, $3, $4) "
+                            "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, "
+                            "is_active = EXCLUDED.is_active"),
+                pqxx::params{"test_user", "test_hash", "HUB", true});
             insert_txn.commit();
         }
         catch (const std::exception& ex)
