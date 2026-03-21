@@ -7,28 +7,27 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define TEST_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define TEST_LOG_BACKUPS 3
+
 void setUp(void)
 {
-    // Initialize logger for tests
     logger_config_t config = {.log_file_path = "/tmp/test_message_handler.log",
-                              .max_file_size = 10 * 1024 * 1024,
-                              .max_backup_files = 3,
+                              .max_file_size = TEST_LOG_FILE_SIZE,
+                              .max_backup_files = TEST_LOG_BACKUPS,
                               .min_level = LOG_DEBUG};
     log_init(&config);
 
-    // Initialize IPC for shared state
     if (ipc_init("test_msg_handler") != 0)
     {
-        fprintf(stderr, "Failed to initialize IPC in setUp\n");
+        TEST_FAIL_MESSAGE("Failed to initialize IPC in setUp");
     }
 
-    // Reset shared data
     shared_data_t* shared_data = get_shared_data();
     memset(shared_data, 0, sizeof(shared_data_t));
     strncpy(shared_data->client_role, HUB, sizeof(shared_data->client_role) - 1);
     strncpy(shared_data->client_id, "HUB001", sizeof(shared_data->client_id) - 1);
 
-    // Initialize inventory with test data
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         shared_data->inventory_item[i].item_id = i + 1;
@@ -51,20 +50,17 @@ void test_handle_null_message(void)
 
 void test_handle_ack_removes_pending(void)
 {
-    // Add a pending ACK
     add_pending_ack("2025-11-25T09:59:00.000Z", HUB_TO_SERVER__INVENTORY_UPDATE, "{\"test\":\"data\"}");
-    
-    // Create ACK message
+
     message_t msg;
     memset(&msg, 0, sizeof(message_t));
     strncpy(msg.msg_type, SERVER_TO_HUB__ACK, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.payload.acknowledgment.ack_for_timestamp, "2025-11-25T09:59:00.000Z", TIMESTAMP_SIZE - 1);
     msg.payload.acknowledgment.status_code = 200;
-    
+
     int result = handle_server_message(&msg);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
-    // Verify pending ACK was removed
+
     shared_data_t* shared_data = get_shared_data();
     int found = 0;
     for (int i = 0; i < MAX_PENDING_ACKS; i++)
@@ -83,14 +79,14 @@ void test_handle_ack_warehouse(void)
 {
     shared_data_t* shared_data = get_shared_data();
     strncpy(shared_data->client_role, WAREHOUSE, sizeof(shared_data->client_role) - 1);
-    
+
     add_pending_ack("2025-11-25T10:00:00.000Z", WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, "{}");
-    
+
     message_t msg;
     memset(&msg, 0, sizeof(message_t));
     strncpy(msg.msg_type, SERVER_TO_WAREHOUSE__ACK, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.payload.acknowledgment.ack_for_timestamp, "2025-11-25T10:00:00.000Z", TIMESTAMP_SIZE - 1);
-    
+
     int result = handle_server_message(&msg);
     TEST_ASSERT_EQUAL_INT(0, result);
 }
@@ -103,11 +99,10 @@ void test_handle_auth_response_hub(void)
     strncpy(msg.msg_type, SERVER_TO_HUB__AUTH_RESPONSE, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.timestamp, "2025-11-25T10:00:00.000Z", TIMESTAMP_SIZE - 1);
     msg.payload.server_auth_response.status_code = 200;
-    
+
     int result = handle_server_message(&msg);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
-    // Verify ACK was enqueued
+
     message_t ack_msg;
     TEST_ASSERT_EQUAL_INT(0, pop_pending_message(&ack_msg));
     TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__ACK, ack_msg.msg_type);
@@ -272,6 +267,7 @@ void test_handle_restock_notice_warehouse(void)
     memset(&msg, 0, sizeof(message_t));
     strncpy(msg.msg_type, SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.timestamp, "2025-11-25T16:00:00.000Z", TIMESTAMP_SIZE - 1);
+    strncpy(msg.payload.restock_notice.order_timestamp, "2025-11-25T16:00:00.000Z", TIMESTAMP_SIZE - 1);
     
     msg.payload.restock_notice.items[0].item_id = 1;
     strncpy(msg.payload.restock_notice.items[0].item_name, "ITEM_1", ITEM_NAME_SIZE - 1);
@@ -303,6 +299,7 @@ void test_handle_incoming_stock_notice_hub(void)
     memset(&msg, 0, sizeof(message_t));
     strncpy(msg.msg_type, SERVER_TO_HUB__INCOMING_STOCK_NOTICE, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.timestamp, "2025-11-25T17:00:00.000Z", TIMESTAMP_SIZE - 1);
+    strncpy(msg.payload.restock_notice.order_timestamp, "2025-11-25T17:00:00.000Z", TIMESTAMP_SIZE - 1);
     
     msg.payload.restock_notice.items[1].item_id = 2;
     strncpy(msg.payload.restock_notice.items[1].item_name, "ITEM_2", ITEM_NAME_SIZE - 1);
@@ -555,47 +552,36 @@ void test_handle_server_emergency_alert_when_queue_full(void)
     shared_data->message_count = 0;
 }
 
-// ==================== MAIN ====================
-
 int main(void)
 {
     UNITY_BEGIN();
 
-    // NULL input
     RUN_TEST(test_handle_null_message);
-    
-    // ACK messages
+
     RUN_TEST(test_handle_ack_removes_pending);
     RUN_TEST(test_handle_ack_warehouse);
-    
-    // AUTH_RESPONSE messages
+
     RUN_TEST(test_handle_auth_response_hub);
     RUN_TEST(test_handle_auth_response_warehouse);
-    
-    // INVENTORY_UPDATE messages
+
     RUN_TEST(test_handle_inventory_update_hub);
     RUN_TEST(test_handle_inventory_update_warehouse);
-    
-    // ORDER_TO_DISPATCH messages
+
     RUN_TEST(test_handle_dispatch_order_single_item);
     RUN_TEST(test_handle_dispatch_order_multiple_items);
-    
-    // RESTOCK_NOTICE messages
+
     RUN_TEST(test_handle_restock_notice_warehouse);
     RUN_TEST(test_handle_incoming_stock_notice_hub);
     RUN_TEST(test_handle_incoming_stock_all_items);
-    
-    // Edge cases
+
     RUN_TEST(test_handle_unknown_message_type);
-    
-    // Error path tests (queue full scenarios)
+
     RUN_TEST(test_handle_auth_response_when_queue_full);
     RUN_TEST(test_handle_inventory_update_when_queue_full);
     RUN_TEST(test_handle_dispatch_order_when_queue_full_on_ack);
     RUN_TEST(test_handle_dispatch_order_when_queue_full_on_shipment);
     RUN_TEST(test_handle_restock_notice_when_queue_full_on_receipt);
 
-    // SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT messages
     RUN_TEST(test_handle_server_emergency_alert);
     RUN_TEST(test_handle_server_emergency_alert_when_queue_full);
 

@@ -1,12 +1,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "logic.h"
 #include "connection.h"
-#include "timers.h"
 #include "emergency_detector.h"
 #include "json_manager.h"
 #include "logger.h"
 #include "message_handler.h"
 #include "shared_state.h"
+#include "timers.h"
 #include <dlfcn.h>
 #include <errno.h>
 #include <pthread.h>
@@ -30,13 +30,22 @@ typedef emergency_result_t (*evaluate_fn_t)(const emergency_config_t*);
 static void* emergency_lib_handle = NULL;
 static evaluate_fn_t evaluate_fn = NULL;
 
+#define ACK_CHECK_INTERVAL_SEC 1
+#define RECV_TIMEOUT_SEC 1
+
 /**
  * @brief Load libemergency.so at runtime via dlopen
  * @return 0 on success, -1 if the library or symbol could not be loaded
  */
 static int load_emergency_library(void)
 {
+    /* Try the unversioned name first (works locally via RPATH), then fall
+     * back to the soname that ldconfig registers inside Docker. */
     emergency_lib_handle = dlopen("libemergency.so", RTLD_LAZY);
+    if (!emergency_lib_handle)
+    {
+        emergency_lib_handle = dlopen("libemergency.so.1", RTLD_LAZY);
+    }
     if (!emergency_lib_handle)
     {
         LOG_ERROR_MSG("dlopen(libemergency.so) failed: %s", dlerror());
@@ -165,6 +174,9 @@ static int get_random_consume_amount(void)
     return cfg->consume_min_amount + (rand() % (cfg->consume_max_amount - cfg->consume_min_amount + 1));
 }
 
+/**
+ * @brief Monitor pending acknowledgements and requeue timed out messages.
+ */
 static void* ack_timeout_checker_thread(void* arg)
 {
     shared_data_t* shared_data = get_shared_data();
@@ -196,7 +208,7 @@ static void* ack_timeout_checker_thread(void* arg)
             }
         }
 
-        sleep(1);
+        sleep(ACK_CHECK_INTERVAL_SEC);
     }
 
     LOG_INFO_MSG("ACK checker thread exiting");
@@ -209,10 +221,10 @@ static void* receiver_thread(void* arg)
     char buffer[BUFFER_SIZE];
     shared_data_t* shared_data = get_shared_data();
 
-    printf("[RECEIVER] Thread started\n");
+    LOG_INFO_MSG("Receiver thread started");
 
     struct timeval tv;
-    tv.tv_sec = 1;
+    tv.tv_sec = RECV_TIMEOUT_SEC;
     tv.tv_usec = 0;
     if (setsockopt(ctx->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
     {
@@ -255,6 +267,9 @@ static void* receiver_thread(void* arg)
     return NULL;
 }
 
+/**
+ * @brief Dequeue pending messages and send them to the server connection.
+ */
 static void* sender_thread(void* arg)
 {
     client_context* ctx = (client_context*)arg;
@@ -276,7 +291,6 @@ static void* sender_thread(void* arg)
                 {
                     if (client_send(ctx, json_buffer) == 0)
                     {
-                        printf("[SENDER] Message sent: type=%s, timestamp=%s\n", msg.msg_type, msg.timestamp);
                         LOG_DEBUG_MSG("Message sent: type=%s, timestamp=%s", msg.msg_type, msg.timestamp);
 
                         if (strstr(msg.msg_type, "ACK") == NULL && strstr(msg.msg_type, "AUTH_REQUEST") == NULL &&
@@ -446,8 +460,9 @@ static int do_check_low_stock(void)
     int requested_item_indices[QUANTITY_ITEMS];
     int critically_low_count = 0;
 
-    int low_count = get_low_stock_report(cfg->low_stock_threshold, cfg->critical_stock_threshold, cfg->max_stock_per_item,
-                                         low_items, requested_item_indices, &critically_low_count);
+    int low_count =
+        get_low_stock_report(cfg->low_stock_threshold, cfg->critical_stock_threshold, cfg->max_stock_per_item,
+                             low_items, requested_item_indices, &critically_low_count);
     if (low_count < 0)
     {
         LOG_ERROR_MSG("Failed to evaluate low stock report");
@@ -582,11 +597,10 @@ static int child_logic_process(void)
         return -1;
     }
 
-    LOG_INFO_MSG(
-        "Timers configured: inventory=%dms (first=%dms), consume=random(%d-%dms, first=%dms), emergency=%dms "
-        "(first=%dms)",
-        cfg->inventory_update_interval_ms, inventory_phase_offset, cfg->consume_stock_min_ms, cfg->consume_stock_max_ms,
-        consume_interval, cfg->emergency_check_interval_ms, emergency_phase_offset);
+    LOG_INFO_MSG("Timers configured: inventory=%dms (first=%dms), consume=random(%d-%dms, first=%dms), emergency=%dms "
+                 "(first=%dms)",
+                 cfg->inventory_update_interval_ms, inventory_phase_offset, cfg->consume_stock_min_ms,
+                 cfg->consume_stock_max_ms, consume_interval, cfg->emergency_check_interval_ms, emergency_phase_offset);
 
     // Event loop with select()
     int maxfd = inventory_timer_fd;

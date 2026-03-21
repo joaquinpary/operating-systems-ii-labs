@@ -1,8 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
-#include "timers.h"
 #include "shared_state.h"
 #include "json_manager.h"
 #include "logger.h"
+#include "timers.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -19,8 +19,6 @@ static int shm_fd = -1;
 static shared_data_t* shared_data = NULL;
 static sem_t* inventory_sem = NULL;
 static sem_t* message_available_sem = NULL;
-
-// Store IPC names for cleanup
 static char shm_name[IPC_NAME_BUFFER_SIZE];
 static char inventory_sem_name[IPC_NAME_BUFFER_SIZE];
 static char message_sem_name[IPC_NAME_BUFFER_SIZE];
@@ -36,16 +34,14 @@ int ipc_init(const char* client_id)
 {
     if (client_id == NULL || strlen(client_id) == 0)
     {
-        fprintf(stderr, "[IPC] Invalid client_id provided\n");
+        LOG_ERROR_MSG("Invalid client_id provided to ipc_init");
         return -1;
     }
 
-    // Create unique IPC names using client_id
     snprintf(shm_name, sizeof(shm_name), "/dhl_client_shm_%s", client_id);
     snprintf(inventory_sem_name, sizeof(inventory_sem_name), "/dhl_inventory_sem_%s", client_id);
     snprintf(message_sem_name, sizeof(message_sem_name), "/dhl_msg_available_sem_%s", client_id);
 
-    // Cleanup any leftover resources from previous runs
     shm_unlink(shm_name);
     sem_unlink(inventory_sem_name);
     sem_unlink(message_sem_name);
@@ -53,51 +49,50 @@ int ipc_init(const char* client_id)
     shm_fd = shm_open(shm_name, O_CREAT | O_EXCL | O_RDWR, 0666);
     if (shm_fd == -1)
     {
-        perror("[IPC] shm_open");
+        LOG_ERROR_MSG("shm_open failed for %s: %s", shm_name, strerror(errno));
         return -1;
     }
 
     if (ftruncate(shm_fd, sizeof(shared_data_t)) == -1)
     {
-        perror("[IPC] ftruncate");
+        LOG_ERROR_MSG("ftruncate failed for %s: %s", shm_name, strerror(errno));
         return -1;
     }
 
     shared_data = mmap(NULL, sizeof(shared_data_t), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (shared_data == MAP_FAILED)
     {
-        perror("[IPC] mmap");
+        LOG_ERROR_MSG("mmap failed for %s: %s", shm_name, strerror(errno));
         return -1;
     }
 
     memset(shared_data, 0, sizeof(shared_data_t));
 
-    // Initialize inventory with predefined items (all starting at 0 quantity)
     const char* item_names[QUANTITY_ITEMS] = {ITEMS_NAME};
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
-        shared_data->inventory_item[i].item_id = i + 1; // IDs from 1 to 6
+        shared_data->inventory_item[i].item_id = i + 1;
         strncpy(shared_data->inventory_item[i].item_name, item_names[i], ITEM_NAME_SIZE - 1);
         shared_data->inventory_item[i].item_name[ITEM_NAME_SIZE - 1] = '\0';
-        shared_data->inventory_item[i].quantity = 0; // Start with 0 quantity
+        shared_data->inventory_item[i].quantity = 0;
     }
-    printf("[IPC] Initialized inventory with %d items (all quantities at 0)\n", QUANTITY_ITEMS);
+    LOG_INFO_MSG("IPC inventory initialized with %d items", QUANTITY_ITEMS);
 
     inventory_sem = sem_open(inventory_sem_name, O_CREAT | O_EXCL, 0666, 1);
     if (inventory_sem == SEM_FAILED)
     {
-        perror("[IPC] sem_open inventory");
+        LOG_ERROR_MSG("sem_open failed for inventory semaphore %s: %s", inventory_sem_name, strerror(errno));
         return -1;
     }
 
     message_available_sem = sem_open(message_sem_name, O_CREAT | O_EXCL, 0666, 0);
     if (message_available_sem == SEM_FAILED)
     {
-        perror("[IPC] sem_open message_available");
+        LOG_ERROR_MSG("sem_open failed for message semaphore %s: %s", message_sem_name, strerror(errno));
         return -1;
     }
 
-    printf("[IPC] Initialized successfully for client: %s\n", client_id);
+    LOG_INFO_MSG("IPC initialized successfully for client %s", client_id);
     return 0;
 }
 
@@ -126,7 +121,7 @@ void ipc_cleanup(void)
         sem_unlink(message_sem_name);
         message_available_sem = NULL;
     }
-    printf("[IPC] Cleaned up\n");
+    LOG_INFO_MSG("IPC resources cleaned up");
 }
 
 int has_pending_messages(void)
@@ -144,7 +139,7 @@ int enqueue_pending_message(const message_t* msg)
     if (shared_data->message_count >= 10)
     {
         sem_post(inventory_sem);
-        fprintf(stderr, "[IPC] Message queue full\n");
+        LOG_ERROR_MSG("Pending message queue is full");
         return -1;
     }
 
@@ -170,7 +165,7 @@ int enqueue_pending_message_json(const char* json_message)
     if (shared_data->message_count >= 10)
     {
         sem_post(inventory_sem);
-        fprintf(stderr, "[IPC] Message queue full\n");
+        LOG_ERROR_MSG("Pending message queue is full");
         return -1;
     }
 
@@ -210,7 +205,7 @@ int modify_inventory(const inventory_item_t* items, inventory_operation_t operat
 {
     if (items == NULL)
     {
-        fprintf(stderr, "[SHARED_STATE] Invalid parameters for modify_inventory\n");
+        LOG_ERROR_MSG("Invalid parameters for modify_inventory");
         return -1;
     }
 
@@ -511,8 +506,8 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
         {
             shared_data->pending_acks[i].send_time = now;
             sem_post(inventory_sem);
-            printf("[ACK_TRACK] Updated send_time for existing msg_id: %s, type: %s (retry %d/%d)\n", msg_id, msg_type,
-                   shared_data->pending_acks[i].retry_count, cfg->max_retries);
+            LOG_DEBUG_MSG("Updated pending ACK timestamp for %s (%s), retry %d/%d", msg_id, msg_type,
+                          shared_data->pending_acks[i].retry_count, cfg->max_retries);
             return 0;
         }
     }
@@ -529,13 +524,13 @@ int add_pending_ack(const char* msg_id, const char* msg_type, const char* messag
             strncpy(shared_data->pending_acks[i].message_json, message_json,
                     sizeof(shared_data->pending_acks[i].message_json) - 1);
             sem_post(inventory_sem);
-            printf("[ACK_TRACK] Added pending ACK for msg_id: %s, type: %s\n", msg_id, msg_type);
+            LOG_DEBUG_MSG("Added pending ACK for %s (%s)", msg_id, msg_type);
             return 0;
         }
     }
 
     sem_post(inventory_sem);
-    fprintf(stderr, "[ACK_TRACK] No free slots for pending ACK\n");
+    LOG_ERROR_MSG("No free slots available for pending ACK tracking");
     return -1;
 }
 
@@ -549,7 +544,7 @@ int remove_pending_ack(const char* msg_id)
         {
             shared_data->pending_acks[i].active = 0;
             sem_post(inventory_sem);
-            printf("[ACK_TRACK] Removed pending ACK for msg_id: %s\n", msg_id);
+            LOG_DEBUG_MSG("Removed pending ACK for %s", msg_id);
             return 0;
         }
     }
@@ -582,16 +577,15 @@ int check_ack_timeouts(void)
 
                 if (shared_data->pending_acks[i].retry_count >= cfg->max_retries)
                 {
-                    fprintf(stderr, "[ACK_TRACK] MAX RETRIES (%d) reached for msg_id: %s - Disconnecting\n",
-                            cfg->max_retries, shared_data->pending_acks[i].msg_id);
+                    LOG_ERROR_MSG("Max retries reached for pending ACK %s (%d/%d)", shared_data->pending_acks[i].msg_id,
+                                  shared_data->pending_acks[i].retry_count, cfg->max_retries);
                     shared_data->ack_timeout_occurred = 1;
                     sem_post(inventory_sem);
                     return -1; // Signal disconnection
                 }
 
-                fprintf(stderr, "[ACK_TRACK] TIMEOUT! No ACK for msg_id: %s (retry %d/%d, timeout=%dms)\n",
-                        shared_data->pending_acks[i].msg_id, shared_data->pending_acks[i].retry_count,
-                        cfg->max_retries, cfg->ack_timeout_ms);
+                LOG_WARNING_MSG("ACK timeout for %s (retry %d/%d, timeout=%dms)", shared_data->pending_acks[i].msg_id,
+                                shared_data->pending_acks[i].retry_count, cfg->max_retries, cfg->ack_timeout_ms);
 
                 shared_data->pending_acks[i].send_time = now;
                 needs_retransmission = 1;

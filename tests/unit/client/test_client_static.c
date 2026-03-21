@@ -21,30 +21,31 @@
 // Include mock server
 #include "mock_server.h"
 
-// Test configuration file paths
+#define TEST_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define TEST_LOG_BACKUPS 3
 #define TEST_CONFIG_VALID "/tmp/test_client_valid.conf"
 #define TEST_CONFIG_INVALID "/tmp/test_client_invalid.conf"
 #define TEST_CONFIG_MISSING "/tmp/test_client_missing.conf"
 #define TEST_CONFIG_INCOMPLETE "/tmp/test_client_incomplete.conf"
+#define TEST_AUTH_SUCCESS_PORT 9999
+#define TEST_AUTH_FAILURE_PORT 9998
+#define TEST_SETUP_DELAY_US 100000
+#define TEST_TIMEOUT_SEC 2
 
 void setUp(void)
 {
-    // Initialize logger for tests
     logger_config_t config = {.log_file_path = "/tmp/test_client_static.log",
-                              .max_file_size = 10 * 1024 * 1024,
-                              .max_backup_files = 3,
+                              .max_file_size = TEST_LOG_FILE_SIZE,
+                              .max_backup_files = TEST_LOG_BACKUPS,
                               .min_level = LOG_DEBUG};
     log_init(&config);
 }
 
 void tearDown(void)
 {
-    // Cleanup test config files
     remove(TEST_CONFIG_VALID);
     remove(TEST_CONFIG_INVALID);
     remove(TEST_CONFIG_INCOMPLETE);
-
-    // Close logger
     log_close();
 }
 
@@ -191,7 +192,6 @@ void test_parse_conf_missing_credentials(void)
                                  "protocol = tcp\n"
                                  "ipversion = v4\n"
                                  "type = HUB\n";
-    // Missing username and password
 
     create_test_config(TEST_CONFIG_INCOMPLETE, config_content);
 
@@ -232,7 +232,6 @@ void test_parse_conf_ipversion_variants(void)
     TEST_ASSERT_EQUAL_INT(0, result);
     TEST_ASSERT_EQUAL_INT(AF_INET6, config.ip_version);
 
-    // Test AF_UNSPEC (default)
     const char* config_unspec = "host = localhost\n"
                                 "port = 8080\n"
                                 "protocol = tcp\n"
@@ -264,9 +263,8 @@ void test_authenticate_success(void)
         return;
     }
 
-    // Setup mock server
     mock_server_args_t server_args = {
-        .port = 9999,
+        .port = TEST_AUTH_SUCCESS_PORT,
         .response_msg = success_response,
         .ready_sem = NULL,
         .behavior = MOCK_BEHAVIOR_NORMAL
@@ -279,11 +277,10 @@ void test_authenticate_success(void)
     pthread_t server_thread;
     pthread_create(&server_thread, NULL, mock_tcp_server, &server_args);
 
-    // Wait for server to be ready
     sem_wait(&ready_sem);
     sem_destroy(&ready_sem);
 
-    usleep(100000);
+    usleep(TEST_SETUP_DELAY_US);
 
     client_config config = {
         .host = "localhost",
@@ -302,7 +299,6 @@ void test_authenticate_success(void)
         return;
     }
 
-    // Setup credentials
     client_credentials creds = {
         .type = "HUB",
         .username = "test_user",
@@ -311,7 +307,6 @@ void test_authenticate_success(void)
 
     int result = authenticate(&ctx, &creds);
 
-    // Cleanup
     client_close(&ctx);
     pthread_join(server_thread, NULL);
 
@@ -334,9 +329,8 @@ void test_authenticate_failure(void)
         return;
     }
 
-    // Setup mock server
     mock_server_args_t server_args = {
-        .port = 9998,
+        .port = TEST_AUTH_FAILURE_PORT,
         .response_msg = failure_response,
         .ready_sem = NULL,
         .behavior = MOCK_BEHAVIOR_NORMAL
@@ -349,13 +343,11 @@ void test_authenticate_failure(void)
     pthread_t server_thread;
     pthread_create(&server_thread, NULL, mock_tcp_server, &server_args);
 
-    // Wait for server to be ready
     sem_wait(&ready_sem);
     sem_destroy(&ready_sem);
 
-    usleep(100000);
+    usleep(TEST_SETUP_DELAY_US);
 
-    // Setup client context
     client_config config = {
         .host = "localhost",
         .port = "9998",
@@ -373,7 +365,6 @@ void test_authenticate_failure(void)
         return;
     }
 
-    // Setup credentials
     client_credentials creds = {
         .type = "HUB",
         .username = "test_user",
@@ -388,17 +379,13 @@ void test_authenticate_failure(void)
     TEST_ASSERT_EQUAL_INT(-1, result);
 }
 
-static volatile sig_atomic_t alarm_fired = 0;
-
 static void alarm_handler(int sig)
 {
     (void)sig;
-    alarm_fired = 1;
 }
 
 void test_run_client_smoke_test(void)
 {
-    // Create a minimal config file for the smoke test
     const char* config_content = "host = 192.0.2.1\n" // TEST-NET-1 (non-routable)
                                  "port = 9999\n"
                                  "protocol = tcp\n"
@@ -413,9 +400,6 @@ void test_run_client_smoke_test(void)
 
     if (test_pid == 0)
     {
-        // ===== CHILD PROCESS =====
-
-        // Setup alarm handler to force exit after 2 seconds
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = alarm_handler;
@@ -423,26 +407,18 @@ void test_run_client_smoke_test(void)
         sa.sa_flags = 0;
         sigaction(SIGALRM, &sa, NULL);
 
-        // Set alarm for 2 seconds
-        alarm(2);
+        alarm(TEST_TIMEOUT_SEC);
 
-        // Call run_client - this will try to connect and likely fail
-        // but we're just checking it doesn't segfault
         int result = run_client(TEST_CONFIG_VALID);
-
-        // Exit with the result code
         exit(result == 0 ? 0 : 1);
     }
     else if (test_pid > 0)
     {
-        // ===== PARENT PROCESS =====
-
         int status;
         pid_t waited = waitpid(test_pid, &status, 0);
 
         TEST_ASSERT_EQUAL_INT(test_pid, waited);
 
-        // Check if child exited normally (not killed by signal like SIGSEGV)
         if (WIFEXITED(status))
         {
             int exit_code = WEXITSTATUS(status);
@@ -452,7 +428,6 @@ void test_run_client_smoke_test(void)
         {
             int signal = WTERMSIG(status);
 
-            // SIGALRM (14) is expected, SIGSEGV (11) is NOT
             if (signal == SIGSEGV)
             {
                 TEST_FAIL_MESSAGE("run_client() caused segmentation fault");
@@ -475,7 +450,6 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    // Tests for parse_conf() static function
     RUN_TEST(test_parse_conf_valid_tcp_config);
     RUN_TEST(test_parse_conf_valid_udp_config);
     RUN_TEST(test_parse_conf_with_spaces_and_tabs);
@@ -485,11 +459,9 @@ int main(void)
     RUN_TEST(test_parse_conf_file_not_found);
     RUN_TEST(test_parse_conf_ipversion_variants);
 
-    // Tests for authenticate() public function
     RUN_TEST(test_authenticate_success);
     RUN_TEST(test_authenticate_failure);
 
-    // Smoke test for run_client()
     RUN_TEST(test_run_client_smoke_test);
 
     return UNITY_END();

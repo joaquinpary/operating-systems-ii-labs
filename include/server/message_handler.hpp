@@ -14,15 +14,15 @@
 
 enum class message_category
 {
-    AUTH_REQUEST,
-    ACK_MESSAGE,
-    KEEPALIVE_MSG,
-    INV_UPDATE,
-    STOCK_REQ,
-    RECEIPT_CONFIRM,
-    DISPATCH_NOTICE,
-    REPLENISH_REQ,
-    OTHER
+    AUTH_REQUEST,    ///< Authentication request from a client.
+    ACK_MESSAGE,     ///< ACK emitted by a client for a previous outbound message.
+    KEEPALIVE_MSG,   ///< Keepalive ping from an authenticated client.
+    INV_UPDATE,      ///< Inventory update emitted by a hub or warehouse.
+    STOCK_REQ,       ///< Stock request emitted by a hub.
+    RECEIPT_CONFIRM, ///< Receipt confirmation emitted after stock delivery.
+    DISPATCH_NOTICE, ///< Shipment notice emitted by a warehouse.
+    REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
+    OTHER            ///< Any unrecognized or unsupported message type.
 };
 
 /**

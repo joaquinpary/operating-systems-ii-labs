@@ -15,29 +15,29 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#define TEST_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define TEST_LOG_BACKUPS 3
+#define TEST_TIMEOUT_SEC 2
+
 void setUp(void)
 {
-    // Initialize logger for tests
     logger_config_t config = {.log_file_path = "/tmp/test_logic.log",
-                              .max_file_size = 10 * 1024 * 1024,
-                              .max_backup_files = 3,
+                              .max_file_size = TEST_LOG_FILE_SIZE,
+                              .max_backup_files = TEST_LOG_BACKUPS,
                               .min_level = LOG_DEBUG};
     log_init(&config);
 
-    // Initialize IPC for shared state
     if (ipc_init("test_logic") != 0)
     {
-        fprintf(stderr, "Failed to initialize IPC in setUp\n");
+        TEST_FAIL_MESSAGE("Failed to initialize IPC in setUp");
     }
 
-    // Reset shared data
     shared_data_t* shared_data = get_shared_data();
     memset(shared_data, 0, sizeof(shared_data_t));
     strncpy(shared_data->client_role, HUB, sizeof(shared_data->client_role) - 1);
     strncpy(shared_data->client_id, "HUB001", sizeof(shared_data->client_id) - 1);
     shared_data->should_exit = 0;
 
-    // Initialize inventory with test data
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         shared_data->inventory_item[i].item_id = i + 1;
@@ -48,10 +48,7 @@ void setUp(void)
 
 void tearDown(void)
 {
-    // Cleanup IPC
     ipc_cleanup();
-
-    // Close logger
     log_close();
 }
 
@@ -80,12 +77,12 @@ void test_inventory_operations(void)
     TEST_ASSERT_EQUAL_INT(0, result);
     
     shared_data_t* shared_data = get_shared_data();
-    TEST_ASSERT_EQUAL_INT(60, shared_data->inventory_item[0].quantity); // 50 initial + 10
+    TEST_ASSERT_EQUAL_INT(60, shared_data->inventory_item[0].quantity);
     
     items[0].quantity = 5;
     result = modify_inventory(items, INVENTORY_REDUCE);
     TEST_ASSERT_EQUAL_INT(0, result);
-    TEST_ASSERT_EQUAL_INT(55, shared_data->inventory_item[0].quantity); // 60 - 5
+    TEST_ASSERT_EQUAL_INT(55, shared_data->inventory_item[0].quantity);
 }
 
 void test_message_queue_operations(void)
@@ -113,7 +110,6 @@ void test_pending_ack_tracking(void)
     const char* msg_type = HUB_TO_SERVER__INVENTORY_UPDATE;
     const char* json = "{\"test\":\"data\"}";
     
-    // Add pending ACK
     int result = add_pending_ack(msg_id, msg_type, json);
     TEST_ASSERT_EQUAL_INT(0, result);
     
@@ -156,15 +152,13 @@ void test_inventory_count_query(void)
     TEST_ASSERT_EQUAL_INT(-1, count);
 }
 
-// ==================== SMOKE TEST: logic_init() ====================
-
 /**
  * @brief Smoke test for logic_init()
- * 
+ *
  * This test verifies that logic_init() can start and stop without crashing.
  * It does NOT test the full functionality (threads, timers, etc.) because
  * that would require a real network connection and would run indefinitely.
- * 
+ *
  * The test:
  * 1. Forks a child process
  * 2. Child sets up a timeout alarm (2 seconds)
@@ -174,21 +168,15 @@ void test_inventory_count_query(void)
  * 6. logic_init() detects flag and cleans up
  * 7. Parent verifies child didn't crash (no segfault)
  */
-
-static volatile sig_atomic_t alarm_fired = 0;
-
 static void alarm_handler(int sig)
 {
     (void)sig;
-    alarm_fired = 1;
-    
-    // Signal all processes to exit
+
     shared_data_t* shared_data = get_shared_data();
     if (shared_data)
     {
         shared_data->should_exit = 1;
-        
-        // Wake up sender thread if it's waiting
+
         sem_t* message_sem = get_message_sem();
         if (message_sem)
         {
@@ -198,61 +186,51 @@ static void alarm_handler(int sig)
 }
 
 void test_logic_init_smoke_test(void)
-{    
+{
     pid_t test_pid = fork();
-    
+
     if (test_pid == 0)
     {
-        // ===== CHILD PROCESS =====
-        
-        // Setup alarm handler to force exit after 2 seconds
         struct sigaction sa;
         memset(&sa, 0, sizeof(sa));
         sa.sa_handler = alarm_handler;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
         sigaction(SIGALRM, &sa, NULL);
-        
-        alarm(2);
-        
-        // Initialize IPC with a unique ID for this test
+
+        alarm(TEST_TIMEOUT_SEC);
+
         if (ipc_init("smoke_test_logic") != 0)
         {
-            fprintf(stderr, "[SMOKE TEST] Failed to initialize IPC\n");
             exit(1);
         }
-        
-        // Create a mock client context (socket will be invalid)
+
         client_context ctx;
         memset(&ctx, 0, sizeof(ctx));
-        ctx.sockfd = -1; // Invalid socket - logic_init won't actually send/receive
-        
-        int result = logic_init(&ctx, HUB, "SMOKE_TEST");
-        
+        ctx.sockfd = -1;
+
+        (void)logic_init(&ctx, HUB, "SMOKE_TEST");
+
         ipc_cleanup();
-        
+
         exit(0);
     }
     else if (test_pid > 0)
     {
-        // ===== PARENT PROCESS =====
-        
         int status;
         pid_t waited = waitpid(test_pid, &status, 0);
-        
+
         TEST_ASSERT_EQUAL_INT(test_pid, waited);
-        
-        // Check if child exited normally (not killed by signal like SIGSEGV)
+
         if (WIFEXITED(status))
         {
             int exit_code = WEXITSTATUS(status);
-            TEST_ASSERT_TRUE(exit_code == 0 || exit_code == 255); // 0 = success, 255 = controlled error
+            TEST_ASSERT_TRUE(exit_code == 0 || exit_code == 255);
         }
         else if (WIFSIGNALED(status))
         {
             int signal = WTERMSIG(status);
-            
-            // SIGALRM (14) is expected, SIGSEGV (11) is NOT
+
             if (signal == SIGSEGV)
             {
                 TEST_FAIL_MESSAGE("logic_init() caused segmentation fault");
@@ -263,7 +241,7 @@ void test_logic_init_smoke_test(void)
                 snprintf(msg, sizeof(msg), "Unexpected signal: %d", signal);
                 TEST_FAIL_MESSAGE(msg);
             }
-        }        
+        }
     }
     else
     {
@@ -282,7 +260,6 @@ int main(void)
     RUN_TEST(test_pending_ack_tracking);
     RUN_TEST(test_inventory_count_query);
     
-    // Smoke test for logic_init (may take 2+ seconds)
     RUN_TEST(test_logic_init_smoke_test);
 
     return UNITY_END();

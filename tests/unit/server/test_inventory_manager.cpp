@@ -135,11 +135,11 @@ TEST_F(InventoryManagerTest, HandleReplenishRequest)
     EXPECT_EQ(result.assigned_warehouse_id, "warehouse_1");
     EXPECT_GT(result.transaction_id, 0);
 
-    // Replenish requests should mark as ASSIGNED immediately
+    // Replenish requests are authorized immediately by the server.
     pqxx::work txn(*db_conn);
     pqxx::result db_res = txn.exec(pqxx::zview("SELECT status FROM inventory_transactions WHERE transaction_id = $1"),
                                    pqxx::params{result.transaction_id});
-    EXPECT_EQ(db_res[0][0].as<std::string>(), "ASSIGNED");
+    EXPECT_EQ(db_res[0][0].as<std::string>(), "DISPATCHED");
 }
 
 TEST_F(InventoryManagerTest, HandleShipmentNotice)

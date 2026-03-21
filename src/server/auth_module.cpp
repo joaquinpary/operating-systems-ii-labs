@@ -3,7 +3,6 @@
 
 #include <iostream>
 
-// AUTH MODULE CONSTRUCTOR
 auth_module::auth_module(connection_pool& pool) : m_pool(pool)
 {
 }
@@ -39,12 +38,10 @@ auth_result auth_module::authenticate(const std::string& username, const std::st
             return result;
         }
 
-        // Authentication successful
         result.status_code = auth_result_code::SUCCESS;
         result.client_type = cred->client_type;
         result.username = cred->username;
 
-        // Mark client as active in the database
         set_client_active(guard.get(), username, true);
 
         return result;

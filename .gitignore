@@ -40,8 +40,12 @@ external/
 
 # Configuration files
 config/clients/
+config/server/
 config/credentials.json
 .env
 
 # Logs and databases
 logs/
+
+
+.pytest_cache/

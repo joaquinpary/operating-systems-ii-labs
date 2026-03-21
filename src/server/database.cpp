@@ -357,9 +357,8 @@ int update_client_inventory(pqxx::work& txn, const std::string& client_id, const
                       "ammo = EXCLUDED.ammo, "
                       "last_updated = EXCLUDED.last_updated";
 
-    txn.exec(pqxx::zview(sql),
-             pqxx::params{client_id, client_type, quantities[0], quantities[1], quantities[2],
-                          quantities[3], quantities[4], quantities[5], timestamp});
+    txn.exec(pqxx::zview(sql), pqxx::params{client_id, client_type, quantities[0], quantities[1], quantities[2],
+                                            quantities[3], quantities[4], quantities[5], timestamp});
     return 0;
 }
 
@@ -370,7 +369,8 @@ int update_client_inventory(pqxx::connection& conn, const std::string& client_id
     {
         pqxx::work txn(conn);
         int rc = update_client_inventory(txn, client_id, client_type, quantities, timestamp);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -387,7 +387,6 @@ std::string get_warehouse_with_all_stock(pqxx::work& txn, const int quantities[6
         return "";
     }
 
-    // Use TABLESAMPLE + filter for fast random pick; fall back to OFFSET if no match
     std::string sql = "SELECT client_id FROM client_inventory "
                       "WHERE client_type = 'WAREHOUSE' "
                       "AND food >= $1 AND water >= $2 AND medicine >= $3 "
@@ -438,10 +437,9 @@ int create_transaction(pqxx::work& txn, const std::string& transaction_type, con
                       "tools, guns, ammo, order_timestamp) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) "
                       "RETURNING transaction_id";
 
-    pqxx::result result =
-        txn.exec(pqxx::zview(sql), pqxx::params{transaction_type, destination_id, destination_type,
-                                                quantities[0], quantities[1], quantities[2],
-                                                quantities[3], quantities[4], quantities[5], order_timestamp});
+    pqxx::result result = txn.exec(
+        pqxx::zview(sql), pqxx::params{transaction_type, destination_id, destination_type, quantities[0], quantities[1],
+                                       quantities[2], quantities[3], quantities[4], quantities[5], order_timestamp});
 
     return result[0][0].as<int>();
 }
@@ -452,8 +450,10 @@ int create_transaction(pqxx::connection& conn, const std::string& transaction_ty
     try
     {
         pqxx::work txn(conn);
-        int id = create_transaction(txn, transaction_type, destination_id, destination_type, quantities, order_timestamp);
-        if (id >= 0) txn.commit();
+        int id =
+            create_transaction(txn, transaction_type, destination_id, destination_type, quantities, order_timestamp);
+        if (id >= 0)
+            txn.commit();
         return id;
     }
     catch (const std::exception& ex)
@@ -505,7 +505,8 @@ int set_transaction_source(pqxx::connection& conn, int transaction_id, const std
     {
         pqxx::work txn(conn);
         int rc = set_transaction_source(txn, transaction_id, client_id, client_type);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -529,7 +530,8 @@ int mark_transaction_dispatched(pqxx::connection& conn, int transaction_id, cons
     {
         pqxx::work txn(conn);
         int rc = mark_transaction_dispatched(txn, transaction_id, dispatch_timestamp);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -552,7 +554,8 @@ int mark_transaction_assigned(pqxx::connection& conn, int transaction_id)
     {
         pqxx::work txn(conn);
         int rc = mark_transaction_assigned(txn, transaction_id);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -576,7 +579,8 @@ int complete_transaction(pqxx::connection& conn, int transaction_id, const std::
     {
         pqxx::work txn(conn);
         int rc = complete_transaction(txn, transaction_id, reception_timestamp);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -765,7 +769,8 @@ int get_client_inventory(pqxx::connection& conn, const std::string& client_id, c
     {
         pqxx::work txn(conn);
         int rc = get_client_inventory(txn, client_id, client_type, quantities_out);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)
@@ -813,7 +818,8 @@ int adjust_client_inventory(pqxx::connection& conn, const std::string& client_id
     {
         pqxx::work txn(conn);
         int rc = adjust_client_inventory(txn, client_id, quantities, add);
-        if (rc == 0) txn.commit();
+        if (rc == 0)
+            txn.commit();
         return rc;
     }
     catch (const std::exception& ex)

@@ -22,6 +22,7 @@
 
 // Default trigger probability (2%)
 #define DEFAULT_EMERGENCY_PROBABILITY 2
+#define EMERGENCY_TYPE_COUNT 3
 
 #define EMERGENCY_TYPE_SIZE 20
 

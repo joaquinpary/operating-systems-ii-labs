@@ -1,6 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
 
-// First include all necessary headers BEFORE including logic.c
 #include "logic.h"
 #include "connection.h"
 #include "json_manager.h"
@@ -24,24 +23,26 @@
 
 #include "../../../src/client/logic.c"
 
+#define TEST_LOG_FILE_SIZE (10 * 1024 * 1024)
+#define TEST_LOG_BACKUPS 3
+#define RANDOM_SAMPLE_COUNT 100
+#define TEST_STOCK_BASELINE 50
+
 void setUp(void)
 {
-    // Initialize logger for tests
     logger_config_t config = {.log_file_path = "/tmp/test_logic_static.log",
-                              .max_file_size = 10 * 1024 * 1024,
-                              .max_backup_files = 3,
+                              .max_file_size = TEST_LOG_FILE_SIZE,
+                              .max_backup_files = TEST_LOG_BACKUPS,
                               .min_level = LOG_DEBUG};
     log_init(&config);
 
     load_timer_config();
 
-    // Initialize IPC for shared state
     if (ipc_init("test_logic_static") != 0)
     {
-        fprintf(stderr, "Failed to initialize IPC in setUp\n");
+        TEST_FAIL_MESSAGE("Failed to initialize IPC in setUp");
     }
 
-    // Reset shared data
     shared_data_t* shared_data = get_shared_data();
     memset(shared_data, 0, sizeof(shared_data_t));
     strncpy(shared_data->client_role, HUB, sizeof(shared_data->client_role) - 1);
@@ -49,12 +50,11 @@ void setUp(void)
     shared_data->should_exit = 0;
     shared_data->inventory_updated = 0;
 
-    // Initialize inventory with medium stock levels
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         shared_data->inventory_item[i].item_id = i + 1;
         snprintf(shared_data->inventory_item[i].item_name, ITEM_NAME_SIZE, "ITEM_%d", i + 1);
-        shared_data->inventory_item[i].quantity = 50; // Medium stock
+        shared_data->inventory_item[i].quantity = TEST_STOCK_BASELINE;
     }
 }
 
@@ -64,11 +64,9 @@ void tearDown(void)
     log_close();
 }
 
-// ==================== UNIT TESTS FOR STATIC FUNCTIONS ====================
-
 void test_get_random_consume_interval(void)
 {
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < RANDOM_SAMPLE_COUNT; i++)
     {
         int interval = get_random_consume_interval();
         
@@ -83,8 +81,7 @@ void test_get_random_consume_amount(void)
     int min_seen = 999;
     int max_seen = 0;
 
-    // Call the static function multiple times
-    for (int i = 0; i < 100; i++)
+    for (int i = 0; i < RANDOM_SAMPLE_COUNT; i++)
     {
         int amount = get_random_consume_amount();
         
@@ -101,7 +98,6 @@ void test_do_inventory_update(void)
 {
     shared_data_t* shared_data = get_shared_data();
 
-    // Clear message queue
     shared_data->message_count = 0;
 
     sem_wait(get_inventory_sem());
@@ -120,7 +116,6 @@ void test_do_consume_stock(void)
 {
     shared_data_t* shared_data = get_shared_data();
 
-    // Set up inventory with known quantities
     sem_wait(get_inventory_sem());
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
@@ -128,7 +123,6 @@ void test_do_consume_stock(void)
     }
     sem_post(get_inventory_sem());
 
-    // Record initial quantities
     int initial_total = 0;
     sem_wait(get_inventory_sem());
     for (int i = 0; i < QUANTITY_ITEMS; i++)
@@ -137,10 +131,8 @@ void test_do_consume_stock(void)
     }
     sem_post(get_inventory_sem());
 
-    // Call the static function
     do_consume_stock();
 
-    // Verify quantities decreased
     int final_total = 0;
     sem_wait(get_inventory_sem());
     for (int i = 0; i < QUANTITY_ITEMS; i++)
@@ -163,10 +155,8 @@ void test_do_consume_stock_zero_inventory(void)
     }
     sem_post(get_inventory_sem());
 
-    // Call the static function (should not crash)
     do_consume_stock();
 
-    // Verify quantities remain zero
     sem_wait(get_inventory_sem());
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
@@ -179,17 +169,15 @@ void test_do_check_low_stock_triggers_request(void)
 {
     shared_data_t* shared_data = get_shared_data();
 
-    // Clear message queue
     shared_data->message_count = 0;
 
-    // Set some items below low stock threshold (20)
     sem_wait(get_inventory_sem());
-    shared_data->inventory_item[0].quantity = 15; // Below threshold
-    shared_data->inventory_item[1].quantity = 10; // Below threshold
-    shared_data->inventory_item[2].quantity = 5;  // Below threshold
-    shared_data->inventory_item[3].quantity = 25; // Above threshold
-    shared_data->inventory_item[4].quantity = 30; // Above threshold
-    shared_data->inventory_item[5].quantity = 18; // Below threshold
+    shared_data->inventory_item[0].quantity = 15;
+    shared_data->inventory_item[1].quantity = 10;
+    shared_data->inventory_item[2].quantity = 5;
+    shared_data->inventory_item[3].quantity = 25;
+    shared_data->inventory_item[4].quantity = 30;
+    shared_data->inventory_item[5].quantity = 18;
     sem_post(get_inventory_sem());
 
     int result = do_check_low_stock();
@@ -219,10 +207,8 @@ void test_do_check_low_stock_sufficient_stock(void)
 {
     shared_data_t* shared_data = get_shared_data();
 
-    // Clear message queue
     shared_data->message_count = 0;
 
-    // Set all items above threshold
     sem_wait(get_inventory_sem());
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
@@ -230,13 +216,9 @@ void test_do_check_low_stock_sufficient_stock(void)
     }
     sem_post(get_inventory_sem());
 
-    // Call the static function
     int result = do_check_low_stock();
 
-    // Should return 0 (not critically low)
     TEST_ASSERT_EQUAL_INT(0, result);
-
-    // Should not have enqueued messages (no low stock)
     TEST_ASSERT_EQUAL_INT(0, shared_data->message_count);
 }
 
@@ -244,11 +226,9 @@ int main(void)
 {
     UNITY_BEGIN();
 
-    // Tests for static helper functions
     RUN_TEST(test_get_random_consume_interval);
     RUN_TEST(test_get_random_consume_amount);
 
-    // Tests for static business logic functions
     RUN_TEST(test_do_inventory_update);
     RUN_TEST(test_do_consume_stock);
     RUN_TEST(test_do_consume_stock_zero_inventory);
