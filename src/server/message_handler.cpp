@@ -385,22 +385,33 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
         responses.push_back(
             make_mark_authenticated(req.session_id, auth_res.client_type.c_str(), auth_res.username.c_str()));
 
-        // 2. Send AUTH_RESPONSE
+        // 2. Send AUTH_RESPONSE (no ACK timer for CLI — it is an admin session)
         responses.push_back(make_send_response(req.session_id, response_msg));
-        responses.push_back(make_start_timer(req.session_id, response_msg));
-
-        // 3. Build and send inventory message
-        message_t inv_msg;
-        if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
+        const bool is_cli = (auth_res.client_type == CLI);
+        if (!is_cli)
         {
-            responses.push_back(make_send_response(req.session_id, inv_msg));
-            responses.push_back(make_start_timer(req.session_id, inv_msg));
-            LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
-                         req.session_id);
+            responses.push_back(make_start_timer(req.session_id, response_msg));
         }
 
-        // 4. Start keepalive timer for this session
-        responses.push_back(make_start_keepalive_timer(req.session_id));
+        // 3. Build and send inventory message (skip for CLI — no inventory)
+        if (!is_cli)
+        {
+            message_t inv_msg;
+            if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
+            {
+                responses.push_back(make_send_response(req.session_id, inv_msg));
+                responses.push_back(make_start_timer(req.session_id, inv_msg));
+            }
+        }
+
+        LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
+                     req.session_id);
+
+        // 4. Start keepalive timer (skip for CLI — admin sessions don't keepalive)
+        if (!is_cli)
+        {
+            responses.push_back(make_start_keepalive_timer(req.session_id));
+        }
     }
     else
     {
@@ -616,7 +627,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 message_category message_handler::categorize_message(const char* msg_type) const
 {
     if (std::strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 ||
-        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0)
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0 ||
+        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0)
     {
         return message_category::AUTH_REQUEST;
     }
@@ -682,6 +694,10 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
     else if (client_type == WAREHOUSE)
     {
         return SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
+    }
+    else if (client_type == CLI)
+    {
+        return SERVER_TO_CLI__AUTH_RESPONSE;
     }
     return nullptr;
 }

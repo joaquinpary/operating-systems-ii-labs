@@ -53,6 +53,12 @@ RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
         cp /tmp/build/libemergency*.so* /usr/local/lib/; \
     fi
 
+# Copy admin CLI shared library (server only — harmless if absent on client)
+RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
+    if ls /tmp/build/libadmin_cli*.so* 2>/dev/null | grep -q .; then \
+        cp /tmp/build/libadmin_cli*.so* /usr/local/lib/; \
+    fi
+
 # Create log directory following FHS
 RUN mkdir -p /var/log/dhl
 
