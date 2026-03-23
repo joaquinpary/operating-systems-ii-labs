@@ -19,6 +19,36 @@
 #define ADMIN_CLI_VERSION "1.0.0"
 #define CLIENTS_PAGE_SIZE 10
 #define TRANSACTIONS_PAGE_SIZE 3
+#define CMD_TOKEN_BUF_SIZE 64
+
+enum inv_col
+{
+    INV_CLIENT_TYPE,
+    INV_FOOD,
+    INV_WATER,
+    INV_MEDICINE,
+    INV_TOOLS,
+    INV_GUNS,
+    INV_AMMO,
+    INV_LAST_UPDATED
+};
+
+enum txn_col
+{
+    TXN_ID,
+    TXN_TYPE,
+    TXN_SRC,
+    TXN_SRC_TYPE,
+    TXN_DST,
+    TXN_DST_TYPE,
+    TXN_STATUS,
+    TXN_FOOD,
+    TXN_WATER,
+    TXN_MEDICINE,
+    TXN_TOOLS,
+    TXN_GUNS,
+    TXN_AMMO
+};
 
 static PGconn* s_conn = NULL;
 
@@ -148,7 +178,7 @@ static int cmd_help(char* out, size_t max_len)
         "Get inventory for a client (args: <client_id>)",
         "List transactions (args: [<client_id>|all] [page N])"};
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); ++i)
     {
         cJSON* e = cJSON_CreateObject();
         cJSON_AddStringToObject(e, "command", names[i]);
@@ -252,14 +282,14 @@ static int cmd_inventory(const char* client_id, char* out, size_t max_len)
 
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "client_id", client_id);
-    cJSON_AddStringToObject(obj, "client_type", PQgetvalue(res, 0, 0));
-    cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, 0, 1)));
-    cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, 0, 2)));
-    cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, 0, 3)));
-    cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, 0, 4)));
-    cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, 0, 5)));
-    cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, 0, 6)));
-    cJSON_AddStringToObject(obj, "last_updated", PQgetvalue(res, 0, 7));
+    cJSON_AddStringToObject(obj, "client_type", PQgetvalue(res, 0, INV_CLIENT_TYPE));
+    cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, 0, INV_FOOD)));
+    cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, 0, INV_WATER)));
+    cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, 0, INV_MEDICINE)));
+    cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, 0, INV_TOOLS)));
+    cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, 0, INV_GUNS)));
+    cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, 0, INV_AMMO)));
+    cJSON_AddStringToObject(obj, "last_updated", PQgetvalue(res, 0, INV_LAST_UPDATED));
 
     PQclear(res);
     return build_ok(out, max_len, "inventory", obj);
@@ -272,17 +302,17 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
 
     int page = parse_int_arg(args, "page ", 1);
 
-    char client_filter[64] = {0};
+    char client_filter[CMD_TOKEN_BUF_SIZE] = {0};
     int has_filter = 0;
 
     if (args && args[0] != '\0')
     {
-        char first[64] = {0};
+        char first[CMD_TOKEN_BUF_SIZE] = {0};
         int i = 0;
         const char* p = args;
         while (*p == ' ')
             p++;
-        while (*p && *p != ' ' && i < 63)
+        while (*p && *p != ' ' && i < CMD_TOKEN_BUF_SIZE - 1)
             first[i++] = *p++;
         first[i] = '\0';
 
@@ -361,17 +391,17 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
     for (int i = 0; i < rows; ++i)
     {
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddNumberToObject(obj, "id", atoi(PQgetvalue(res, i, 0)));
-        cJSON_AddStringToObject(obj, "type", PQgetvalue(res, i, 1));
-        cJSON_AddStringToObject(obj, "src", PQgetvalue(res, i, 2));
-        cJSON_AddStringToObject(obj, "dst", PQgetvalue(res, i, 4));
-        cJSON_AddStringToObject(obj, "status", PQgetvalue(res, i, 6));
-        cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, i, 7)));
-        cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, i, 8)));
-        cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, i, 9)));
-        cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, i, 10)));
-        cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, i, 11)));
-        cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, i, 12)));
+        cJSON_AddNumberToObject(obj, "id", atoi(PQgetvalue(res, i, TXN_ID)));
+        cJSON_AddStringToObject(obj, "type", PQgetvalue(res, i, TXN_TYPE));
+        cJSON_AddStringToObject(obj, "src", PQgetvalue(res, i, TXN_SRC));
+        cJSON_AddStringToObject(obj, "dst", PQgetvalue(res, i, TXN_DST));
+        cJSON_AddStringToObject(obj, "status", PQgetvalue(res, i, TXN_STATUS));
+        cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, i, TXN_FOOD)));
+        cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, i, TXN_WATER)));
+        cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, i, TXN_MEDICINE)));
+        cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, i, TXN_TOOLS)));
+        cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, i, TXN_GUNS)));
+        cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, i, TXN_AMMO)));
         cJSON_AddItemToArray(arr, obj);
     }
     PQclear(res);

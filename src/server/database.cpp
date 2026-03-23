@@ -15,6 +15,26 @@
 
 namespace
 {
+enum txn_col
+{
+    TXN_ID = 0,
+    TXN_TYPE,
+    TXN_SOURCE_ID,
+    TXN_SOURCE_TYPE,
+    TXN_DEST_ID,
+    TXN_DEST_TYPE,
+    TXN_STATUS,
+    TXN_FOOD,
+    TXN_WATER,
+    TXN_MEDICINE,
+    TXN_TOOLS,
+    TXN_GUNS,
+    TXN_AMMO
+};
+} // namespace
+
+namespace
+{
 std::string require_env_var(const char* env_var)
 {
     const char* value = std::getenv(env_var);
@@ -591,19 +611,19 @@ static int parse_transaction_rows(const pqxx::result& result, transaction_record
         if (count >= max_count)
             break;
 
-        out_transactions[count].transaction_id = row[0].as<int>();
-        out_transactions[count].transaction_type = row[1].as<std::string>();
-        out_transactions[count].source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-        out_transactions[count].source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-        out_transactions[count].destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-        out_transactions[count].destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-        out_transactions[count].status = row[6].as<std::string>();
-        out_transactions[count].food = row[7].as<int>();
-        out_transactions[count].water = row[8].as<int>();
-        out_transactions[count].medicine = row[9].as<int>();
-        out_transactions[count].tools = row[10].as<int>();
-        out_transactions[count].guns = row[11].as<int>();
-        out_transactions[count].ammo = row[12].as<int>();
+        out_transactions[count].transaction_id = row[TXN_ID].as<int>();
+        out_transactions[count].transaction_type = row[TXN_TYPE].as<std::string>();
+        out_transactions[count].source_id = row[TXN_SOURCE_ID].is_null() ? "" : row[TXN_SOURCE_ID].as<std::string>();
+        out_transactions[count].source_type = row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
+        out_transactions[count].destination_id = row[TXN_DEST_ID].is_null() ? "" : row[TXN_DEST_ID].as<std::string>();
+        out_transactions[count].destination_type = row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
+        out_transactions[count].status = row[TXN_STATUS].as<std::string>();
+        out_transactions[count].food = row[TXN_FOOD].as<int>();
+        out_transactions[count].water = row[TXN_WATER].as<int>();
+        out_transactions[count].medicine = row[TXN_MEDICINE].as<int>();
+        out_transactions[count].tools = row[TXN_TOOLS].as<int>();
+        out_transactions[count].guns = row[TXN_GUNS].as<int>();
+        out_transactions[count].ammo = row[TXN_AMMO].as<int>();
 
         count++;
     }
@@ -689,19 +709,19 @@ int get_transaction_by_id(pqxx::work& txn, int transaction_id, transaction_recor
         return -1;
 
     const auto& row = result[0];
-    out.transaction_id = row[0].as<int>();
-    out.transaction_type = row[1].as<std::string>();
-    out.source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-    out.source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-    out.destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-    out.destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-    out.status = row[6].as<std::string>();
-    out.food = row[7].as<int>();
-    out.water = row[8].as<int>();
-    out.medicine = row[9].as<int>();
-    out.tools = row[10].as<int>();
-    out.guns = row[11].as<int>();
-    out.ammo = row[12].as<int>();
+    out.transaction_id = row[TXN_ID].as<int>();
+    out.transaction_type = row[TXN_TYPE].as<std::string>();
+    out.source_id = row[TXN_SOURCE_ID].is_null() ? "" : row[TXN_SOURCE_ID].as<std::string>();
+    out.source_type = row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
+    out.destination_id = row[TXN_DEST_ID].is_null() ? "" : row[TXN_DEST_ID].as<std::string>();
+    out.destination_type = row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
+    out.status = row[TXN_STATUS].as<std::string>();
+    out.food = row[TXN_FOOD].as<int>();
+    out.water = row[TXN_WATER].as<int>();
+    out.medicine = row[TXN_MEDICINE].as<int>();
+    out.tools = row[TXN_TOOLS].as<int>();
+    out.guns = row[TXN_GUNS].as<int>();
+    out.ammo = row[TXN_AMMO].as<int>();
 
     return 0;
 }
@@ -745,12 +765,8 @@ int get_client_inventory(pqxx::work& txn, const std::string& client_id, const st
         return 0;
     }
 
-    quantities_out[0] = result[0][0].as<int>();
-    quantities_out[1] = result[0][1].as<int>();
-    quantities_out[2] = result[0][2].as<int>();
-    quantities_out[3] = result[0][3].as<int>();
-    quantities_out[4] = result[0][4].as<int>();
-    quantities_out[5] = result[0][5].as<int>();
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+        quantities_out[i] = result[0][i].as<int>();
 
     return 0;
 }
