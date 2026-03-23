@@ -111,14 +111,13 @@ void load_timer_config(void)
         timer_config.consume_max_amount = tmp;
     }
 
-    LOG_INFO_MSG(
-        "Timer config loaded: inv=%dms consume=[%d,%d]ms consume_amount=[%d,%d] emergency=%dms ack_check=%ds "
-        "recv_timeout=%ds loop_timeout=%ds ack=%dms retries=%d response_delay=[%d,%d]ms",
-        timer_config.inventory_update_interval_ms, timer_config.consume_stock_min_ms, timer_config.consume_stock_max_ms,
-        timer_config.consume_min_amount, timer_config.consume_max_amount, timer_config.emergency_check_interval_ms,
-        timer_config.ack_check_interval_sec, timer_config.recv_timeout_sec, timer_config.loop_timeout_sec,
-        timer_config.ack_timeout_ms, timer_config.max_retries, timer_config.response_delay_min_ms,
-        timer_config.response_delay_max_ms);
+    LOG_INFO_MSG("Timer config loaded: inv=%dms consume=[%d,%d]ms consume_amount=[%d,%d] emergency=%dms ack_check=%ds "
+                 "recv_timeout=%ds loop_timeout=%ds ack=%dms retries=%d response_delay=[%d,%d]ms",
+                 timer_config.inventory_update_interval_ms, timer_config.consume_stock_min_ms,
+                 timer_config.consume_stock_max_ms, timer_config.consume_min_amount, timer_config.consume_max_amount,
+                 timer_config.emergency_check_interval_ms, timer_config.ack_check_interval_sec,
+                 timer_config.recv_timeout_sec, timer_config.loop_timeout_sec, timer_config.ack_timeout_ms,
+                 timer_config.max_retries, timer_config.response_delay_min_ms, timer_config.response_delay_max_ms);
 }
 
 const timer_config_t* get_timer_config(void)
