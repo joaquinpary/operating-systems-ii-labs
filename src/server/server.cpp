@@ -626,6 +626,31 @@ void server::dispatch_response(const response_slot_t& resp)
         handle_keepalive_timeout(session_id);
         break;
     }
+    case response_command::BROADCAST: {
+        std::string data(resp.payload, resp.payload_len);
+        auto sessions = m_session_manager->get_authenticated_sessions();
+        for (const auto& target_session : sessions)
+        {
+            send_to_session(target_session, data);
+
+            if (resp.start_ack_timer && resp.timer_timeout > 0)
+            {
+                std::string timer_key(resp.timer_key);
+                std::string payload_copy(resp.payload, resp.payload_len);
+                std::uint32_t retry_count = resp.retry_count;
+                std::uint32_t max_retries = resp.max_retries;
+                std::uint32_t timeout = resp.timer_timeout;
+
+                m_timer_manager->start_ack_timer(
+                    target_session, timer_key, static_cast<int>(timeout),
+                    [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
+                        handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
+                    });
+            }
+        }
+        LOG_INFO_MSG("[DISPATCH] BROADCAST len=%u to %zu sessions", resp.payload_len, sessions.size());
+        break;
+    }
     }
 }
 

@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 class tcp_session;
 
@@ -75,6 +76,9 @@ class session_manager
     std::string find_session_by_username(const std::string& username) const;
     /** Check whether a session id exists. */
     bool has_session(const std::string& session_id) const;
+
+    /** Return a list of all authenticated, non-blacklisted session IDs. */
+    std::vector<std::string> get_authenticated_sessions() const;
 
     /** Return the UDP endpoint associated with a session when it exists. */
     std::optional<posix_address> get_udp_endpoint(const std::string& session_id) const;

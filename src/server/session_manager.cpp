@@ -163,6 +163,19 @@ bool session_manager::has_session(const std::string& session_id) const
     return m_sessions.find(session_id) != m_sessions.end();
 }
 
+std::vector<std::string> session_manager::get_authenticated_sessions() const
+{
+    std::vector<std::string> result;
+    for (const auto& [id, info] : m_sessions)
+    {
+        if (info.is_authenticated && !info.is_blacklisted)
+        {
+            result.push_back(id);
+        }
+    }
+    return result;
+}
+
 std::optional<posix_address> session_manager::get_udp_endpoint(const std::string& session_id) const
 {
     auto it = m_sessions.find(session_id);
