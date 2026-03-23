@@ -14,6 +14,9 @@ typedef struct
     int critical_stock_threshold;
     int max_stock_per_item;
     int emergency_check_interval_ms;
+    int ack_check_interval_sec;
+    int recv_timeout_sec;
+    int loop_timeout_sec;
     int ack_timeout_ms;
     int max_retries;
     int response_delay_min_ms;
@@ -33,6 +36,9 @@ typedef struct
  * - CLIENT_CRITICAL_STOCK_THRESHOLD
  * - CLIENT_MAX_STOCK_PER_ITEM
  * - CLIENT_EMERGENCY_INTERVAL_MS
+ * - CLIENT_ACK_CHECK_INTERVAL_SEC
+ * - CLIENT_RECV_TIMEOUT_SEC
+ * - CLIENT_LOOP_TIMEOUT_SEC
  * - CLIENT_ACK_TIMEOUT_MS
  * - CLIENT_MAX_RETRIES
  * - CLIENT_RESPONSE_DELAY_MIN_MS
@@ -54,4 +60,4 @@ const timer_config_t* get_timer_config(void);
  */
 struct itimerspec ms_to_itimerspec(int ms);
 
-#endif // TIMERS_H
+#endif

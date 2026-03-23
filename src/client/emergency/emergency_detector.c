@@ -15,9 +15,6 @@ static void ensure_seeded(void)
 {
     if (!seeded)
     {
-        // XOR time(NULL) with getpid() so that each of the 1000 processes in the
-        // container gets a distinct random sequence even when they start almost
-        // simultaneously.
         unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid();
         srand(seed);
         seeded = 1;
@@ -38,17 +35,14 @@ emergency_result_t evaluate_emergency(const emergency_config_t* config)
 
     int probability = (config != NULL) ? config->probability_percent : DEFAULT_EMERGENCY_PROBABILITY;
 
-    // Clamp to avoid out-of-range values
     if (probability < 0)
         probability = 0;
     if (probability > 100)
         probability = 100;
 
-    // ~(100 - probability)% of the time there is no emergency
     int roll = rand() % 100;
     if (roll >= probability)
     {
-        // No emergency (~98% of the time with probability=2)
         return result;
     }
 

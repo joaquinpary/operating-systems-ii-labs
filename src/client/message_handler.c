@@ -40,7 +40,7 @@ static int send_ack_to_server(const char* msg_timestamp)
     message_t ack_msg;
 
     if (create_acknowledgment_message(&ack_msg, shared_data->client_role, shared_data->client_id, SERVER, SERVER,
-                                      msg_timestamp, 200) != 0)
+                                      msg_timestamp, OK) != 0)
     {
         LOG_ERROR_MSG("Failed to create ACK message");
         return -1;
@@ -86,7 +86,6 @@ int handle_server_message(const message_t* msg)
         return 0;
     }
 
-    // Handle INVENTORY_UPDATE - add to inventory and send ACK
     if (strcmp(msg->msg_type, SERVER_TO_WAREHOUSE__INVENTORY_UPDATE) == 0 ||
         strcmp(msg->msg_type, SERVER_TO_HUB__INVENTORY_UPDATE) == 0)
     {

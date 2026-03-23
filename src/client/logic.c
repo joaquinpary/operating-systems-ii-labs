@@ -23,15 +23,10 @@
 
 static client_context* logic_ctx = NULL;
 
-// ==================== EMERGENCY LIBRARY (dlopen) ====================
-
 typedef emergency_result_t (*evaluate_fn_t)(const emergency_config_t*);
 
 static void* emergency_lib_handle = NULL;
 static evaluate_fn_t evaluate_fn = NULL;
-
-#define ACK_CHECK_INTERVAL_SEC 1
-#define RECV_TIMEOUT_SEC 1
 
 /**
  * @brief Load libemergency.so at runtime via dlopen
@@ -39,8 +34,6 @@ static evaluate_fn_t evaluate_fn = NULL;
  */
 static int load_emergency_library(void)
 {
-    /* Try the unversioned name first (works locally via RPATH), then fall
-     * back to the soname that ldconfig registers inside Docker. */
     emergency_lib_handle = dlopen("libemergency.so", RTLD_LAZY);
     if (!emergency_lib_handle)
     {
@@ -52,7 +45,7 @@ static int load_emergency_library(void)
         return -1;
     }
 
-    dlerror(); /* clear any existing error */
+    dlerror();
 
     evaluate_fn = (evaluate_fn_t)dlsym(emergency_lib_handle, "evaluate_emergency");
     const char* dl_err = dlerror();
@@ -64,7 +57,6 @@ static int load_emergency_library(void)
         return -1;
     }
 
-    /* Log library version if symbol is available */
     typedef const char* (*version_fn_t)(void);
     version_fn_t version_fn = (version_fn_t)dlsym(emergency_lib_handle, "emergency_lib_version");
     if (!dlerror() && version_fn)
@@ -97,7 +89,7 @@ static void do_emergency_check(void)
         return;
     }
 
-    emergency_result_t result = evaluate_fn(NULL); /* NULL → use default 2% probability */
+    emergency_result_t result = evaluate_fn(NULL);
 
     if (result.emergency_code == EMERGENCY_CODE_NONE)
     {
@@ -179,6 +171,7 @@ static int get_random_consume_amount(void)
  */
 static void* ack_timeout_checker_thread(void* arg)
 {
+    const timer_config_t* cfg = get_timer_config();
     shared_data_t* shared_data = get_shared_data();
 
     LOG_INFO_MSG("ACK checker thread started");
@@ -208,7 +201,7 @@ static void* ack_timeout_checker_thread(void* arg)
             }
         }
 
-        sleep(ACK_CHECK_INTERVAL_SEC);
+        sleep(cfg->ack_check_interval_sec);
     }
 
     LOG_INFO_MSG("ACK checker thread exiting");
@@ -217,6 +210,7 @@ static void* ack_timeout_checker_thread(void* arg)
 
 static void* receiver_thread(void* arg)
 {
+    const timer_config_t* cfg = get_timer_config();
     client_context* ctx = (client_context*)arg;
     char buffer[BUFFER_SIZE];
     shared_data_t* shared_data = get_shared_data();
@@ -224,7 +218,7 @@ static void* receiver_thread(void* arg)
     LOG_INFO_MSG("Receiver thread started");
 
     struct timeval tv;
-    tv.tv_sec = RECV_TIMEOUT_SEC;
+    tv.tv_sec = cfg->recv_timeout_sec;
     tv.tv_usec = 0;
     if (setsockopt(ctx->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0)
     {
@@ -272,6 +266,7 @@ static void* receiver_thread(void* arg)
  */
 static void* sender_thread(void* arg)
 {
+    const timer_config_t* cfg = get_timer_config();
     client_context* ctx = (client_context*)arg;
     message_t msg;
     shared_data_t* shared_data = get_shared_data();
@@ -280,7 +275,7 @@ static void* sender_thread(void* arg)
 
     while (!shared_data->should_exit)
     {
-        int sem_result = wait_for_message(1);
+        int sem_result = wait_for_message(cfg->loop_timeout_sec);
 
         if (sem_result == 0)
         {
@@ -321,8 +316,6 @@ static void* sender_thread(void* arg)
     return NULL;
 }
 
-// ==================== BUSINESS LOGIC FUNCTIONS ====================
-
 /**
  * @brief Send periodic inventory update to server
  *
@@ -359,7 +352,6 @@ static void do_inventory_update(void)
 
     log_inventory_snapshot("INVENTORY_UPDATE send");
 
-    // Determine correct message type based on client role
     const char* msg_type = (strcmp(shared_data->client_role, HUB) == 0) ? HUB_TO_SERVER__INVENTORY_UPDATE
                                                                         : WAREHOUSE_TO_SERVER__INVENTORY_UPDATE;
 
@@ -386,7 +378,6 @@ static void do_inventory_update(void)
  */
 static void do_consume_stock(void)
 {
-    // Prepare items to reduce with random amounts
     inventory_item_t inventory_snapshot[QUANTITY_ITEMS];
     inventory_item_t items_to_reduce[QUANTITY_ITEMS];
     int items_with_stock = 0;
@@ -398,7 +389,6 @@ static void do_consume_stock(void)
         return;
     }
 
-    // Build list of items to consume with random amounts
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         items_to_reduce[i].item_id = inventory_snapshot[i].item_id;
@@ -417,14 +407,12 @@ static void do_consume_stock(void)
         }
     }
 
-    // If no items have stock, return early
     if (items_with_stock == 0)
     {
         LOG_WARNING_MSG("No stock available to consume");
         return;
     }
 
-    // Reduce inventory (server manages stock levels)
     if (modify_inventory(items_to_reduce, INVENTORY_REDUCE) != 0)
     {
         LOG_ERROR_MSG("Failed to reduce inventory");
@@ -448,8 +436,6 @@ static int do_check_low_stock(void)
     const timer_config_t* cfg = get_timer_config();
     shared_data_t* shared_data = get_shared_data();
 
-    // Warehouses replenish only through dispatch orders from the server,
-    // not through autonomous stock requests.
     if (strcmp(shared_data->client_role, HUB) != 0)
     {
         LOG_DEBUG_MSG("do_check_low_stock() skipped for WAREHOUSE role");
@@ -508,7 +494,6 @@ static int do_check_low_stock(void)
         LOG_INFO_MSG("Stock request enqueued for %d items", low_count);
     }
 
-    // If ALL items are critically low, signal to pause consumption
     if (critically_low_count == QUANTITY_ITEMS)
     {
         LOG_WARNING_MSG("All inventory critically low, consumption will be paused");
@@ -518,8 +503,6 @@ static int do_check_low_stock(void)
     return 0;
 }
 
-// ==================== CHILD LOGIC PROCESS ====================
-
 static int child_logic_process(void)
 {
     const timer_config_t* cfg = get_timer_config();
@@ -527,13 +510,11 @@ static int child_logic_process(void)
 
     LOG_INFO_MSG("Business logic process started (PID: %d)", getpid());
 
-    /* Load emergency detection library */
     if (load_emergency_library() != 0)
     {
         LOG_WARNING_MSG("Emergency library unavailable — emergency alerts disabled");
     }
 
-    // Create timer file descriptors
     int inventory_timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
     if (inventory_timer_fd == -1)
     {
@@ -558,7 +539,6 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure inventory update timer with random initial phase offset
     int inventory_phase_offset = get_random_phase_offset(cfg->inventory_update_interval_ms);
     struct itimerspec inventory_spec = ms_to_itimerspec(inventory_phase_offset);
     inventory_spec.it_interval.tv_sec = cfg->inventory_update_interval_ms / 1000;
@@ -571,7 +551,6 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure stock consumption timer (random interval, one-shot)
     int consume_interval = get_random_consume_interval();
     struct itimerspec consume_spec = ms_to_itimerspec(consume_interval);
     if (timerfd_settime(consume_timer_fd, 0, &consume_spec, NULL) == -1)
@@ -583,7 +562,6 @@ static int child_logic_process(void)
         return -1;
     }
 
-    // Configure emergency check timer with random initial phase offset
     int emergency_phase_offset = get_random_phase_offset(cfg->emergency_check_interval_ms);
     struct itimerspec emergency_spec = ms_to_itimerspec(emergency_phase_offset);
     emergency_spec.it_interval.tv_sec = cfg->emergency_check_interval_ms / 1000;
@@ -602,20 +580,19 @@ static int child_logic_process(void)
                  cfg->inventory_update_interval_ms, inventory_phase_offset, cfg->consume_stock_min_ms,
                  cfg->consume_stock_max_ms, consume_interval, cfg->emergency_check_interval_ms, emergency_phase_offset);
 
-    // Event loop with select()
     int maxfd = inventory_timer_fd;
     if (consume_timer_fd > maxfd)
         maxfd = consume_timer_fd;
     if (emergency_timer_fd > maxfd)
         maxfd = emergency_timer_fd;
     fd_set readfds;
-    int consume_timer_active = 1; // Track if consume timer is active
+    int consume_timer_active = 1;
 
     while (!shared_data->should_exit)
     {
         if (shared_data->inventory_updated && !consume_timer_active)
         {
-            shared_data->inventory_updated = 0; // Reset flag
+            shared_data->inventory_updated = 0;
 
             int items_with_stock = count_items_above_threshold(cfg->critical_stock_threshold);
 
@@ -641,7 +618,6 @@ static int child_logic_process(void)
         FD_SET(consume_timer_fd, &readfds);
         FD_SET(emergency_timer_fd, &readfds);
 
-        // Use timeout to check should_exit periodically
         struct timeval timeout = {.tv_sec = 1, .tv_usec = 0};
 
         int ret = select(maxfd + 1, &readfds, NULL, NULL, &timeout);
@@ -650,7 +626,6 @@ static int child_logic_process(void)
         {
             if (errno == EINTR)
             {
-                // Interrupted by signal, check should_exit and continue
                 continue;
             }
             LOG_ERROR_MSG("select() error: %s", strerror(errno));
@@ -660,7 +635,6 @@ static int child_logic_process(void)
         {
             uint64_t expirations;
 
-            // Check inventory update timer
             if (FD_ISSET(inventory_timer_fd, &readfds))
             {
                 if (read(inventory_timer_fd, &expirations, sizeof(expirations)) > 0)
@@ -670,25 +644,20 @@ static int child_logic_process(void)
                 }
             }
 
-            // Check stock consumption timer (only HUBs consume stock)
             if (FD_ISSET(consume_timer_fd, &readfds))
             {
                 if (read(consume_timer_fd, &expirations, sizeof(expirations)) > 0)
                 {
                     LOG_DEBUG_MSG("Consume timer expired (%lu times)", expirations);
 
-                    // Only HUBs consume stock (simulating deliveries to customers)
-                    // WAREHOUSEs don't consume, they only dispatch to HUBs
                     if (strcmp(shared_data->client_role, HUB) == 0)
                     {
                         do_consume_stock();
 
-                        // Check if stock is critically low
                         int all_low = do_check_low_stock();
 
                         if (all_low)
                         {
-                            // Disable consume timer until stock arrives
                             struct itimerspec disable_spec = ms_to_itimerspec(0);
 
                             if (timerfd_settime(consume_timer_fd, 0, &disable_spec, NULL) == -1)
@@ -703,7 +672,6 @@ static int child_logic_process(void)
                         }
                         else
                         {
-                            // Reconfigure timer with new random interval (one-shot)
                             int next_interval = get_random_consume_interval();
                             struct itimerspec new_consume_spec = ms_to_itimerspec(next_interval);
 
@@ -724,7 +692,6 @@ static int child_logic_process(void)
                 }
             }
 
-            // Check emergency evaluation timer
             if (FD_ISSET(emergency_timer_fd, &readfds))
             {
                 if (read(emergency_timer_fd, &expirations, sizeof(expirations)) > 0)
@@ -750,8 +717,6 @@ static int child_logic_process(void)
     return 0;
 }
 
-// ==================== MAIN LOGIC ENTRY ====================
-
 int logic_init(client_context* ctx, const char* client_role, const char* client_id)
 {
     logic_ctx = ctx;
@@ -764,7 +729,6 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
         return -1;
     }
 
-    // Get shared data and store client identity
     shared_data_t* shared_data = get_shared_data();
     strncpy(shared_data->client_role, client_role, sizeof(shared_data->client_role) - 1);
     strncpy(shared_data->client_id, client_id, sizeof(shared_data->client_id) - 1);
@@ -780,19 +744,16 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
     }
     else if (pid == 0)
     {
-        // ============ CHILD PROCESS ============
         int ret = child_logic_process();
         ipc_cleanup();
         exit(ret);
     }
     else
     {
-        // ============ PARENT PROCESS ============
         LOG_INFO_MSG("Network handler started (PID: %d, Child PID: %d)", getpid(), pid);
 
         pthread_t receiver, sender, ack_checker;
 
-        // Create receiver thread
         if (pthread_create(&receiver, NULL, receiver_thread, ctx) != 0)
         {
             LOG_ERROR_MSG("Failed to create receiver thread");
@@ -802,7 +763,6 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
             return -1;
         }
 
-        // Create sender thread
         if (pthread_create(&sender, NULL, sender_thread, ctx) != 0)
         {
             LOG_ERROR_MSG("Failed to create sender thread");
@@ -814,7 +774,6 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
             return -1;
         }
 
-        // Create ACK checker thread
         if (pthread_create(&ack_checker, NULL, ack_timeout_checker_thread, NULL) != 0)
         {
             LOG_ERROR_MSG("Failed to create ACK checker thread");
@@ -828,23 +787,18 @@ int logic_init(client_context* ctx, const char* client_role, const char* client_
             return -1;
         }
 
-        // Wait for child process
         int status;
         waitpid(pid, &status, 0);
         LOG_INFO_MSG("Child process exited with status %d", WEXITSTATUS(status));
 
-        // Signal threads to exit
         shared_data->should_exit = 1;
 
-        // Wake up sender thread if it's blocked waiting for messages
         wake_sender_thread();
 
-        // Wait for threads
         pthread_join(receiver, NULL);
         pthread_join(sender, NULL);
         pthread_join(ack_checker, NULL);
 
-        // Check if exit was due to ACK timeout
         if (shared_data->ack_timeout_occurred)
         {
             LOG_WARNING_MSG("Disconnection due to ACK timeout");

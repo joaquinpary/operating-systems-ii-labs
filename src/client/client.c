@@ -174,11 +174,11 @@ int authenticate(client_context* ctx, client_credentials* creds)
         if (strcmp(response_msg.msg_type, SERVER_TO_HUB__AUTH_RESPONSE) == 0 ||
             strcmp(response_msg.msg_type, SERVER_TO_WAREHOUSE__AUTH_RESPONSE) == 0)
         {
-            if (response_msg.payload.server_auth_response.status_code == 200)
+            if (response_msg.payload.server_auth_response.status_code == OK)
             {
                 message_t ack_msg;
                 if (create_acknowledgment_message(&ack_msg, creds->type, creds->username, SERVER, SERVER,
-                                                  response_msg.timestamp, 200) == 0)
+                                                  response_msg.timestamp, OK) == 0)
                 {
                     if (serialize_message_to_json(&ack_msg, json_buffer) == 0)
                     {
