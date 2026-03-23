@@ -495,6 +495,37 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
         responses.push_back(make_start_timer(req.session_id, restock_msg));
         LOG_INFO_MSG("[MSG] restock -> wh=%s sess=%s", replenish_result.assigned_warehouse_id.c_str(), req.session_id);
     }
+    else if (category == message_category::EMERGENCY_ALERT)
+    {
+        // Build SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT using the client's emergency_type as instructions
+        message_t broadcast_msg;
+        if (create_server_emergency_message(&broadcast_msg, msg.payload.client_emergency.emergency_code,
+                                            msg.payload.client_emergency.emergency_type) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::BROADCAST);
+
+            char json_buf[BUFFER_SIZE];
+            if (serialize_message_to_json(&broadcast_msg, json_buf) == 0)
+            {
+                std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
+                std::memcpy(slot.payload, json_buf, len);
+                slot.payload_len = len;
+                slot.start_ack_timer = true;
+                std::strncpy(slot.timer_key, broadcast_msg.timestamp, TIMESTAMP_SIZE - 1);
+                slot.timer_timeout = m_ack_timeout_seconds;
+                slot.max_retries = m_max_retries;
+                responses.push_back(slot);
+            }
+            LOG_INFO_MSG("[MSG] emergency broadcast from=%s code=%d", msg.source_id,
+                         msg.payload.client_emergency.emergency_code);
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] emergency broadcast create fail from=%s", msg.source_id);
+        }
+    }
     else
     {
         LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
@@ -549,6 +580,12 @@ message_category message_handler::categorize_message(const char* msg_type) const
     if (std::strcmp(msg_type, WAREHOUSE_TO_SERVER__REPLENISH_REQUEST) == 0)
     {
         return message_category::REPLENISH_REQ;
+    }
+
+    if (std::strcmp(msg_type, HUB_TO_SERVER__EMERGENCY_ALERT) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__EMERGENCY_ALERT) == 0)
+    {
+        return message_category::EMERGENCY_ALERT;
     }
 
     return message_category::OTHER;
