@@ -10,15 +10,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-// ==================== Size calculation ====================
-
 std::size_t shared_queue::total_shm_size()
 {
     return sizeof(shm_header_t) + REQUEST_QUEUE_SIZE * sizeof(request_slot_t) +
            RESPONSE_QUEUE_SIZE * sizeof(response_slot_t);
 }
-
-// ==================== Create (reactor side) ====================
 
 shared_queue shared_queue::create()
 {
@@ -26,7 +22,6 @@ shared_queue shared_queue::create()
     q.m_owner = true;
     q.m_size = total_shm_size();
 
-    // Remove any stale segment
     shm_unlink(SHM_NAME);
 
     q.m_shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR | O_EXCL, SHM_PERMISSIONS);
@@ -50,10 +45,8 @@ shared_queue shared_queue::create()
         throw std::runtime_error(std::string("mmap failed: ") + strerror(errno));
     }
 
-    // Zero out entire region
     std::memset(q.m_base, 0, q.m_size);
 
-    // Set up pointers
     q.m_header = static_cast<shm_header_t*>(q.m_base);
     auto* after_header = reinterpret_cast<char*>(q.m_base) + sizeof(shm_header_t);
     q.m_req_ring = reinterpret_cast<request_slot_t*>(after_header);
@@ -62,8 +55,6 @@ shared_queue shared_queue::create()
     q.init_header();
     return q;
 }
-
-// ==================== Open (worker side) ====================
 
 shared_queue shared_queue::open()
 {
@@ -92,8 +83,6 @@ shared_queue shared_queue::open()
     return q;
 }
 
-// ==================== Initialize header ====================
-
 void shared_queue::init_header()
 {
     m_header->req_head.store(0, std::memory_order_relaxed);
@@ -106,7 +95,6 @@ void shared_queue::init_header()
 
     m_header->shutdown_flag.store(0, std::memory_order_relaxed);
 
-    // Initialize process-shared semaphores — request ring
     if (sem_init(&m_header->sem_requests, 1, 0) == -1)
     {
         throw std::runtime_error(std::string("sem_init sem_requests failed: ") + strerror(errno));
@@ -116,7 +104,6 @@ void shared_queue::init_header()
         throw std::runtime_error(std::string("sem_init sem_free_req_slots failed: ") + strerror(errno));
     }
 
-    // Initialize process-shared semaphores — response ring
     if (sem_init(&m_header->sem_responses, 1, 0) == -1)
     {
         throw std::runtime_error(std::string("sem_init sem_responses failed: ") + strerror(errno));
@@ -126,7 +113,6 @@ void shared_queue::init_header()
         throw std::runtime_error(std::string("sem_init sem_free_resp_slots failed: ") + strerror(errno));
     }
 
-    // Initialize process-shared mutex for response ring
     pthread_mutexattr_t attr;
     pthread_mutexattr_init(&attr);
     pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
@@ -137,8 +123,6 @@ void shared_queue::init_header()
     }
     pthread_mutexattr_destroy(&attr);
 }
-
-// ==================== Destructor ====================
 
 shared_queue::~shared_queue()
 {
@@ -160,8 +144,6 @@ shared_queue::~shared_queue()
     }
 }
 
-// ==================== Move operations ====================
-
 shared_queue::shared_queue(shared_queue&& other) noexcept
     : m_header(other.m_header), m_req_ring(other.m_req_ring), m_resp_ring(other.m_resp_ring), m_base(other.m_base),
       m_size(other.m_size), m_shm_fd(other.m_shm_fd), m_owner(other.m_owner)
@@ -179,7 +161,6 @@ shared_queue& shared_queue::operator=(shared_queue&& other) noexcept
 {
     if (this != &other)
     {
-        // Clean up current resources
         if (m_base && m_base != MAP_FAILED)
         {
             munmap(m_base, m_size);
@@ -208,19 +189,14 @@ shared_queue& shared_queue::operator=(shared_queue&& other) noexcept
     return *this;
 }
 
-// ==================== Reactor-side: push_request ====================
-
 bool shared_queue::push_request(const request_slot_t& slot)
 {
-    // Non-blocking try: never freeze the reactor event loop
     if (sem_trywait(&m_header->sem_free_req_slots) == -1)
     {
         if (errno == EAGAIN)
         {
-            // Queue full — load shedding (caller drops the message)
             return false;
         }
-        // Any other error (e.g. EINVAL)
         return false;
     }
 
@@ -229,7 +205,6 @@ bool shared_queue::push_request(const request_slot_t& slot)
         return false;
     }
 
-    // Single producer (reactor) — no lock needed for req_head
     std::uint64_t head = m_header->req_head.load(std::memory_order_relaxed);
     std::uint32_t idx = static_cast<std::uint32_t>(head & (REQUEST_QUEUE_SIZE - 1));
 
@@ -237,12 +212,9 @@ bool shared_queue::push_request(const request_slot_t& slot)
 
     m_header->req_head.store(head + 1, std::memory_order_release);
 
-    // Signal workers that a request is available
     sem_post(&m_header->sem_requests);
     return true;
 }
-
-// ==================== Reactor-side: pop_response ====================
 
 bool shared_queue::pop_response(response_slot_t& slot)
 {
@@ -251,25 +223,20 @@ bool shared_queue::pop_response(response_slot_t& slot)
 
     if (tail >= head)
     {
-        return false; // Ring empty
+        return false;
     }
 
     std::uint32_t idx = static_cast<std::uint32_t>(tail & (RESPONSE_QUEUE_SIZE - 1));
     std::memcpy(&slot, &m_resp_ring[idx], sizeof(response_slot_t));
 
-    // Single consumer (reactor) — no lock needed for resp_tail
     m_header->resp_tail.store(tail + 1, std::memory_order_release);
 
-    // Signal workers that a response slot is free
     sem_post(&m_header->sem_free_resp_slots);
     return true;
 }
 
-// ==================== Worker-side: wait_request ====================
-
 bool shared_queue::wait_request(request_slot_t& slot)
 {
-    // Block until a request is available
     while (sem_wait(&m_header->sem_requests) == -1)
     {
         if (errno == EINTR)
@@ -288,7 +255,6 @@ bool shared_queue::wait_request(request_slot_t& slot)
         return false;
     }
 
-    // Multiple consumers — use atomic tail with CAS
     std::uint64_t tail;
     do
     {
@@ -298,16 +264,12 @@ bool shared_queue::wait_request(request_slot_t& slot)
     std::uint32_t idx = static_cast<std::uint32_t>(tail & (REQUEST_QUEUE_SIZE - 1));
     std::memcpy(&slot, &m_req_ring[idx], sizeof(request_slot_t));
 
-    // Signal reactor that a slot is free
     sem_post(&m_header->sem_free_req_slots);
     return true;
 }
 
-// ==================== Worker-side: push_response ====================
-
 void shared_queue::push_response(const response_slot_t& slot, int efd)
 {
-    // Wait for a free response slot (backpressure — prevents overwriting unread responses)
     while (sem_wait(&m_header->sem_free_resp_slots) == -1)
     {
         if (errno == EINTR)
@@ -326,7 +288,6 @@ void shared_queue::push_response(const response_slot_t& slot, int efd)
         return;
     }
 
-    // Multiple producers (worker threads) — protect with mutex
     pthread_mutex_lock(&m_header->resp_mutex);
 
     std::uint64_t head = m_header->resp_head.load(std::memory_order_relaxed);
@@ -338,7 +299,6 @@ void shared_queue::push_response(const response_slot_t& slot, int efd)
 
     pthread_mutex_unlock(&m_header->resp_mutex);
 
-    // Notify reactor via eventfd
     std::uint64_t val = 1;
     if (write(efd, &val, sizeof(val)) == -1)
     {
@@ -346,19 +306,16 @@ void shared_queue::push_response(const response_slot_t& slot, int efd)
     }
 }
 
-// ==================== Shutdown ====================
 
 void shared_queue::signal_shutdown()
 {
     m_header->shutdown_flag.store(1, std::memory_order_release);
 
-    // Wake up all blocked workers on request ring
     for (int i = 0; i < REQUEST_QUEUE_SIZE; ++i)
     {
         sem_post(&m_header->sem_requests);
     }
 
-    // Wake up any workers blocked on the response ring (backpressure)
     for (int i = 0; i < RESPONSE_QUEUE_SIZE; ++i)
     {
         sem_post(&m_header->sem_free_resp_slots);

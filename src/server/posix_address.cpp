@@ -15,7 +15,6 @@ posix_address::posix_address(const std::string& ip, std::uint16_t port)
 {
     std::memset(&m_addr, 0, sizeof(m_addr));
 
-    // Try IPv4 first
     auto* addr4 = reinterpret_cast<struct sockaddr_in*>(&m_addr);
     if (inet_pton(AF_INET, ip.c_str(), &addr4->sin_addr) == 1)
     {
@@ -25,7 +24,6 @@ posix_address::posix_address(const std::string& ip, std::uint16_t port)
         return;
     }
 
-    // Try IPv6
     auto* addr6 = reinterpret_cast<struct sockaddr_in6*>(&m_addr);
     std::memset(&m_addr, 0, sizeof(m_addr));
     if (inet_pton(AF_INET6, ip.c_str(), &addr6->sin6_addr) == 1)

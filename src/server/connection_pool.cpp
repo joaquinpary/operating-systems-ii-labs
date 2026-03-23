@@ -5,8 +5,6 @@
 
 #define POOL_LOG_PREFIX "[CONNECTION_POOL] "
 
-// ==================== connection_guard ====================
-
 connection_pool::connection_guard::connection_guard(connection_pool& pool, std::unique_ptr<pqxx::connection> conn)
     : m_pool(&pool), m_connection(std::move(conn))
 {
@@ -30,7 +28,6 @@ connection_pool::connection_guard& connection_pool::connection_guard::operator=(
 {
     if (this != &other)
     {
-        // Release current connection if we have one
         if (m_connection)
         {
             m_pool->release(std::move(m_connection));
@@ -50,8 +47,6 @@ pqxx::connection& connection_pool::connection_guard::get()
     }
     return *m_connection;
 }
-
-// ==================== connection_pool ====================
 
 connection_pool::connection_pool(const std::string& conn_string, size_t pool_size)
     : m_pool_size(pool_size), m_conn_string(conn_string)
@@ -108,7 +103,6 @@ void connection_pool::release(std::unique_ptr<pqxx::connection> conn)
         return;
     }
 
-    // If the connection is broken, try to reconnect
     if (!conn->is_open())
     {
         std::cerr << POOL_LOG_PREFIX "Connection was closed, reconnecting..." << std::endl;
@@ -119,7 +113,6 @@ void connection_pool::release(std::unique_ptr<pqxx::connection> conn)
         catch (const std::exception& ex)
         {
             std::cerr << POOL_LOG_PREFIX "Reconnection failed: " << ex.what() << std::endl;
-            // Still push the broken connection back — better than losing a pool slot
         }
     }
 

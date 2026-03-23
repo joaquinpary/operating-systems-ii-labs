@@ -6,15 +6,12 @@
 #include <iostream>
 #include <random>
 
-// Initial stock values (must match database.cpp)
 static constexpr int INITIAL_STOCK_HUB = 100;
 static constexpr int INITIAL_STOCK_WAREHOUSE = 500;
 
 mem_store::mem_store(connection_pool& pool) : m_pool(pool)
 {
 }
-
-// ======================== INIT ========================
 
 void mem_store::load_credentials()
 {
@@ -40,7 +37,6 @@ void mem_store::load_credentials()
             if (cred.is_active)
                 m_active_clients.insert(cred.username);
 
-            // Also seed the warehouse_ids set for inventory scanning
             if (cred.client_type == "WAREHOUSE")
             {
                 std::unique_lock inv_lock(m_inv_mtx);
@@ -59,8 +55,6 @@ void mem_store::load_credentials()
     }
 }
 
-// ======================== CREDENTIALS ========================
-
 std::unique_ptr<credential> mem_store::get_credential(const std::string& username)
 {
     std::shared_lock lock(m_cred_mtx);
@@ -69,14 +63,12 @@ std::unique_ptr<credential> mem_store::get_credential(const std::string& usernam
         return nullptr;
 
     auto cred = std::make_unique<credential>(it->second);
-    // Reflect current active state
     cred->is_active = m_active_clients.count(username) > 0;
     return cred;
 }
 
 void mem_store::set_active(const std::string& username, bool active)
 {
-    // Update cache
     {
         std::unique_lock lock(m_cred_mtx);
         if (active)
@@ -85,7 +77,6 @@ void mem_store::set_active(const std::string& username, bool active)
             m_active_clients.erase(username);
     }
 
-    // Write-through to DB
     try
     {
         auto guard = m_pool.acquire();
@@ -115,11 +106,8 @@ void mem_store::reset_all_inactive()
     }
 }
 
-// ======================== INVENTORY ========================
-
 bool mem_store::get_inventory(const std::string& client_id, const std::string& client_type, int quantities_out[6])
 {
-    // Try cache first
     {
         std::shared_lock lock(m_inv_mtx);
         auto it = m_inventory.find(client_id);
@@ -130,7 +118,6 @@ bool mem_store::get_inventory(const std::string& client_id, const std::string& c
         }
     }
 
-    // Not in cache — load from DB
     try
     {
         auto guard = m_pool.acquire();
@@ -143,7 +130,6 @@ bool mem_store::get_inventory(const std::string& client_id, const std::string& c
         return false;
     }
 
-    // Cache it
     {
         std::unique_lock lock(m_inv_mtx);
         std::array<int, 6> arr;
@@ -159,7 +145,6 @@ bool mem_store::get_inventory(const std::string& client_id, const std::string& c
 void mem_store::update_inventory(const std::string& client_id, const std::string& client_type, const int quantities[6],
                                  const std::string& timestamp)
 {
-    // Update cache
     {
         std::unique_lock lock(m_inv_mtx);
         std::array<int, 6> arr;
@@ -169,7 +154,6 @@ void mem_store::update_inventory(const std::string& client_id, const std::string
             m_warehouse_ids.insert(client_id);
     }
 
-    // Write-through to DB
     try
     {
         auto guard = m_pool.acquire();
@@ -183,7 +167,6 @@ void mem_store::update_inventory(const std::string& client_id, const std::string
 
 int mem_store::adjust_inventory(const std::string& client_id, const int quantities[6], bool add)
 {
-    // Adjust cache
     {
         std::unique_lock lock(m_inv_mtx);
         auto it = m_inventory.find(client_id);
@@ -197,11 +180,8 @@ int mem_store::adjust_inventory(const std::string& client_id, const int quantiti
                     it->second[i] = std::max(0, it->second[i] - quantities[i]);
             }
         }
-        // If not in cache, the DB update will still happen below.
-        // Next get_inventory will load the DB value.
     }
 
-    // Write-through to DB
     try
     {
         auto guard = m_pool.acquire();
@@ -219,7 +199,6 @@ std::string mem_store::find_warehouse_with_stock(const int quantities[6])
 {
     std::shared_lock lock(m_inv_mtx);
 
-    // Collect candidates
     std::vector<std::string> candidates;
     for (const auto& wh_id : m_warehouse_ids)
     {
@@ -243,19 +222,15 @@ std::string mem_store::find_warehouse_with_stock(const int quantities[6])
     if (candidates.empty())
         return "";
 
-    // Pick random warehouse (like the DB's ORDER BY RANDOM())
     static thread_local std::mt19937 rng(std::random_device{}());
     std::uniform_int_distribution<size_t> dist(0, candidates.size() - 1);
     return candidates[dist(rng)];
 }
 
-// ======================== TRANSACTIONS ========================
-
 int mem_store::create_transaction(const std::string& transaction_type, const std::string& destination_id,
                                   const std::string& destination_type, const int quantities[6],
                                   const std::string& order_timestamp)
 {
-    // Create in DB first to get the auto-generated transaction_id
     int transaction_id;
     try
     {
@@ -272,7 +247,6 @@ int mem_store::create_transaction(const std::string& transaction_type, const std
     if (transaction_id < 0)
         return -1;
 
-    // Cache the new transaction
     transaction_record rec;
     rec.transaction_id = transaction_id;
     rec.transaction_type = transaction_type;
@@ -298,7 +272,6 @@ int mem_store::create_transaction(const std::string& transaction_type, const std
 
 int mem_store::set_transaction_source(int transaction_id, const std::string& client_id, const std::string& client_type)
 {
-    // Update cache
     {
         std::unique_lock lock(m_txn_mtx);
         auto it = m_transactions.find(transaction_id);
@@ -309,7 +282,6 @@ int mem_store::set_transaction_source(int transaction_id, const std::string& cli
         }
     }
 
-    // Write-through
     try
     {
         auto guard = m_pool.acquire();
@@ -324,7 +296,6 @@ int mem_store::set_transaction_source(int transaction_id, const std::string& cli
 
 int mem_store::mark_transaction_assigned(int transaction_id)
 {
-    // Update cache
     {
         std::unique_lock lock(m_txn_mtx);
         auto it = m_transactions.find(transaction_id);
@@ -332,7 +303,6 @@ int mem_store::mark_transaction_assigned(int transaction_id)
             it->second.status = "ASSIGNED";
     }
 
-    // Write-through
     try
     {
         auto guard = m_pool.acquire();
@@ -347,7 +317,6 @@ int mem_store::mark_transaction_assigned(int transaction_id)
 
 int mem_store::mark_transaction_dispatched(int transaction_id, const std::string& dispatch_timestamp)
 {
-    // Update cache
     {
         std::unique_lock lock(m_txn_mtx);
         auto it = m_transactions.find(transaction_id);
@@ -355,7 +324,6 @@ int mem_store::mark_transaction_dispatched(int transaction_id, const std::string
             it->second.status = "DISPATCHED";
     }
 
-    // Write-through
     try
     {
         auto guard = m_pool.acquire();
@@ -370,13 +338,11 @@ int mem_store::mark_transaction_dispatched(int transaction_id, const std::string
 
 int mem_store::complete_transaction(int transaction_id, const std::string& reception_timestamp)
 {
-    // Remove from cache (completed transactions are rarely queried)
     {
         std::unique_lock lock(m_txn_mtx);
         m_transactions.erase(transaction_id);
     }
 
-    // Write-through
     try
     {
         auto guard = m_pool.acquire();
@@ -394,7 +360,6 @@ int mem_store::find_transaction(const std::string& source_id, const std::string&
 {
     std::shared_lock lock(m_txn_mtx);
 
-    // Scan transactions — newest first (highest id = most recent)
     int best_id = -1;
     for (const auto& [id, rec] : m_transactions)
     {
@@ -428,7 +393,6 @@ int mem_store::get_pending_transactions(transaction_record* out, int max_count)
 
     std::shared_lock lock(m_txn_mtx);
 
-    // Collect all PENDING, sort by transaction_id (proxy for order_timestamp)
     std::vector<const transaction_record*> pending;
     for (const auto& [id, rec] : m_transactions)
     {

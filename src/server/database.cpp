@@ -81,7 +81,6 @@ std::string build_connection_string()
     std::string user = require_env_var("POSTGRES_USER");
     std::string password = require_env_var("POSTGRES_PASSWORD");
 
-    // Port can also be overridden by environment variable
     int port = DEFAULT_DB_PORT;
     const char* port_env = std::getenv("POSTGRES_PORT");
     if (port_env)
@@ -277,7 +276,6 @@ int create_inventory_tables(pqxx::connection& conn)
     try
     {
         pqxx::work txn(conn);
-        // Create client_inventory table - one row per client with all 6 items
         std::string sql_inventory = "CREATE TABLE IF NOT EXISTS client_inventory ("
                                     "client_id TEXT PRIMARY KEY, "
                                     "client_type TEXT NOT NULL, "
@@ -291,7 +289,6 @@ int create_inventory_tables(pqxx::connection& conn)
                                     ");";
 
         txn.exec(sql_inventory);
-        // Create inventory_transactions table - audit trail with embedded items
         std::string sql_transactions = "CREATE TABLE IF NOT EXISTS inventory_transactions ("
                                        "transaction_id SERIAL PRIMARY KEY, "
                                        "transaction_type TEXT NOT NULL, "
@@ -313,7 +310,6 @@ int create_inventory_tables(pqxx::connection& conn)
 
         txn.exec(sql_transactions);
 
-        // Indexes for inventory_transactions — critical for performance at scale
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_status "
                  "ON inventory_transactions (status) WHERE status IN ('PENDING', 'ASSIGNED', 'DISPATCHED')");
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_source_status "
@@ -321,7 +317,6 @@ int create_inventory_tables(pqxx::connection& conn)
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_dest_status "
                  "ON inventory_transactions (destination_id, status)");
 
-        // Index for warehouse stock lookups
         txn.exec("CREATE INDEX IF NOT EXISTS idx_inventory_warehouse_type "
                  "ON client_inventory (client_type) WHERE client_type = 'WAREHOUSE'");
 
@@ -462,10 +457,6 @@ int create_transaction(pqxx::connection& conn, const std::string& transaction_ty
         return -1;
     }
 }
-
-// is this set_transaction_destination needed? maybe we can just set the destination when we create the transaction
-// because the transaction is created when a hub or warehouse requests stock, so we already know the destination at that
-// point
 
 int set_transaction_destination(pqxx::connection& conn, int transaction_id, const std::string& client_id,
                                 const std::string& client_type)

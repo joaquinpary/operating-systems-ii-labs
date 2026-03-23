@@ -20,10 +20,7 @@
 #define CLIENTS_PAGE_SIZE 10
 #define TRANSACTIONS_PAGE_SIZE 3
 
-/* ---- internal state ----------------------------------------------------- */
 static PGconn* s_conn = NULL;
-
-/* ===== exported symbols ================================================== */
 
 const char* admin_cli_version(void)
 {
@@ -55,10 +52,6 @@ void admin_cli_shutdown(void)
     }
 }
 
-/* ===== argument parsing ================================================== */
-
-/** Find "key VALUE" in a space-separated args string and return VALUE as int.
- *  Returns default_val if not found. */
 static int parse_int_arg(const char* args, const char* key, int default_val)
 {
     if (!args || !key)
@@ -89,15 +82,12 @@ static int parse_str_arg(const char* args, const char* key, char* buf, size_t bu
         p++;
     if (*p == '\0')
         return -1;
-    /* copy until next space or end */
     size_t i = 0;
     while (*p && *p != ' ' && i < buf_len - 1)
         buf[i++] = *p++;
     buf[i] = '\0';
     return i > 0 ? 0 : -1;
 }
-
-/* ===== JSON helpers ====================================================== */
 
 static int build_error(char* out, size_t max_len, const char* message)
 {
@@ -147,8 +137,6 @@ static int build_ok(char* out, size_t max_len, const char* key, cJSON* data)
     return 0;
 }
 
-/* ===== command handlers ================================================== */
-
 static int cmd_help(char* out, size_t max_len)
 {
     cJSON* cmds = cJSON_CreateArray();
@@ -175,8 +163,7 @@ static int cmd_clients(const char* args, char* out, size_t max_len)
     if (!s_conn)
         return build_error(out, max_len, "no database connection");
 
-    /* Parse "active true/false" — default: active true */
-    int filter_active = 1; /* 1 = true, 0 = false */
+    int filter_active = 1;
     char active_val[8] = {0};
     if (parse_str_arg(args, "active ", active_val, sizeof(active_val)) == 0)
     {
@@ -186,7 +173,6 @@ static int cmd_clients(const char* args, char* out, size_t max_len)
 
     int page = parse_int_arg(args, "page ", 1);
 
-    /* Count total matching rows */
     const char* active_str = filter_active ? "true" : "false";
     const char* count_params[1] = {active_str};
     PGresult* cnt_res = PQexecParams(s_conn,
@@ -286,14 +272,11 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
 
     int page = parse_int_arg(args, "page ", 1);
 
-    /* Determine if filtering by a specific client. The first token in args
-       (if not "page" or "all") is the client_id filter. */
     char client_filter[64] = {0};
     int has_filter = 0;
 
     if (args && args[0] != '\0')
     {
-        /* grab first token */
         char first[64] = {0};
         int i = 0;
         const char* p = args;
@@ -310,7 +293,6 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
         }
     }
 
-    /* Count total */
     PGresult* cnt_res;
     if (has_filter)
     {
@@ -396,8 +378,6 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
     return build_paged(out, max_len, "transactions", arr, page, total_pages, total);
 }
 
-/* ===== main dispatch ===================================================== */
-
 int admin_cli_handle(const char* raw_json, char* resp_json, size_t max_len)
 {
     if (!raw_json || !resp_json || max_len == 0)
@@ -407,7 +387,6 @@ int admin_cli_handle(const char* raw_json, char* resp_json, size_t max_len)
     if (!root)
         return build_error(resp_json, max_len, "invalid JSON");
 
-    /* Extract payload.command and payload.args */
     const char* command = NULL;
     const char* args = NULL;
 

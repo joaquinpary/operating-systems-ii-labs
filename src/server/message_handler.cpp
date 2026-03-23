@@ -7,15 +7,12 @@
 #include <dlfcn.h>
 #include <iostream>
 
-// ==================== CONSTRUCTOR / DESTRUCTOR ====================
-
 message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
                                  std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds,
                                  const std::string& db_conn_string)
     : m_auth_module(auth), m_inventory_manager(inv_mgr), m_ack_timeout_seconds(ack_timeout_seconds),
       m_max_retries(max_retries), m_keepalive_timeout_seconds(keepalive_timeout_seconds)
 {
-    // Load admin CLI plugin (best-effort: server works without it)
     m_admin_lib = dlopen("libadmin_cli.so", RTLD_LAZY);
     if (!m_admin_lib)
         m_admin_lib = dlopen("libadmin_cli.so.1", RTLD_LAZY);
@@ -67,8 +64,6 @@ message_handler::~message_handler()
         dlclose(m_admin_lib);
 }
 
-// ==================== RESPONSE SLOT HELPERS ====================
-
 response_slot_t message_handler::make_send_response(const char* session_id, const message_t& msg)
 {
     response_slot_t slot;
@@ -91,7 +86,6 @@ response_slot_t message_handler::make_send_to_username(const char* username, con
     response_slot_t slot;
     std::memset(&slot, 0, sizeof(slot));
     slot.command = static_cast<std::uint8_t>(response_command::SEND);
-    // session_id left empty — reactor resolves via target_username
     std::strncpy(slot.target_username, username, CREDENTIALS_SIZE - 1);
 
     char json_buf[BUFFER_SIZE];
@@ -102,7 +96,6 @@ response_slot_t message_handler::make_send_to_username(const char* username, con
         slot.payload_len = len;
     }
 
-    // Populate timer fields so reactor can start ACK timer after resolving the session
     slot.start_ack_timer = true;
     std::strncpy(slot.timer_key, msg.timestamp, TIMESTAMP_SIZE - 1);
     slot.timer_timeout = m_ack_timeout_seconds;
@@ -123,7 +116,6 @@ response_slot_t message_handler::make_start_timer(const char* session_id, const 
     slot.retry_count = 0;
     slot.max_retries = m_max_retries;
 
-    // Store serialized message in payload so reactor can resend on timeout
     char json_buf[BUFFER_SIZE];
     if (serialize_message_to_json(&msg, json_buf) == 0)
     {
@@ -193,19 +185,15 @@ response_slot_t message_handler::make_reset_keepalive_timer(const char* session_
     return slot;
 }
 
-// ==================== ACK GENERATION ====================
-
 bool message_handler::generate_ack_if_needed(const message_t& msg, const request_slot_t& req, response_slot_t& ack_out)
 {
     message_category category = categorize_message(msg.msg_type);
 
-    // AUTH_REQUEST and ACK messages don't get ACKed
     if (category == message_category::AUTH_REQUEST || category == message_category::ACK_MESSAGE)
     {
         return false;
     }
 
-    // Only authenticated sessions receive ACKs
     if (!req.is_authenticated)
     {
         return false;
@@ -223,17 +211,13 @@ bool message_handler::generate_ack_if_needed(const message_t& msg, const request
     return true;
 }
 
-// ==================== IMMEDIATE ACK GENERATION ====================
-
 std::optional<response_slot_t> message_handler::generate_ack(const request_slot_t& request)
 {
-    // No ACK for disconnects, blacklisted, or unauthenticated sessions
     if (request.is_disconnect || request.is_blacklisted || !request.is_authenticated)
     {
         return std::nullopt;
     }
 
-    // Deserialize just to check message type and build the ACK
     message_t incoming_msg;
     if (deserialize_message_from_json(request.raw_json, &incoming_msg) != 0)
     {
@@ -249,14 +233,11 @@ std::optional<response_slot_t> message_handler::generate_ack(const request_slot_
     return std::nullopt;
 }
 
-// ==================== MAIN ENTRY POINT ====================
-
 std::vector<response_slot_t> message_handler::process_request(const request_slot_t& request)
 {
     std::vector<response_slot_t> responses;
     std::string sess_id(request.session_id);
 
-    // Handle disconnect notifications (reactor signals client disconnected)
     if (request.is_disconnect)
     {
         std::string username(request.username);
@@ -265,7 +246,6 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
             LOG_INFO_MSG("[WORKER] disconnect user=%s sess=%s", username.c_str(), request.session_id);
             m_auth_module.deactivate_client(username);
         }
-        // Mark session as dead so queued messages behind this one are skipped
         if (!sess_id.empty())
         {
             std::unique_lock lock(m_dead_sessions_mutex);
@@ -274,8 +254,6 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         return responses;
     }
 
-    // Skip messages for sessions already known to be dead (disconnect was
-    // processed earlier). This avoids wasting DB queries on stale messages.
     if (!sess_id.empty())
     {
         std::shared_lock lock(m_dead_sessions_mutex);
@@ -286,14 +264,12 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         }
     }
 
-    // Reject messages from blacklisted sessions
     if (request.is_blacklisted)
     {
         LOG_WARNING_MSG("[WORKER] blacklisted sess=%s", request.session_id);
         return responses;
     }
 
-    // Deserialize the incoming message
     message_t incoming_msg;
     int deserialize_result = deserialize_message_from_json(request.raw_json, &incoming_msg);
     if (deserialize_result != 0)
@@ -303,10 +279,8 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         return responses;
     }
 
-    // Categorize message for routing
     message_category category = categorize_message(incoming_msg.msg_type);
 
-    // SECURITY: Only AUTH_REQUEST is allowed from unauthenticated sessions
     if (category != message_category::AUTH_REQUEST && !request.is_authenticated)
     {
         LOG_WARNING_MSG("[SECURITY] rejected type=%s sess=%s (unauthenticated)", incoming_msg.msg_type,
@@ -314,11 +288,6 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         return responses;
     }
 
-    // NOTE: ACK is no longer generated here — it is sent immediately by the worker
-    // thread via generate_ack() BEFORE calling process_request(), so the client
-    // receives the ACK without waiting for heavy business logic (DB queries, etc.).
-
-    // Route message to appropriate handler
     std::vector<response_slot_t> handler_responses;
     switch (category)
     {
@@ -329,7 +298,6 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
         handler_responses = handle_ack_message(incoming_msg, request);
         break;
     case message_category::KEEPALIVE_MSG:
-        // Keepalive: ACK was already sent immediately, just reset the keepalive timer
         LOG_DEBUG_MSG("[MSG] keepalive from=%s sess=%s", incoming_msg.source_id, request.session_id);
         responses.push_back(make_reset_keepalive_timer(request.session_id));
         break;
@@ -342,20 +310,15 @@ std::vector<response_slot_t> message_handler::process_request(const request_slot
     return responses;
 }
 
-// ==================== AUTH REQUEST ====================
-
 std::vector<response_slot_t> message_handler::handle_auth_request(const message_t& msg, const request_slot_t& req)
 {
     std::vector<response_slot_t> responses;
 
-    // Extract credentials
     std::string username(msg.payload.client_auth_request.username);
     std::string password(msg.payload.client_auth_request.password);
 
-    // Authenticate using auth_module
     auth_result auth_res = m_auth_module.authenticate(username, password);
 
-    // Create response message
     message_t response_msg;
     std::memset(&response_msg, 0, sizeof(response_msg));
 
@@ -381,11 +344,9 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
 
     if (auth_res.status_code == auth_result_code::SUCCESS)
     {
-        // 1. Mark session as authenticated (reactor will update session_manager)
         responses.push_back(
             make_mark_authenticated(req.session_id, auth_res.client_type.c_str(), auth_res.username.c_str()));
 
-        // 2. Send AUTH_RESPONSE (no ACK timer for CLI — it is an admin session)
         responses.push_back(make_send_response(req.session_id, response_msg));
         const bool is_cli = (auth_res.client_type == CLI);
         if (!is_cli)
@@ -393,7 +354,6 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
             responses.push_back(make_start_timer(req.session_id, response_msg));
         }
 
-        // 3. Build and send inventory message (skip for CLI — no inventory)
         if (!is_cli)
         {
             message_t inv_msg;
@@ -407,7 +367,6 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
         LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
                      req.session_id);
 
-        // 4. Start keepalive timer (skip for CLI — admin sessions don't keepalive)
         if (!is_cli)
         {
             responses.push_back(make_start_keepalive_timer(req.session_id));
@@ -415,14 +374,11 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
     }
     else
     {
-        // Auth failed — just send the response (no timer tracking needed)
         responses.push_back(make_send_response(req.session_id, response_msg));
     }
 
     return responses;
 }
-
-// ==================== ACK MESSAGE ====================
 
 std::vector<response_slot_t> message_handler::handle_ack_message(const message_t& msg, const request_slot_t& req)
 {
@@ -434,13 +390,10 @@ std::vector<response_slot_t> message_handler::handle_ack_message(const message_t
     LOG_INFO_MSG("[ACK] from=%s ts=%s status=%d sess=%s", msg.source_id, ack_for_timestamp.c_str(), status_code,
                  req.session_id);
 
-    // Tell reactor to cancel the ACK timer
     responses.push_back(make_cancel_timer(req.session_id, ack_for_timestamp.c_str()));
 
     return responses;
 }
-
-// ==================== OTHER MESSAGES ====================
 
 std::vector<response_slot_t> message_handler::handle_other_message(const message_t& msg, const request_slot_t& req,
                                                                    message_category category)
@@ -466,7 +419,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                 continue;
             }
 
-            // Send to warehouse by username (reactor resolves session + starts ACK timer)
             responses.push_back(make_send_to_username(fulfilled.assigned_warehouse_id.c_str(), dispatch_msg));
             LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(),
                          fulfilled.transaction_id);
@@ -511,7 +463,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
         if (shipment_result.success && !shipment_result.requesting_hub_id.empty())
         {
-            // Notify the hub that stock is incoming
             message_t incoming_msg;
             int create_result = create_items_message(&incoming_msg, SERVER_TO_HUB__INCOMING_STOCK_NOTICE, SERVER,
                                                      shipment_result.requesting_hub_id.c_str(), shipment_result.items,
@@ -550,14 +501,12 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             return responses;
         }
 
-        // Restock goes back to the same session that sent the replenish request
         responses.push_back(make_send_response(req.session_id, restock_msg));
         responses.push_back(make_start_timer(req.session_id, restock_msg));
         LOG_INFO_MSG("[MSG] restock -> wh=%s sess=%s", replenish_result.assigned_warehouse_id.c_str(), req.session_id);
     }
     else if (category == message_category::EMERGENCY_ALERT)
     {
-        // Build SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT using the client's emergency_type as instructions
         message_t broadcast_msg;
         if (create_server_emergency_message(&broadcast_msg, msg.payload.client_emergency.emergency_code,
                                             msg.payload.client_emergency.emergency_type) == 0)
@@ -594,7 +543,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             return responses;
         }
 
-        // Forward the raw JSON to the plugin and send the response back
         char resp_buf[ADMIN_RESPONSE_MAX];
         if (m_admin_handle(req.raw_json, resp_buf, sizeof(resp_buf)) == 0)
         {
@@ -621,8 +569,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
     return responses;
 }
-
-// ==================== CATEGORIZATION ====================
 
 message_category message_handler::categorize_message(const char* msg_type) const
 {
