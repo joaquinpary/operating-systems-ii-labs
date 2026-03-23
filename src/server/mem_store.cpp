@@ -1,6 +1,8 @@
 #include "mem_store.hpp"
 #include "connection_pool.hpp"
 
+#include <common/json_manager.h>
+
 #include <algorithm>
 #include <cstring>
 #include <iostream>
@@ -132,8 +134,8 @@ bool mem_store::get_inventory(const std::string& client_id, const std::string& c
 
     {
         std::unique_lock lock(m_inv_mtx);
-        std::array<int, 6> arr;
-        std::copy(quantities_out, quantities_out + 6, arr.begin());
+        std::array<int, QUANTITY_ITEMS> arr;
+        std::copy(quantities_out, quantities_out + QUANTITY_ITEMS, arr.begin());
         m_inventory[client_id] = arr;
         if (client_type == "WAREHOUSE")
             m_warehouse_ids.insert(client_id);
@@ -147,8 +149,8 @@ void mem_store::update_inventory(const std::string& client_id, const std::string
 {
     {
         std::unique_lock lock(m_inv_mtx);
-        std::array<int, 6> arr;
-        std::copy(quantities, quantities + 6, arr.begin());
+        std::array<int, QUANTITY_ITEMS> arr;
+        std::copy(quantities, quantities + QUANTITY_ITEMS, arr.begin());
         m_inventory[client_id] = arr;
         if (client_type == "WAREHOUSE")
             m_warehouse_ids.insert(client_id);
@@ -172,7 +174,7 @@ int mem_store::adjust_inventory(const std::string& client_id, const int quantiti
         auto it = m_inventory.find(client_id);
         if (it != m_inventory.end())
         {
-            for (int i = 0; i < 6; i++)
+            for (int i = 0; i < QUANTITY_ITEMS; i++)
             {
                 if (add)
                     it->second[i] += quantities[i];
@@ -207,7 +209,7 @@ std::string mem_store::find_warehouse_with_stock(const int quantities[6])
             continue;
 
         bool sufficient = true;
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < QUANTITY_ITEMS; i++)
         {
             if (it->second[i] < quantities[i])
             {

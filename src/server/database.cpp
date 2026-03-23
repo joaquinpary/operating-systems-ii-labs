@@ -1,5 +1,7 @@
 #include "database.hpp"
 
+#include <common/json_manager.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -728,7 +730,7 @@ int get_client_inventory(pqxx::work& txn, const std::string& client_id, const st
     }
 
     int initial_stock = (client_type == "WAREHOUSE") ? INITIAL_STOCK_WAREHOUSE : INITIAL_STOCK_HUB;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
         quantities_out[i] = initial_stock;
 
     std::string sql = "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1";

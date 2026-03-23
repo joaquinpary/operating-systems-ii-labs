@@ -201,7 +201,7 @@ bool message_handler::generate_ack_if_needed(const message_t& msg, const request
 
     message_t ack_msg;
     int create_result =
-        create_acknowledgment_message(&ack_msg, SERVER, SERVER, msg.source_role, msg.source_id, msg.timestamp, 200);
+        create_acknowledgment_message(&ack_msg, SERVER, SERVER, msg.source_role, msg.source_id, msg.timestamp, OK);
     if (create_result != 0)
     {
         return false;

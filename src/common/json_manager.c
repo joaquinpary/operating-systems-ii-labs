@@ -9,6 +9,8 @@
 #include <zlib.h>
 
 #define TIMESTAMP_BASE_BUFFER_SIZE 32
+#define DJB2_HASH_SEED 5381UL
+#define CHECKSUM_BITMASK 0xFFFFFF
 
 static void safe_strcpy(char* dest, size_t size, const char* src)
 {
@@ -194,7 +196,7 @@ static void deserialize_client_emergency(const cJSON* root, void* ptr)
     if (cJSON_IsNumber(code))
         payload->emergency_code = code->valueint;
     if (cJSON_IsString(type))
-        safe_strcpy(payload->emergency_type, 20, type->valuestring);
+        safe_strcpy(payload->emergency_type, EMERGENCY_TYPE_SIZE, type->valuestring);
 }
 
 static void deserialize_server_emergency(const cJSON* root, void* ptr)
@@ -206,7 +208,7 @@ static void deserialize_server_emergency(const cJSON* root, void* ptr)
     if (cJSON_IsNumber(code))
         payload->emergency_code = code->valueint;
     if (cJSON_IsString(instr))
-        safe_strcpy(payload->instructions, 100, instr->valuestring);
+        safe_strcpy(payload->instructions, EMERGENCY_INSTRUCTIONS_SIZE, instr->valuestring);
 }
 
 typedef struct
@@ -360,7 +362,7 @@ static void generate_timestamp(char* buffer, size_t size)
 
 static void generate_checksum(const message_t* msg, char* checksum_out)
 {
-    unsigned long hash = 5381;
+    unsigned long hash = DJB2_HASH_SEED;
     const char* str = msg->msg_type;
     while (*str)
         hash = ((hash << 5) + hash) + (unsigned char)(*str++);
@@ -368,7 +370,7 @@ static void generate_checksum(const message_t* msg, char* checksum_out)
     while (*str)
         hash = ((hash << 5) + hash) + (unsigned char)(*str++);
 
-    snprintf(checksum_out, CHECKSUM_SIZE, "%lX", hash & 0xFFFFFF);
+    snprintf(checksum_out, CHECKSUM_SIZE, "%lX", hash & CHECKSUM_BITMASK);
 }
 
 static int create_message(message_t* out, const char* msg_type, const char* source_role, const char* source_id,
@@ -539,7 +541,7 @@ int create_client_emergency_message(message_t* out, const char* source_role, con
 
     payload_client_emergency_alert payload = {0};
     payload.emergency_code = emergency_code;
-    safe_strcpy(payload.emergency_type, 20, emergency_type);
+    safe_strcpy(payload.emergency_type, EMERGENCY_TYPE_SIZE, emergency_type);
 
     const char* msg_type =
         (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__EMERGENCY_ALERT : WAREHOUSE_TO_SERVER__EMERGENCY_ALERT;
@@ -554,7 +556,7 @@ int create_server_emergency_message(message_t* out, int emergency_code, const ch
 
     payload_server_emergency_alert payload = {0};
     payload.emergency_code = emergency_code;
-    safe_strcpy(payload.instructions, 100, instructions);
+    safe_strcpy(payload.instructions, EMERGENCY_INSTRUCTIONS_SIZE, instructions);
 
     return create_message(out, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, SERVER, "SERVER", CLI, "ALL", &payload,
                           sizeof(payload));

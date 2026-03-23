@@ -17,7 +17,7 @@ std::vector<stock_request_result> inventory_manager::handle_inventory_update(con
 {
     std::vector<stock_request_result> fulfilled_orders;
 
-    int quantities[6] = {0};
+    int quantities[QUANTITY_ITEMS] = {0};
     extract_quantities_from_payload(msg.payload.inventory_update, quantities);
 
     {
@@ -48,7 +48,7 @@ stock_request_result inventory_manager::handle_stock_request(const message_t& ms
     result.item_count = 0;
     result.requesting_hub_id = std::string(msg.source_id);
 
-    int quantities[6] = {0};
+    int quantities[QUANTITY_ITEMS] = {0};
     extract_quantities_from_payload(msg.payload.stock_request, quantities);
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
@@ -111,7 +111,7 @@ stock_request_result inventory_manager::handle_replenish_request(const message_t
     result.item_count = 0;
     result.requesting_hub_id = "";
 
-    int quantities[6] = {0};
+    int quantities[QUANTITY_ITEMS] = {0};
     extract_quantities_from_payload(msg.payload.restock_notice, quantities);
 
     for (int i = 0; i < QUANTITY_ITEMS; i++)
@@ -172,7 +172,7 @@ int inventory_manager::handle_receipt_confirmation(const message_t& msg)
             return -1;
         }
 
-        int quantities[6] = {0};
+        int quantities[QUANTITY_ITEMS] = {0};
         extract_quantities_from_payload(msg.payload.receipt_confirmation, quantities);
 
         if (adjust_client_inventory(txn, std::string(msg.source_id), quantities, true) != 0)
@@ -222,7 +222,7 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
             return result;
         }
 
-        int quantities[6] = {0};
+        int quantities[QUANTITY_ITEMS] = {0};
         extract_quantities_from_payload(msg.payload.shipment_notice, quantities);
 
         if (adjust_client_inventory(txn, std::string(msg.source_id), quantities, false) != 0)
@@ -252,9 +252,9 @@ stock_request_result inventory_manager::handle_shipment_notice(const message_t& 
         result.assigned_warehouse_id = std::string(msg.source_id);
         result.requesting_hub_id = txn_record.destination_id;
 
-        const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+        const char* item_names[QUANTITY_ITEMS] = {"food", "water", "medicine", "tools", "guns", "ammo"};
         result.item_count = 0;
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < QUANTITY_ITEMS; i++)
         {
             if (quantities[i] > 0)
             {
@@ -282,7 +282,7 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
         auto guard = m_pool.acquire();
         pqxx::work txn(guard.get());
 
-        int stock[6] = {0};
+        int stock[QUANTITY_ITEMS] = {0};
         if (get_client_inventory(txn, warehouse_id, "WAREHOUSE", stock) != 0)
         {
             return fulfilled;
@@ -296,15 +296,15 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
             return fulfilled;
         }
 
-        const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+        const char* item_names[QUANTITY_ITEMS] = {"food", "water", "medicine", "tools", "guns", "ammo"};
 
         for (int i = 0; i < count; i++)
         {
-            int quantities[6] = {pending[i].food,  pending[i].water, pending[i].medicine,
+            int quantities[QUANTITY_ITEMS] = {pending[i].food,  pending[i].water, pending[i].medicine,
                                  pending[i].tools, pending[i].guns,  pending[i].ammo};
 
             bool can_fulfill = true;
-            for (int j = 0; j < 6; j++)
+            for (int j = 0; j < QUANTITY_ITEMS; j++)
             {
                 if (quantities[j] > stock[j])
                 {
@@ -326,7 +326,7 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
                 result.requesting_hub_id = pending[i].destination_id;
 
                 result.item_count = 0;
-                for (int j = 0; j < 6; j++)
+                for (int j = 0; j < QUANTITY_ITEMS; j++)
                 {
                     if (quantities[j] > 0)
                     {
@@ -356,7 +356,7 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
 
 void inventory_manager::extract_quantities_from_payload(const payload_items_list& payload, int quantities[6])
 {
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         quantities[i] = 0;
     }
@@ -364,7 +364,7 @@ void inventory_manager::extract_quantities_from_payload(const payload_items_list
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         int item_id = payload.items[i].item_id;
-        if (item_id >= 1 && item_id <= 6)
+        if (item_id >= 1 && item_id <= QUANTITY_ITEMS)
         {
             quantities[item_id - 1] = payload.items[i].quantity;
         }
@@ -381,7 +381,7 @@ int inventory_manager::find_transaction_id(const std::string& source_id, const s
 bool inventory_manager::get_client_inventory_message(const std::string& client_id, const std::string& client_type,
                                                      message_t& out_msg)
 {
-    int quantities[6] = {0};
+    int quantities[QUANTITY_ITEMS] = {0};
     {
         auto guard = m_pool.acquire();
         if (get_client_inventory(guard.get(), client_id, client_type, quantities) != 0)
@@ -406,12 +406,12 @@ bool inventory_manager::get_client_inventory_message(const std::string& client_i
         return false;
     }
 
-    const char* item_names[6] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+    const char* item_names[QUANTITY_ITEMS] = {"food", "water", "medicine", "tools", "guns", "ammo"};
     inventory_item_t items[QUANTITY_ITEMS];
     memset(items, 0, sizeof(items));
 
     int item_count = 0;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         items[item_count].item_id = i + 1;
         strncpy(items[item_count].item_name, item_names[i], ITEM_NAME_SIZE - 1);
