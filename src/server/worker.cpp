@@ -103,7 +103,8 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
     // Create processing modules (direct DB access via pool)
     auth_module auth(*pool);
     inventory_manager inv_mgr(*pool);
-    message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout);
+    message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout,
+                            build_connection_string());
 
     // Spawn worker threads
     static constexpr std::uint32_t DEFAULT_WORKER_THREADS = 4;

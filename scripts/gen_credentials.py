@@ -105,8 +105,22 @@ def generate_configs(num_clients=2000):
             username, correct_password, client_type
         )
 
+    # Always generate admin CLI credential
+    cli_username = "cli_admin"
+    cli_password = generate_password(cli_username)
+    write_conf_file(
+        os.path.join(CLIENTS_DIR, "cli_admin.conf"),
+        cli_username, cli_password, "CLI",
+        protocol="tcp", ip_version="v4"
+    )
+    write_conf_file(
+        os.path.join(SERVER_DIR, "cli_admin.conf"),
+        cli_username, cli_password, "CLI"
+    )
+
     print(f"Generated client configs in: {CLIENTS_DIR}")
     print(f"Generated server configs in: {SERVER_DIR}")
+    print(f"Generated admin CLI config: cli_admin.conf")
     print("Process completed.")
 
 

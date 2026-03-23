@@ -626,6 +626,32 @@ void server::dispatch_response(const response_slot_t& resp)
         handle_keepalive_timeout(session_id);
         break;
     }
+    case response_command::BROADCAST: {
+        std::string data(resp.payload, resp.payload_len);
+        auto sessions = m_session_manager->get_authenticated_sessions();
+        for (const auto& target_session : sessions)
+        {
+            send_to_session(target_session, data);
+
+            if (resp.start_ack_timer && resp.timer_timeout > 0 &&
+                m_session_manager->get_client_type(target_session) != CLI)
+            {
+                std::string timer_key(resp.timer_key);
+                std::string payload_copy(resp.payload, resp.payload_len);
+                std::uint32_t retry_count = resp.retry_count;
+                std::uint32_t max_retries = resp.max_retries;
+                std::uint32_t timeout = resp.timer_timeout;
+
+                m_timer_manager->start_ack_timer(
+                    target_session, timer_key, static_cast<int>(timeout),
+                    [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
+                        handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
+                    });
+            }
+        }
+        LOG_INFO_MSG("[DISPATCH] BROADCAST len=%u to %zu sessions", resp.payload_len, sessions.size());
+        break;
+    }
     }
 }
 
@@ -684,10 +710,40 @@ void server::handle_ack_timeout(const std::string& session_id, const std::string
 
     if (retry_count >= max_retries - 1)
     {
-        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u blacklisting", session_id.c_str(),
+        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u", session_id.c_str(),
                         timer_key.c_str(), max_retries);
         m_timer_manager->clear_session_timers(session_id);
-        m_session_manager->blacklist_session(session_id);
+
+        auto info = m_session_manager->get_session_info(session_id);
+        if (info && info->type == session_info::connection_type::TCP)
+        {
+            // TCP: disconnect properly
+            if (auto tcp_sess = info->tcp_session_ref.lock())
+            {
+                tcp_sess->notify_disconnect();
+                tcp_sess->close();
+            }
+            m_session_manager->remove_session(session_id);
+        }
+        else
+        {
+            // UDP: can't close socket, blacklist and notify worker to deactivate in DB
+            if (info && !info->username.empty())
+            {
+                request_slot_t req{};
+                std::strncpy(req.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
+                req.is_disconnect = true;
+                req.is_authenticated = true;
+                std::strncpy(req.username, info->username.c_str(), CREDENTIALS_SIZE - 1);
+                std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
+                if (!m_shm.push_request(req))
+                {
+                    LOG_WARNING_MSG("[UDP] IPC queue full, disconnect dropped user=%s sess=%s",
+                                    info->username.c_str(), session_id.c_str());
+                }
+            }
+            m_session_manager->blacklist_session(session_id);
+        }
         return;
     }
 

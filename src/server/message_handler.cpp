@@ -1,21 +1,70 @@
 #include "message_handler.hpp"
+#include "admin_cli_interface.h"
 
 #include <common/logger.h>
 
 #include <cstring>
+#include <dlfcn.h>
 #include <iostream>
 
 // ==================== CONSTRUCTOR / DESTRUCTOR ====================
 
 message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                                 std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds)
+                                 std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds,
+                                 const std::string& db_conn_string)
     : m_auth_module(auth), m_inventory_manager(inv_mgr), m_ack_timeout_seconds(ack_timeout_seconds),
       m_max_retries(max_retries), m_keepalive_timeout_seconds(keepalive_timeout_seconds)
 {
+    // Load admin CLI plugin (best-effort: server works without it)
+    m_admin_lib = dlopen("libadmin_cli.so", RTLD_LAZY);
+    if (!m_admin_lib)
+        m_admin_lib = dlopen("libadmin_cli.so.1", RTLD_LAZY);
+
+    if (m_admin_lib)
+    {
+        using version_fn = const char* (*)();
+        using init_fn = int (*)(const char*);
+
+        auto ver = reinterpret_cast<version_fn>(dlsym(m_admin_lib, "admin_cli_version"));
+        auto init = reinterpret_cast<init_fn>(dlsym(m_admin_lib, "admin_cli_init"));
+        m_admin_handle = reinterpret_cast<admin_handle_fn>(dlsym(m_admin_lib, "admin_cli_handle"));
+        m_admin_shutdown = reinterpret_cast<admin_shutdown_fn>(dlsym(m_admin_lib, "admin_cli_shutdown"));
+
+        if (init && m_admin_handle && !db_conn_string.empty())
+        {
+            if (init(db_conn_string.c_str()) == 0)
+            {
+                LOG_INFO_MSG("[ADMIN] libadmin_cli.so loaded (v%s)", ver ? ver() : "?");
+            }
+            else
+            {
+                LOG_ERROR_MSG("[ADMIN] admin_cli_init failed");
+                m_admin_handle = nullptr;
+            }
+        }
+        else if (db_conn_string.empty())
+        {
+            LOG_WARNING_MSG("[ADMIN] libadmin_cli.so loaded but no conn_string — CLI disabled");
+            m_admin_handle = nullptr;
+        }
+        else
+        {
+            LOG_ERROR_MSG("[ADMIN] libadmin_cli.so missing symbols");
+            m_admin_handle = nullptr;
+        }
+    }
+    else
+    {
+        LOG_WARNING_MSG("[ADMIN] libadmin_cli.so not found — CLI disabled (%s)", dlerror());
+    }
 }
 
 message_handler::~message_handler()
 {
+    if (m_admin_shutdown)
+        m_admin_shutdown();
+    if (m_admin_lib)
+        dlclose(m_admin_lib);
 }
 
 // ==================== RESPONSE SLOT HELPERS ====================
@@ -336,22 +385,33 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
         responses.push_back(
             make_mark_authenticated(req.session_id, auth_res.client_type.c_str(), auth_res.username.c_str()));
 
-        // 2. Send AUTH_RESPONSE
+        // 2. Send AUTH_RESPONSE (no ACK timer for CLI — it is an admin session)
         responses.push_back(make_send_response(req.session_id, response_msg));
-        responses.push_back(make_start_timer(req.session_id, response_msg));
-
-        // 3. Build and send inventory message
-        message_t inv_msg;
-        if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
+        const bool is_cli = (auth_res.client_type == CLI);
+        if (!is_cli)
         {
-            responses.push_back(make_send_response(req.session_id, inv_msg));
-            responses.push_back(make_start_timer(req.session_id, inv_msg));
-            LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
-                         req.session_id);
+            responses.push_back(make_start_timer(req.session_id, response_msg));
         }
 
-        // 4. Start keepalive timer for this session
-        responses.push_back(make_start_keepalive_timer(req.session_id));
+        // 3. Build and send inventory message (skip for CLI — no inventory)
+        if (!is_cli)
+        {
+            message_t inv_msg;
+            if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
+            {
+                responses.push_back(make_send_response(req.session_id, inv_msg));
+                responses.push_back(make_start_timer(req.session_id, inv_msg));
+            }
+        }
+
+        LOG_INFO_MSG("[AUTH] OK user=%s type=%s sess=%s", auth_res.username.c_str(), auth_res.client_type.c_str(),
+                     req.session_id);
+
+        // 4. Start keepalive timer (skip for CLI — admin sessions don't keepalive)
+        if (!is_cli)
+        {
+            responses.push_back(make_start_keepalive_timer(req.session_id));
+        }
     }
     else
     {
@@ -495,6 +555,65 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
         responses.push_back(make_start_timer(req.session_id, restock_msg));
         LOG_INFO_MSG("[MSG] restock -> wh=%s sess=%s", replenish_result.assigned_warehouse_id.c_str(), req.session_id);
     }
+    else if (category == message_category::EMERGENCY_ALERT)
+    {
+        // Build SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT using the client's emergency_type as instructions
+        message_t broadcast_msg;
+        if (create_server_emergency_message(&broadcast_msg, msg.payload.client_emergency.emergency_code,
+                                            msg.payload.client_emergency.emergency_type) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::BROADCAST);
+
+            char json_buf[BUFFER_SIZE];
+            if (serialize_message_to_json(&broadcast_msg, json_buf) == 0)
+            {
+                std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
+                std::memcpy(slot.payload, json_buf, len);
+                slot.payload_len = len;
+                slot.start_ack_timer = true;
+                std::strncpy(slot.timer_key, broadcast_msg.timestamp, TIMESTAMP_SIZE - 1);
+                slot.timer_timeout = m_ack_timeout_seconds;
+                slot.max_retries = m_max_retries;
+                responses.push_back(slot);
+            }
+            LOG_INFO_MSG("[MSG] emergency broadcast from=%s code=%d", msg.source_id,
+                         msg.payload.client_emergency.emergency_code);
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] emergency broadcast create fail from=%s", msg.source_id);
+        }
+    }
+    else if (category == message_category::CLI_COMMAND)
+    {
+        if (!m_admin_handle)
+        {
+            LOG_WARNING_MSG("[MSG] CLI command but admin plugin not loaded, from=%s", msg.source_id);
+            return responses;
+        }
+
+        // Forward the raw JSON to the plugin and send the response back
+        char resp_buf[ADMIN_RESPONSE_MAX];
+        if (m_admin_handle(req.raw_json, resp_buf, sizeof(resp_buf)) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::SEND);
+            std::strncpy(slot.session_id, req.session_id, SESSION_ID_SIZE - 1);
+
+            std::uint32_t len = static_cast<std::uint32_t>(std::strlen(resp_buf));
+            std::memcpy(slot.payload, resp_buf, len);
+            slot.payload_len = len;
+            responses.push_back(slot);
+            LOG_INFO_MSG("[MSG] CLI response -> sess=%s len=%u", req.session_id, len);
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] admin_cli_handle failed from=%s", msg.source_id);
+        }
+    }
     else
     {
         LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
@@ -508,7 +627,8 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 message_category message_handler::categorize_message(const char* msg_type) const
 {
     if (std::strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 ||
-        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0)
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0 ||
+        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0)
     {
         return message_category::AUTH_REQUEST;
     }
@@ -551,6 +671,17 @@ message_category message_handler::categorize_message(const char* msg_type) const
         return message_category::REPLENISH_REQ;
     }
 
+    if (std::strcmp(msg_type, HUB_TO_SERVER__EMERGENCY_ALERT) == 0 ||
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__EMERGENCY_ALERT) == 0)
+    {
+        return message_category::EMERGENCY_ALERT;
+    }
+
+    if (std::strcmp(msg_type, CLI_TO_SERVER__ADMIN_COMMAND) == 0)
+    {
+        return message_category::CLI_COMMAND;
+    }
+
     return message_category::OTHER;
 }
 
@@ -563,6 +694,10 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
     else if (client_type == WAREHOUSE)
     {
         return SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
+    }
+    else if (client_type == CLI)
+    {
+        return SERVER_TO_CLI__AUTH_RESPONSE;
     }
     return nullptr;
 }

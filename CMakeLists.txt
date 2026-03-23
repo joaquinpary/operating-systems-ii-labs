@@ -69,6 +69,22 @@ if(BUILD_TARGET STREQUAL "server")
 
     find_package(PostgreSQL REQUIRED)
     include_directories(${PostgreSQL_INCLUDE_DIRS})
+
+    # Shared library: libadmin_cli.so (admin CLI plugin, loaded via dlopen)
+    add_library(admin_cli SHARED
+        src/server/admin_cli/admin_cli.c
+    )
+    target_include_directories(admin_cli PRIVATE
+        include/server
+        ${cjson_SOURCE_DIR}
+        ${PostgreSQL_INCLUDE_DIRS}
+    )
+    target_link_libraries(admin_cli PRIVATE cjson ${PostgreSQL_LIBRARIES})
+    set_target_properties(admin_cli PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        SOVERSION 1
+        VERSION 1.0.0
+    )
     
     file(GLOB SOURCES
         src/server/*.cpp
@@ -78,8 +94,14 @@ if(BUILD_TARGET STREQUAL "server")
     )
     set(TARGET_EXEC dhl_server)
     add_executable(${TARGET_EXEC} ${SOURCES})
-    target_link_libraries(${TARGET_EXEC} pthread rt)
+    target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
+
+    # Embed build-tree location of libadmin_cli.so into RPATH
+    set_target_properties(${TARGET_EXEC} PROPERTIES
+        BUILD_RPATH  "${CMAKE_BINARY_DIR}"
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+    )
 
 
 elseif(BUILD_TARGET STREQUAL "client")

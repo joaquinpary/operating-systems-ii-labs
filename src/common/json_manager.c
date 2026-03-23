@@ -220,6 +220,7 @@ typedef struct
 
 static const payload_handler_t handlers[] = {
     {HUB_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
+    {CLI_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
     {HUB_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {HUB_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {HUB_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
@@ -236,6 +237,7 @@ static const payload_handler_t handlers[] = {
     {WAREHOUSE_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_HUB__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
+    {SERVER_TO_CLI__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {SERVER_TO_HUB__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB, serialize_items_list, deserialize_items_list},
@@ -496,6 +498,8 @@ int create_auth_response_message(message_t* out, const char* target_role, const 
         msg_type = SERVER_TO_HUB__AUTH_RESPONSE;
     else if (strcmp(target_role, WAREHOUSE) == 0)
         msg_type = SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
+    else if (strcmp(target_role, CLI) == 0)
+        msg_type = SERVER_TO_CLI__AUTH_RESPONSE;
 
     if (!msg_type)
         return -1;

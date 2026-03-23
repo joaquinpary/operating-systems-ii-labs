@@ -21,7 +21,9 @@ enum class message_category
     STOCK_REQ,       ///< Stock request emitted by a hub.
     RECEIPT_CONFIRM, ///< Receipt confirmation emitted after stock delivery.
     DISPATCH_NOTICE, ///< Shipment notice emitted by a warehouse.
-    REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
+    REPLENISH_REQ,    ///< Replenish request emitted by a warehouse.
+    EMERGENCY_ALERT, ///< Emergency alert from a hub or warehouse.
+    CLI_COMMAND,     ///< Admin CLI command (handled by libadmin_cli.so).
     OTHER            ///< Any unrecognized or unsupported message type.
 };
 
@@ -40,7 +42,8 @@ class message_handler
 {
   public:
     message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                    std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds);
+                    std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds,
+                    const std::string& db_conn_string = "");
     ~message_handler();
 
     /**
@@ -99,6 +102,13 @@ class message_handler
     // Worker threads check this before doing heavy DB work.
     mutable std::shared_mutex m_dead_sessions_mutex;
     std::unordered_set<std::string> m_dead_sessions;
+
+    // Admin CLI plugin (libadmin_cli.so) — loaded via dlopen.
+    void* m_admin_lib = nullptr;
+    using admin_handle_fn = int (*)(const char*, char*, size_t);
+    using admin_shutdown_fn = void (*)();
+    admin_handle_fn m_admin_handle = nullptr;
+    admin_shutdown_fn m_admin_shutdown = nullptr;
 };
 
 #endif // MESSAGE_HANDLER_HPP
