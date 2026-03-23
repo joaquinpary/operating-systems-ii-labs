@@ -1,21 +1,70 @@
 #include "message_handler.hpp"
+#include "admin_cli_interface.h"
 
 #include <common/logger.h>
 
 #include <cstring>
+#include <dlfcn.h>
 #include <iostream>
 
 // ==================== CONSTRUCTOR / DESTRUCTOR ====================
 
 message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, std::uint32_t ack_timeout_seconds,
-                                 std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds)
+                                 std::uint32_t max_retries, std::uint32_t keepalive_timeout_seconds,
+                                 const std::string& db_conn_string)
     : m_auth_module(auth), m_inventory_manager(inv_mgr), m_ack_timeout_seconds(ack_timeout_seconds),
       m_max_retries(max_retries), m_keepalive_timeout_seconds(keepalive_timeout_seconds)
 {
+    // Load admin CLI plugin (best-effort: server works without it)
+    m_admin_lib = dlopen("libadmin_cli.so", RTLD_LAZY);
+    if (!m_admin_lib)
+        m_admin_lib = dlopen("libadmin_cli.so.1", RTLD_LAZY);
+
+    if (m_admin_lib)
+    {
+        using version_fn = const char* (*)();
+        using init_fn = int (*)(const char*);
+
+        auto ver = reinterpret_cast<version_fn>(dlsym(m_admin_lib, "admin_cli_version"));
+        auto init = reinterpret_cast<init_fn>(dlsym(m_admin_lib, "admin_cli_init"));
+        m_admin_handle = reinterpret_cast<admin_handle_fn>(dlsym(m_admin_lib, "admin_cli_handle"));
+        m_admin_shutdown = reinterpret_cast<admin_shutdown_fn>(dlsym(m_admin_lib, "admin_cli_shutdown"));
+
+        if (init && m_admin_handle && !db_conn_string.empty())
+        {
+            if (init(db_conn_string.c_str()) == 0)
+            {
+                LOG_INFO_MSG("[ADMIN] libadmin_cli.so loaded (v%s)", ver ? ver() : "?");
+            }
+            else
+            {
+                LOG_ERROR_MSG("[ADMIN] admin_cli_init failed");
+                m_admin_handle = nullptr;
+            }
+        }
+        else if (db_conn_string.empty())
+        {
+            LOG_WARNING_MSG("[ADMIN] libadmin_cli.so loaded but no conn_string — CLI disabled");
+            m_admin_handle = nullptr;
+        }
+        else
+        {
+            LOG_ERROR_MSG("[ADMIN] libadmin_cli.so missing symbols");
+            m_admin_handle = nullptr;
+        }
+    }
+    else
+    {
+        LOG_WARNING_MSG("[ADMIN] libadmin_cli.so not found — CLI disabled (%s)", dlerror());
+    }
 }
 
 message_handler::~message_handler()
 {
+    if (m_admin_shutdown)
+        m_admin_shutdown();
+    if (m_admin_lib)
+        dlclose(m_admin_lib);
 }
 
 // ==================== RESPONSE SLOT HELPERS ====================
@@ -526,6 +575,34 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             LOG_ERROR_MSG("[MSG] emergency broadcast create fail from=%s", msg.source_id);
         }
     }
+    else if (category == message_category::CLI_COMMAND)
+    {
+        if (!m_admin_handle)
+        {
+            LOG_WARNING_MSG("[MSG] CLI command but admin plugin not loaded, from=%s", msg.source_id);
+            return responses;
+        }
+
+        // Forward the raw JSON to the plugin and send the response back
+        char resp_buf[ADMIN_RESPONSE_MAX];
+        if (m_admin_handle(req.raw_json, resp_buf, sizeof(resp_buf)) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::SEND);
+            std::strncpy(slot.session_id, req.session_id, SESSION_ID_SIZE - 1);
+
+            std::uint32_t len = static_cast<std::uint32_t>(std::strlen(resp_buf));
+            std::memcpy(slot.payload, resp_buf, len);
+            slot.payload_len = len;
+            responses.push_back(slot);
+            LOG_INFO_MSG("[MSG] CLI response -> sess=%s len=%u", req.session_id, len);
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] admin_cli_handle failed from=%s", msg.source_id);
+        }
+    }
     else
     {
         LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
@@ -586,6 +663,11 @@ message_category message_handler::categorize_message(const char* msg_type) const
         std::strcmp(msg_type, WAREHOUSE_TO_SERVER__EMERGENCY_ALERT) == 0)
     {
         return message_category::EMERGENCY_ALERT;
+    }
+
+    if (std::strcmp(msg_type, CLI_TO_SERVER__ADMIN_COMMAND) == 0)
+    {
+        return message_category::CLI_COMMAND;
     }
 
     return message_category::OTHER;
