@@ -13,6 +13,8 @@
 
 #define TIMESTAMP_BUFFER_SIZE 64
 #define LOG_PATH_BUFFER_SIZE 512
+#define DEFAULT_LOG_MAX_FILE_SIZE (10 * 1024 * 1024)
+#define DEFAULT_LOG_MAX_BACKUPS 5
 
 static logger_config_t g_config;
 static FILE* g_log_file = NULL;
@@ -171,12 +173,12 @@ int log_init(const logger_config_t* config)
 
     if (g_config.max_file_size == 0)
     {
-        g_config.max_file_size = 10 * 1024 * 1024;
+        g_config.max_file_size = DEFAULT_LOG_MAX_FILE_SIZE;
     }
 
     if (g_config.max_backup_files < 0)
     {
-        g_config.max_backup_files = 5;
+        g_config.max_backup_files = DEFAULT_LOG_MAX_BACKUPS;
     }
 
     scan_existing_backups();

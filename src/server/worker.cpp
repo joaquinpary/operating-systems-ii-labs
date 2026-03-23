@@ -13,6 +13,9 @@
 #include <cstring>
 #include <iostream>
 #include <thread>
+
+static constexpr size_t SERVER_LOG_MAX_FILE_SIZE = 50 * 1024 * 1024;
+static constexpr int SERVER_LOG_MAX_BACKUPS = 1000;
 #include <unistd.h>
 #include <vector>
 
@@ -77,7 +80,7 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
         const char* log_dir = std::getenv("LOG_DIR");
         if (!log_dir)
             log_dir = "logs/server";
-        logger_config_t log_cfg = {.max_file_size = 50 * 1024 * 1024, .max_backup_files = 1000, .min_level = LOG_DEBUG};
+        logger_config_t log_cfg = {.max_file_size = SERVER_LOG_MAX_FILE_SIZE, .max_backup_files = SERVER_LOG_MAX_BACKUPS, .min_level = LOG_DEBUG};
         snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_worker.log", log_dir);
         log_init(&log_cfg);
     }
