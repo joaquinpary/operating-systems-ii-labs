@@ -36,7 +36,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
         throw std::runtime_error("Failed to parse config file: unknown error");
     }
 
-    // Validate and parse ip_v4
     cJSON* ip_v4 = cJSON_GetObjectItemCaseSensitive(json, "ip_v4");
     if (!ip_v4 || !cJSON_IsString(ip_v4))
     {
@@ -45,7 +44,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.ip_v4 = ip_v4->valuestring;
 
-    // Validate and parse ip_v6
     cJSON* ip_v6 = cJSON_GetObjectItemCaseSensitive(json, "ip_v6");
     if (!ip_v6 || !cJSON_IsString(ip_v6))
     {
@@ -54,7 +52,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.ip_v6 = ip_v6->valuestring;
 
-    // Validate and parse network_port
     cJSON* network_port = cJSON_GetObjectItemCaseSensitive(json, "network_port");
     if (!network_port || !cJSON_IsNumber(network_port))
     {
@@ -63,7 +60,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.network_port = static_cast<std::uint16_t>(network_port->valueint);
 
-    // Validate and parse ack_timeout
     cJSON* ack_timeout = cJSON_GetObjectItemCaseSensitive(json, "ack_timeout");
     if (!ack_timeout || !cJSON_IsNumber(ack_timeout))
     {
@@ -72,7 +68,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.ack_timeout = static_cast<std::uint32_t>(ack_timeout->valueint);
 
-    // Validate and parse max_auth_attempts
     cJSON* max_auth_attempts = cJSON_GetObjectItemCaseSensitive(json, "max_auth_attempts");
     if (!max_auth_attempts || !cJSON_IsNumber(max_auth_attempts))
     {
@@ -81,7 +76,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.max_auth_attempts = static_cast<std::uint32_t>(max_auth_attempts->valueint);
 
-    // Validate and parse max_retries
     cJSON* max_retries = cJSON_GetObjectItemCaseSensitive(json, "max_retries");
     if (!max_retries || !cJSON_IsNumber(max_retries))
     {
@@ -90,7 +84,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.max_retries = static_cast<std::uint32_t>(max_retries->valueint);
 
-    // Validate and parse keepalive_timeout
     cJSON* keepalive_timeout = cJSON_GetObjectItemCaseSensitive(json, "keepalive_timeout");
     if (!keepalive_timeout || !cJSON_IsNumber(keepalive_timeout))
     {
@@ -99,7 +92,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.keepalive_timeout = static_cast<std::uint32_t>(keepalive_timeout->valueint);
 
-    // Validate and parse pool_size
     cJSON* pool_size = cJSON_GetObjectItemCaseSensitive(json, "pool_size");
     if (!pool_size || !cJSON_IsNumber(pool_size))
     {
@@ -108,7 +100,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.pool_size = static_cast<std::uint32_t>(pool_size->valueint);
 
-    // Validate and parse worker_threads
     cJSON* worker_threads = cJSON_GetObjectItemCaseSensitive(json, "worker_threads");
     if (!worker_threads || !cJSON_IsNumber(worker_threads))
     {
@@ -117,7 +108,6 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.worker_threads = static_cast<std::uint32_t>(worker_threads->valueint);
 
-    // Validate and parse credentials_path
     cJSON* credentials_path = cJSON_GetObjectItemCaseSensitive(json, "credentials_path");
     if (!credentials_path || !cJSON_IsString(credentials_path))
     {

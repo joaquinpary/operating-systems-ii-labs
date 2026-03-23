@@ -32,7 +32,6 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
 
     while (shm.wait_request(request))
     {
-        // Deserialize once for logging (type, timestamp, source)
         message_t log_msg;
         bool deserialized = (deserialize_message_from_json(request.raw_json, &log_msg) == 0);
 
@@ -46,7 +45,6 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
             LOG_INFO_MSG("[T%d] IN disconnect user=%s sess=%s", thread_id, request.username, request.session_id);
         }
 
-        // 1. Send ACK immediately (lightweight — no DB access)
         auto ack = handler.generate_ack(request);
         if (ack)
         {
@@ -57,10 +55,8 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
             }
         }
 
-        // 2. Process the request (heavy business logic — DB queries, inventory, etc.)
         std::vector<response_slot_t> responses = handler.process_request(request);
 
-        // 3. Push all remaining responses back to the reactor
         for (const auto& resp : responses)
         {
             shm.push_response(resp, response_efd);
@@ -77,7 +73,6 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
 
 void run_worker_process(int response_efd, const config::server_config& cfg)
 {
-    // Initialize logger for the worker process (separate file from reactor)
     {
         const char* log_dir = std::getenv("LOG_DIR");
         if (!log_dir)
@@ -88,25 +83,20 @@ void run_worker_process(int response_efd, const config::server_config& cfg)
     }
 
     LOG_INFO_MSG("[WORKER] pid=%d started", getpid());
-    // Open shared memory segment (created by reactor before fork)
     shared_queue shm = shared_queue::open();
 
-    // Create our own connection pool (worker process has its own DB connections)
     auto pool = std::make_shared<connection_pool>(build_connection_string(), cfg.pool_size);
 
-    // Reset all clients to inactive on startup
     {
         auto guard = pool->acquire();
         reset_all_clients_inactive(guard.get());
     }
 
-    // Create processing modules (direct DB access via pool)
     auth_module auth(*pool);
     inventory_manager inv_mgr(*pool);
     message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout,
                             build_connection_string());
 
-    // Spawn worker threads
     static constexpr std::uint32_t DEFAULT_WORKER_THREADS = 4;
 
     std::uint32_t num_threads = cfg.worker_threads;
