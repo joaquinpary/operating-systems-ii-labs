@@ -515,6 +515,8 @@ TEST_F(MessageHandlerTest, InventoryUpdateTriggersPendingFulfillment)
 
     {
         pqxx::work txn(*db_conn);
+        txn.exec("DELETE FROM inventory_transactions");
+        txn.exec("DELETE FROM client_inventory");
         txn.exec(
             "INSERT INTO inventory_transactions (transaction_type, destination_id, destination_type, status, food) "
             "VALUES ('STOCK_REQUEST', 'hub_1', 'HUB', 'PENDING', 10)");
