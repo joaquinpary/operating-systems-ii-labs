@@ -1,9 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
-#include "shared_state.h"
+#include "connection.h"
 #include "json_manager.h"
 #include "logger.h"
 #include "logic.h"
-#include "connection.h"
+#include "shared_state.h"
 #include "unity.h"
 #include <pthread.h>
 #include <semaphore.h>
@@ -55,7 +55,7 @@ void tearDown(void)
 void test_ipc_initialization(void)
 {
     shared_data_t* shared_data = get_shared_data();
-    
+
     TEST_ASSERT_NOT_NULL(shared_data);
     TEST_ASSERT_EQUAL_STRING("HUB", shared_data->client_role);
     TEST_ASSERT_EQUAL_STRING("HUB001", shared_data->client_id);
@@ -65,20 +65,20 @@ void test_ipc_initialization(void)
 void test_inventory_operations(void)
 {
     inventory_item_t items[QUANTITY_ITEMS];
-    
+
     for (int i = 0; i < QUANTITY_ITEMS; i++)
     {
         items[i].item_id = i + 1;
         snprintf(items[i].item_name, ITEM_NAME_SIZE, "ITEM_%d", i + 1);
         items[i].quantity = 10;
     }
-    
+
     int result = modify_inventory(items, INVENTORY_ADD);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
+
     shared_data_t* shared_data = get_shared_data();
     TEST_ASSERT_EQUAL_INT(60, shared_data->inventory_item[0].quantity);
-    
+
     items[0].quantity = 5;
     result = modify_inventory(items, INVENTORY_REDUCE);
     TEST_ASSERT_EQUAL_INT(0, result);
@@ -89,15 +89,15 @@ void test_message_queue_operations(void)
 {
     message_t msg;
     memset(&msg, 0, sizeof(message_t));
-    
+
     strncpy(msg.msg_type, HUB_TO_SERVER__KEEPALIVE, MESSAGE_TYPE_SIZE - 1);
     strncpy(msg.source_role, HUB, ROLE_SIZE - 1);
     strncpy(msg.source_id, "HUB001", ID_SIZE - 1);
     strncpy(msg.timestamp, "2025-11-25T10:00:00.000Z", TIMESTAMP_SIZE - 1);
-    
+
     int result = enqueue_pending_message(&msg);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
+
     message_t popped_msg;
     result = pop_pending_message(&popped_msg);
     TEST_ASSERT_EQUAL_INT(0, result);
@@ -109,16 +109,15 @@ void test_pending_ack_tracking(void)
     const char* msg_id = "2025-11-25T10:00:00.000Z";
     const char* msg_type = HUB_TO_SERVER__INVENTORY_UPDATE;
     const char* json = "{\"test\":\"data\"}";
-    
+
     int result = add_pending_ack(msg_id, msg_type, json);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
+
     shared_data_t* shared_data = get_shared_data();
     int found = 0;
     for (int i = 0; i < MAX_PENDING_ACKS; i++)
     {
-        if (shared_data->pending_acks[i].active &&
-            strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0)
+        if (shared_data->pending_acks[i].active && strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0)
         {
             found = 1;
             TEST_ASSERT_EQUAL_STRING(msg_type, shared_data->pending_acks[i].msg_type);
@@ -126,15 +125,14 @@ void test_pending_ack_tracking(void)
         }
     }
     TEST_ASSERT_EQUAL_INT(1, found);
-    
+
     result = remove_pending_ack(msg_id);
     TEST_ASSERT_EQUAL_INT(0, result);
-    
+
     found = 0;
     for (int i = 0; i < MAX_PENDING_ACKS; i++)
     {
-        if (shared_data->pending_acks[i].active &&
-            strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0)
+        if (shared_data->pending_acks[i].active && strcmp(shared_data->pending_acks[i].msg_id, msg_id) == 0)
         {
             found = 1;
             break;
@@ -147,7 +145,7 @@ void test_inventory_count_query(void)
 {
     int count = get_inventory_count(1);
     TEST_ASSERT_EQUAL_INT(50, count);
-    
+
     count = get_inventory_count(999);
     TEST_ASSERT_EQUAL_INT(-1, count);
 }
@@ -249,7 +247,6 @@ void test_logic_init_smoke_test(void)
     }
 }
 
-
 int main(void)
 {
     UNITY_BEGIN();
@@ -259,7 +256,7 @@ int main(void)
     RUN_TEST(test_message_queue_operations);
     RUN_TEST(test_pending_ack_tracking);
     RUN_TEST(test_inventory_count_query);
-    
+
     RUN_TEST(test_logic_init_smoke_test);
 
     return UNITY_END();

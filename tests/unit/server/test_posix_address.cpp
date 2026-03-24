@@ -6,8 +6,12 @@
 class PosixAddressTest : public ::testing::Test
 {
   protected:
-    void SetUp() override {}
-    void TearDown() override {}
+    void SetUp() override
+    {
+    }
+    void TearDown() override
+    {
+    }
 };
 
 TEST_F(PosixAddressTest, DefaultConstructorZeroLength)
@@ -134,7 +138,9 @@ TEST_F(PosixAddressTest, MutableSockaddrPtr)
 
 TEST_F(PosixAddressTest, ConstructFromSockaddrStorage)
 {
-    struct sockaddr_storage storage{};
+    struct sockaddr_storage storage
+    {
+    };
     auto* a4 = reinterpret_cast<struct sockaddr_in*>(&storage);
     a4->sin_family = AF_INET;
     a4->sin_port = htons(7777);

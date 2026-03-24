@@ -78,7 +78,9 @@ TEST_F(ConnectionPoolTest, ExhaustionBlocks)
     EXPECT_FALSE(thread_acquired); // Should still be blocked
 
     // Release the connection by destroying guard1 in an inner scope
-    { auto released = std::move(guard1); }
+    {
+        auto released = std::move(guard1);
+    }
 
     // The blocked thread should now complete
     t.join();

@@ -172,11 +172,9 @@ static int cmd_help(char* out, size_t max_len)
     cJSON* cmds = cJSON_CreateArray();
 
     const char* names[] = {"help", "clients", "inventory", "transactions"};
-    const char* descs[] = {
-        "Show available commands",
-        "List clients (args: [active true|false] [page N])",
-        "Get inventory for a client (args: <client_id>)",
-        "List transactions (args: [<client_id>|all] [page N])"};
+    const char* descs[] = {"Show available commands", "List clients (args: [active true|false] [page N])",
+                           "Get inventory for a client (args: <client_id>)",
+                           "List transactions (args: [<client_id>|all] [page N])"};
 
     for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); ++i)
     {
@@ -205,9 +203,8 @@ static int cmd_clients(const char* args, char* out, size_t max_len)
 
     const char* active_str = filter_active ? "true" : "false";
     const char* count_params[1] = {active_str};
-    PGresult* cnt_res = PQexecParams(s_conn,
-                                     "SELECT COUNT(*) FROM credentials WHERE is_active = $1",
-                                     1, NULL, count_params, NULL, NULL, 0);
+    PGresult* cnt_res = PQexecParams(s_conn, "SELECT COUNT(*) FROM credentials WHERE is_active = $1", 1, NULL,
+                                     count_params, NULL, NULL, 0);
 
     if (PQresultStatus(cnt_res) != PGRES_TUPLES_OK)
     {

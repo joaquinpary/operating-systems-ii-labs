@@ -306,7 +306,6 @@ void shared_queue::push_response(const response_slot_t& slot, int efd)
     }
 }
 
-
 void shared_queue::signal_shutdown()
 {
     m_header->shutdown_flag.store(1, std::memory_order_release);

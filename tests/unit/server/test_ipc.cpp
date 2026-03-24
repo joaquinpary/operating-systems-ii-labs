@@ -248,7 +248,9 @@ TEST_F(SharedQueueTest, ConcurrentPushAndWaitRequests)
 
 TEST_F(SharedQueueTest, UnlinkRemovesSharedMemory)
 {
-    { auto q = shared_queue::create(); }
+    {
+        auto q = shared_queue::create();
+    }
     shared_queue::unlink();
 
     int fd = shm_open(SHM_NAME, O_RDONLY, SHM_PERMISSIONS);

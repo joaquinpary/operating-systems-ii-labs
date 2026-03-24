@@ -111,4 +111,3 @@ TEST_F(SessionManagerTest, MultipleConcurrentSessions)
         EXPECT_EQ(info->username, "user_" + std::to_string(i));
     }
 }
-

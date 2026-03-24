@@ -4,7 +4,7 @@
 set -eo pipefail
 
 # Configuration
-SOURCE_DIRS=("src/" "include/")
+SOURCE_DIRS=("src/" "include/" "tests/")
 STYLE="file"
 FILE_TYPES=("*.c" "*.h" "*.cpp" "*.hpp" "*.cc" "*.hh" "*.cxx" "*.hxx" "*.inc" "*.inl")
 CHECK_MODE=false

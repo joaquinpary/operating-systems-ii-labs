@@ -614,9 +614,11 @@ static int parse_transaction_rows(const pqxx::result& result, transaction_record
         out_transactions[count].transaction_id = row[TXN_ID].as<int>();
         out_transactions[count].transaction_type = row[TXN_TYPE].as<std::string>();
         out_transactions[count].source_id = row[TXN_SOURCE_ID].is_null() ? "" : row[TXN_SOURCE_ID].as<std::string>();
-        out_transactions[count].source_type = row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
+        out_transactions[count].source_type =
+            row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
         out_transactions[count].destination_id = row[TXN_DEST_ID].is_null() ? "" : row[TXN_DEST_ID].as<std::string>();
-        out_transactions[count].destination_type = row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
+        out_transactions[count].destination_type =
+            row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
         out_transactions[count].status = row[TXN_STATUS].as<std::string>();
         out_transactions[count].food = row[TXN_FOOD].as<int>();
         out_transactions[count].water = row[TXN_WATER].as<int>();

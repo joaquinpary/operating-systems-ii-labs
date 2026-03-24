@@ -666,8 +666,8 @@ void server::handle_ack_timeout(const std::string& session_id, const std::string
 
     if (retry_count >= max_retries - 1)
     {
-        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u", session_id.c_str(),
-                        timer_key.c_str(), max_retries);
+        LOG_WARNING_MSG("[ACK_TIMEOUT] MAX RETRIES sess=%s ts=%s retries=%u", session_id.c_str(), timer_key.c_str(),
+                        max_retries);
         m_timer_manager->clear_session_timers(session_id);
 
         auto info = m_session_manager->get_session_info(session_id);
@@ -692,8 +692,8 @@ void server::handle_ack_timeout(const std::string& session_id, const std::string
                 std::strncpy(req.client_type, info->client_type.c_str(), ROLE_SIZE - 1);
                 if (!m_shm.push_request(req))
                 {
-                    LOG_WARNING_MSG("[UDP] IPC queue full, disconnect dropped user=%s sess=%s",
-                                    info->username.c_str(), session_id.c_str());
+                    LOG_WARNING_MSG("[UDP] IPC queue full, disconnect dropped user=%s sess=%s", info->username.c_str(),
+                                    session_id.c_str());
                 }
             }
             m_session_manager->blacklist_session(session_id);

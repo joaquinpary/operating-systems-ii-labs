@@ -114,7 +114,9 @@ class ServerTest : public ::testing::Test
     int connect_tcp(uint16_t port)
     {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
-        struct sockaddr_in addr{};
+        struct sockaddr_in addr
+        {
+        };
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
         inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
@@ -137,7 +139,9 @@ class ServerTest : public ::testing::Test
     // Read a BUFFER_SIZE frame from TCP
     bool recv_frame(int sock, char* out, int timeout_ms = 500)
     {
-        struct timeval tv{};
+        struct timeval tv
+        {
+        };
         tv.tv_sec = timeout_ms / 1000;
         tv.tv_usec = (timeout_ms % 1000) * 1000;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -216,9 +220,9 @@ TEST_F(ServerTest, ServerInitialization)
     config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
     ASSERT_NO_THROW({
-        m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                            std::make_unique<session_manager>(),
-                                            std::make_unique<timer_manager>(*m_loop));
+        m_server =
+            std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
+                                     std::make_unique<timer_manager>(*m_loop));
     });
     ASSERT_NE(m_server, nullptr);
 }
@@ -228,8 +232,7 @@ TEST_F(ServerTest, ServerStart)
 {
     config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
-    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                        std::make_unique<session_manager>(),
+    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
                                         std::make_unique<timer_manager>(*m_loop));
     ASSERT_NO_THROW(m_server->start());
     start_loop();
@@ -241,8 +244,7 @@ TEST_F(ServerTest, ServerStop)
 {
     config::server_config config = make_test_server_config();
     config.network_port = get_unique_port();
-    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                        std::make_unique<session_manager>(),
+    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
                                         std::make_unique<timer_manager>(*m_loop));
     m_server->start();
     start_loop();
@@ -256,8 +258,7 @@ TEST_F(ServerTest, TCPIPv4Connection)
     config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
-    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                        std::make_unique<session_manager>(),
+    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
                                         std::make_unique<timer_manager>(*m_loop));
     m_server->start();
     start_loop();
@@ -284,8 +285,7 @@ TEST_F(ServerTest, TCPIPv6Connection)
     config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
-    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                        std::make_unique<session_manager>(),
+    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
                                         std::make_unique<timer_manager>(*m_loop));
     m_server->start();
     start_loop();
@@ -312,8 +312,7 @@ TEST_F(ServerTest, TCPMessageProcessing)
     config::server_config config = make_test_server_config();
     uint16_t test_port = get_unique_port();
     config.network_port = test_port;
-    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config,
-                                        std::make_unique<session_manager>(),
+    m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::make_unique<session_manager>(),
                                         std::make_unique<timer_manager>(*m_loop));
     m_server->start();
     start_loop();
@@ -1052,7 +1051,9 @@ TEST_F(ServerTest, UDPMessageAppearsInQueue)
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     ASSERT_GE(sock, 0);
 
-    struct sockaddr_in server_addr{};
+    struct sockaddr_in server_addr
+    {
+    };
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
@@ -1062,7 +1063,8 @@ TEST_F(ServerTest, UDPMessageAppearsInQueue)
     char json[BUFFER_SIZE]{};
     serialize_message_to_json(&auth_msg, json);
 
-    ssize_t sent = sendto(sock, json, std::strlen(json), 0, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
+    ssize_t sent =
+        sendto(sock, json, std::strlen(json), 0, reinterpret_cast<sockaddr*>(&server_addr), sizeof(server_addr));
     EXPECT_GT(sent, 0);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(200));

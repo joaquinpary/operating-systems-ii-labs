@@ -9,8 +9,7 @@
 
 // Helper: fill a request_slot_t from a session_id + JSON + auth state
 static request_slot_t make_request(const char* session_id, const char* json, bool is_authenticated = false,
-                                   bool is_blacklisted = false, const char* client_type = "",
-                                   const char* username = "")
+                                   bool is_blacklisted = false, const char* client_type = "", const char* username = "")
 {
     request_slot_t req;
     std::memset(&req, 0, sizeof(req));

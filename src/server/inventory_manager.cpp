@@ -301,7 +301,7 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
         for (int i = 0; i < count; i++)
         {
             int quantities[QUANTITY_ITEMS] = {pending[i].food,  pending[i].water, pending[i].medicine,
-                                 pending[i].tools, pending[i].guns,  pending[i].ammo};
+                                              pending[i].tools, pending[i].guns,  pending[i].ammo};
 
             bool can_fulfill = true;
             for (int j = 0; j < QUANTITY_ITEMS; j++)

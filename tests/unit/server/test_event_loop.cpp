@@ -8,8 +8,12 @@
 class EventLoopTest : public ::testing::Test
 {
   protected:
-    void SetUp() override {}
-    void TearDown() override {}
+    void SetUp() override
+    {
+    }
+    void TearDown() override
+    {
+    }
 };
 
 TEST_F(EventLoopTest, ConstructionSucceeds)

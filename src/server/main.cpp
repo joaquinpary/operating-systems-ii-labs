@@ -78,8 +78,9 @@ int main()
             const char* log_dir = std::getenv("LOG_DIR");
             if (!log_dir)
                 log_dir = "logs/server";
-            logger_config_t log_cfg = {
-                .max_file_size = SERVER_LOG_MAX_FILE_SIZE, .max_backup_files = SERVER_LOG_MAX_BACKUPS, .min_level = LOG_DEBUG};
+            logger_config_t log_cfg = {.max_file_size = SERVER_LOG_MAX_FILE_SIZE,
+                                       .max_backup_files = SERVER_LOG_MAX_BACKUPS,
+                                       .min_level = LOG_DEBUG};
             snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_reactor.log", log_dir);
             log_init(&log_cfg);
         }
