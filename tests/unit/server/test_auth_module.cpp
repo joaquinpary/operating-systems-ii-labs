@@ -104,8 +104,10 @@ TEST_F(AuthModuleTest, AuthenticateWithInactiveUser)
 
     auth_result result = auth_mod->authenticate("inactive_user", "hash123");
 
-    EXPECT_EQ(result.status_code, auth_result_code::USER_INACTIVE);
-    EXPECT_FALSE(result.error_message.empty());
+    EXPECT_EQ(result.status_code, auth_result_code::SUCCESS);
+    EXPECT_EQ(result.client_type, "WAREHOUSE");
+    EXPECT_EQ(result.username, "inactive_user");
+    EXPECT_TRUE(result.error_message.empty());
 }
 
 TEST_F(AuthModuleTest, AuthenticateWithEmptyUsername)

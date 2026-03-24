@@ -11,7 +11,6 @@ enum class auth_result_code
 {
     SUCCESS = 200,
     INVALID_CREDENTIALS = 401,
-    USER_INACTIVE = 403,
     ERROR = 500
 };
 
