@@ -32,11 +32,7 @@ void test_client_tcp_connection(void)
     sem_init(&ready_sem, 0, 0);
 
     mock_server_args_t args = {
-        .port = 8081,
-        .response_msg = "Hello from server",
-        .ready_sem = &ready_sem,
-        .behavior = MOCK_BEHAVIOR_NORMAL
-    };
+        .port = 8081, .response_msg = "Hello from server", .ready_sem = &ready_sem, .behavior = MOCK_BEHAVIOR_NORMAL};
 
     pthread_create(&server_thread, NULL, mock_tcp_server, &args);
     sem_wait(&ready_sem);
@@ -69,11 +65,7 @@ void test_client_tcp_server_disconnect(void)
     sem_init(&ready_sem, 0, 0);
 
     mock_server_args_t args = {
-        .port = 8083,
-        .response_msg = "",
-        .ready_sem = &ready_sem,
-        .behavior = MOCK_BEHAVIOR_CLOSE_IMMEDIATE
-    };
+        .port = 8083, .response_msg = "", .ready_sem = &ready_sem, .behavior = MOCK_BEHAVIOR_CLOSE_IMMEDIATE};
 
     pthread_create(&server_thread, NULL, mock_tcp_server, &args);
     sem_wait(&ready_sem);
@@ -121,11 +113,7 @@ void test_client_udp_send_receive(void)
     sem_init(&ready_sem, 0, 0);
 
     mock_server_args_t args = {
-        .port = 8084,
-        .response_msg = "UDP Response",
-        .ready_sem = &ready_sem,
-        .behavior = MOCK_BEHAVIOR_NORMAL
-    };
+        .port = 8084, .response_msg = "UDP Response", .ready_sem = &ready_sem, .behavior = MOCK_BEHAVIOR_NORMAL};
 
     pthread_create(&server_thread, NULL, mock_udp_server, &args);
     sem_wait(&ready_sem);
@@ -184,11 +172,7 @@ void test_client_close_valid_socket(void)
     sem_init(&ready_sem, 0, 0);
 
     mock_server_args_t args = {
-        .port = 8085,
-        .response_msg = "Test",
-        .ready_sem = &ready_sem,
-        .behavior = MOCK_BEHAVIOR_CLOSE_IMMEDIATE
-    };
+        .port = 8085, .response_msg = "Test", .ready_sem = &ready_sem, .behavior = MOCK_BEHAVIOR_CLOSE_IMMEDIATE};
 
     pthread_create(&server_thread, NULL, mock_tcp_server, &args);
     sem_wait(&ready_sem);
@@ -220,6 +204,27 @@ void test_client_close_already_closed(void)
     TEST_ASSERT_EQUAL(-1, ctx.sockfd);
 }
 
+void test_client_send_tcp_closed_socket(void)
+{
+    client_context ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.sockfd = -1;
+    ctx.protocol = PROTO_TCP;
+
+    TEST_ASSERT_EQUAL(-1, client_send(&ctx, "Hello"));
+}
+
+void test_client_send_udp_closed_socket(void)
+{
+    client_context ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.sockfd = -1;
+    ctx.protocol = PROTO_UDP;
+    ctx.addr_len = sizeof(struct sockaddr_in);
+
+    TEST_ASSERT_EQUAL(-1, client_send(&ctx, "Hello UDP"));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -235,6 +240,8 @@ int main(void)
 
     RUN_TEST(test_client_close_valid_socket);
     RUN_TEST(test_client_close_already_closed);
+    RUN_TEST(test_client_send_tcp_closed_socket);
+    RUN_TEST(test_client_send_udp_closed_socket);
 
     return UNITY_END();
 }

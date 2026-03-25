@@ -9,8 +9,7 @@
 
 // Helper: fill a request_slot_t from a session_id + JSON + auth state
 static request_slot_t make_request(const char* session_id, const char* json, bool is_authenticated = false,
-                                   bool is_blacklisted = false, const char* client_type = "",
-                                   const char* username = "")
+                                   bool is_blacklisted = false, const char* client_type = "", const char* username = "")
 {
     request_slot_t req;
     std::memset(&req, 0, sizeof(req));
@@ -515,6 +514,8 @@ TEST_F(MessageHandlerTest, InventoryUpdateTriggersPendingFulfillment)
 
     {
         pqxx::work txn(*db_conn);
+        txn.exec("DELETE FROM inventory_transactions");
+        txn.exec("DELETE FROM client_inventory");
         txn.exec(
             "INSERT INTO inventory_transactions (transaction_type, destination_id, destination_type, status, food) "
             "VALUES ('STOCK_REQUEST', 'hub_1', 'HUB', 'PENDING', 10)");

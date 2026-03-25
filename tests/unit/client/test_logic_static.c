@@ -1,9 +1,9 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "logic.h"
 #include "connection.h"
 #include "json_manager.h"
 #include "logger.h"
+#include "logic.h"
 #include "message_handler.h"
 #include "shared_state.h"
 #include "unity.h"
@@ -69,7 +69,7 @@ void test_get_random_consume_interval(void)
     for (int i = 0; i < RANDOM_SAMPLE_COUNT; i++)
     {
         int interval = get_random_consume_interval();
-        
+
         const timer_config_t* cfg = get_timer_config();
         TEST_ASSERT_TRUE(interval >= cfg->consume_stock_min_ms);
         TEST_ASSERT_TRUE(interval <= cfg->consume_stock_max_ms);
@@ -84,13 +84,27 @@ void test_get_random_consume_amount(void)
     for (int i = 0; i < RANDOM_SAMPLE_COUNT; i++)
     {
         int amount = get_random_consume_amount();
-        
-        if (amount < min_seen) min_seen = amount;
-        if (amount > max_seen) max_seen = amount;
-        
+
+        if (amount < min_seen)
+            min_seen = amount;
+        if (amount > max_seen)
+            max_seen = amount;
+
         const timer_config_t* cfg = get_timer_config();
         TEST_ASSERT_TRUE(amount >= cfg->consume_min_amount);
         TEST_ASSERT_TRUE(amount <= cfg->consume_max_amount);
+    }
+}
+
+void test_get_random_phase_offset(void)
+{
+    const int interval_ms = 2000;
+
+    for (int i = 0; i < RANDOM_SAMPLE_COUNT; i++)
+    {
+        int phase_offset = get_random_phase_offset(interval_ms);
+        TEST_ASSERT_TRUE(phase_offset >= interval_ms / 2);
+        TEST_ASSERT_TRUE(phase_offset <= interval_ms);
     }
 }
 
@@ -222,12 +236,48 @@ void test_do_check_low_stock_sufficient_stock(void)
     TEST_ASSERT_EQUAL_INT(0, shared_data->message_count);
 }
 
+void test_do_check_low_stock_warehouse_skips(void)
+{
+    shared_data_t* shared_data = get_shared_data();
+    strncpy(shared_data->client_role, WAREHOUSE, sizeof(shared_data->client_role) - 1);
+    shared_data->message_count = 0;
+
+    TEST_ASSERT_EQUAL_INT(0, do_check_low_stock());
+    TEST_ASSERT_EQUAL_INT(0, shared_data->message_count);
+}
+
+void test_do_emergency_check_without_library_function(void)
+{
+    shared_data_t* shared_data = get_shared_data();
+    evaluate_fn = NULL;
+    shared_data->message_count = 0;
+    shared_data->emergency_active = 0;
+
+    do_emergency_check();
+
+    TEST_ASSERT_EQUAL_INT(0, shared_data->message_count);
+    TEST_ASSERT_EQUAL_INT(0, shared_data->emergency_active);
+}
+
+void test_do_emergency_check_skips_when_active(void)
+{
+    shared_data_t* shared_data = get_shared_data();
+    shared_data->message_count = 0;
+    shared_data->emergency_active = 1;
+
+    do_emergency_check();
+
+    TEST_ASSERT_EQUAL_INT(0, shared_data->message_count);
+    TEST_ASSERT_EQUAL_INT(1, shared_data->emergency_active);
+}
+
 int main(void)
 {
     UNITY_BEGIN();
 
     RUN_TEST(test_get_random_consume_interval);
     RUN_TEST(test_get_random_consume_amount);
+    RUN_TEST(test_get_random_phase_offset);
 
     RUN_TEST(test_do_inventory_update);
     RUN_TEST(test_do_consume_stock);
@@ -235,6 +285,9 @@ int main(void)
     RUN_TEST(test_do_check_low_stock_triggers_request);
     RUN_TEST(test_do_check_low_stock_critically_low);
     RUN_TEST(test_do_check_low_stock_sufficient_stock);
+    RUN_TEST(test_do_check_low_stock_warehouse_skips);
+    RUN_TEST(test_do_emergency_check_without_library_function);
+    RUN_TEST(test_do_emergency_check_skips_when_active);
 
     return UNITY_END();
 }

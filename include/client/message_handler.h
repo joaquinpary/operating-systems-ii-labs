@@ -18,4 +18,4 @@
  */
 int handle_server_message(const message_t* msg);
 
-#endif // MESSAGE_HANDLER_H
+#endif

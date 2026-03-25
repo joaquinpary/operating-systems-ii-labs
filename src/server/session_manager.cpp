@@ -59,7 +59,6 @@ void session_manager::mark_authenticated(const std::string& session_id, const st
     auto it = m_sessions.find(session_id);
     if (it != m_sessions.end())
     {
-        // Remove old reverse mapping if username was already set
         if (!it->second.username.empty())
         {
             m_username_to_session.erase(it->second.username);
@@ -67,7 +66,6 @@ void session_manager::mark_authenticated(const std::string& session_id, const st
         it->second.is_authenticated = true;
         it->second.client_type = client_type;
         it->second.username = username;
-        // Add reverse mapping
         if (!username.empty())
         {
             m_username_to_session[username] = session_id;
@@ -101,7 +99,6 @@ void session_manager::blacklist_session(const std::string& session_id)
     if (it != m_sessions.end())
     {
         it->second.is_blacklisted = true;
-        // Remove from reverse index so find_session_by_username won't find blacklisted sessions
         if (!it->second.username.empty())
         {
             m_username_to_session.erase(it->second.username);

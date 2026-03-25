@@ -9,7 +9,7 @@ class ConfigTest : public ::testing::Test
 {
   protected:
     const std::string test_config_path = "/tmp/test_server_config.json";
-    
+
     void SetUp() override
     {
         // Clean up any existing test files
@@ -17,7 +17,7 @@ class ConfigTest : public ::testing::Test
         {
             std::filesystem::remove(test_config_path);
         }
-        
+
         // Clear environment variable
         unsetenv("CONFIG_PATH");
     }
@@ -71,10 +71,10 @@ TEST_F(ConfigTest, GetEnvVarReturnsEnvValue)
 TEST_F(ConfigTest, LoadValidConfig)
 {
     create_valid_config_file(test_config_path);
-    
+
     config::server_config cfg;
     ASSERT_NO_THROW(config::load_config_from_file(test_config_path, cfg));
-    
+
     EXPECT_EQ(cfg.ip_v4, "127.0.0.1");
     EXPECT_EQ(cfg.ip_v6, "::1");
     EXPECT_EQ(cfg.network_port, 9999);
@@ -99,7 +99,7 @@ TEST_F(ConfigTest, LoadConfigInvalidJSON)
     std::ofstream file(test_config_path);
     file << "{ invalid json content }";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -118,7 +118,7 @@ TEST_F(ConfigTest, LoadConfigMissingIpV4)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -137,7 +137,7 @@ TEST_F(ConfigTest, LoadConfigMissingIpV6)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -156,7 +156,7 @@ TEST_F(ConfigTest, LoadConfigMissingPort)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -175,7 +175,7 @@ TEST_F(ConfigTest, LoadConfigMissingAckTimeout)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -194,7 +194,7 @@ TEST_F(ConfigTest, LoadConfigMissingMaxAuthAttempts)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -214,7 +214,7 @@ TEST_F(ConfigTest, LoadConfigInvalidIpV4Type)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -234,7 +234,7 @@ TEST_F(ConfigTest, LoadConfigInvalidPortType)
          << "  \"credentials_path\": \"config/clients\"\n"
          << "}";
     file.close();
-    
+
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
@@ -244,15 +244,15 @@ TEST_F(ConfigTest, LoadConfigFromEnvVariable)
 {
     const std::string env_config_path = "/tmp/env_config.json";
     create_valid_config_file(env_config_path);
-    
+
     setenv("CONFIG_PATH", env_config_path.c_str(), 1);
-    
+
     config::server_config cfg;
     // Even though we pass test_config_path, it should use env variable path
     ASSERT_NO_THROW(config::load_config_from_file("ignored_path.json", cfg));
-    
+
     EXPECT_EQ(cfg.ip_v4, "127.0.0.1");
-    
+
     unsetenv("CONFIG_PATH");
     std::filesystem::remove(env_config_path);
 }
@@ -316,4 +316,3 @@ int main(int argc, char** argv)
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
-

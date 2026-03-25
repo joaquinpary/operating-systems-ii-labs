@@ -136,7 +136,7 @@ int has_pending_messages(void)
 int enqueue_pending_message(const message_t* msg)
 {
     sem_wait(inventory_sem);
-    if (shared_data->message_count >= 10)
+    if (shared_data->message_count >= MAX_PENDING_MESSAGES)
     {
         sem_post(inventory_sem);
         LOG_ERROR_MSG("Pending message queue is full");
@@ -162,7 +162,7 @@ int enqueue_pending_message(const message_t* msg)
 int enqueue_pending_message_json(const char* json_message)
 {
     sem_wait(inventory_sem);
-    if (shared_data->message_count >= 10)
+    if (shared_data->message_count >= MAX_PENDING_MESSAGES)
     {
         sem_post(inventory_sem);
         LOG_ERROR_MSG("Pending message queue is full");
@@ -190,7 +190,6 @@ int pop_pending_message(message_t* msg)
     char json_buffer[BUFFER_SIZE];
     strncpy(json_buffer, shared_data->pending_messages[0], BUFFER_SIZE - 1);
 
-    // Shift queue
     for (int i = 0; i < shared_data->message_count - 1; i++)
     {
         memcpy(shared_data->pending_messages[i], shared_data->pending_messages[i + 1], BUFFER_SIZE);
@@ -216,7 +215,6 @@ int modify_inventory(const inventory_item_t* items, inventory_operation_t operat
         if (items[i].item_id == 0 || items[i].quantity == 0)
             continue;
 
-        // Match incoming item to local slot by item_id, not by index
         for (int j = 0; j < QUANTITY_ITEMS; j++)
         {
             if (shared_data->inventory_item[j].item_id != items[i].item_id)
@@ -550,7 +548,7 @@ int remove_pending_ack(const char* msg_id)
     }
 
     sem_post(inventory_sem);
-    return -1; // Not found
+    return -1;
 }
 
 int check_ack_timeouts(void)
@@ -581,7 +579,7 @@ int check_ack_timeouts(void)
                                   shared_data->pending_acks[i].retry_count, cfg->max_retries);
                     shared_data->ack_timeout_occurred = 1;
                     sem_post(inventory_sem);
-                    return -1; // Signal disconnection
+                    return -1;
                 }
 
                 LOG_WARNING_MSG("ACK timeout for %s (retry %d/%d, timeout=%dms)", shared_data->pending_acks[i].msg_id,

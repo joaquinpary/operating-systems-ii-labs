@@ -33,7 +33,7 @@ typedef struct
     char host[256];
     char port[16];
     protocol_type protocol;
-    int ip_version; // AF_INET, AF_INET6, or AF_UNSPEC
+    int ip_version;
 } client_config;
 
 /**

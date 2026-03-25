@@ -1,48 +1,36 @@
 #ifndef EMERGENCY_DETECTOR_H
 #define EMERGENCY_DETECTOR_H
 
-// ==================== EMERGENCY CODES (FR005) ====================
-
 #define EMERGENCY_CODE_NONE 0
-#define EMERGENCY_CODE_WEATHER 2001      // Extreme weather conditions
-#define EMERGENCY_CODE_INFECTION 2002    // Contamination/infection in the logistics chain
-#define EMERGENCY_CODE_ENEMY_THREAT 2003 // External threat (theft, sabotage)
+#define EMERGENCY_CODE_WEATHER 2001
+#define EMERGENCY_CODE_INFECTION 2002
+#define EMERGENCY_CODE_ENEMY_THREAT 2003
 
-// Emergency type strings (carried in the message payload)
 #define EMERGENCY_TYPE_WEATHER "WEATHER"
 #define EMERGENCY_TYPE_INFECTION "INFECTION"
 #define EMERGENCY_TYPE_ENEMY_THREAT "ENEMY_THREAT"
 
-// Severity levels
 #define SEVERITY_NONE 0
 #define SEVERITY_LOW 1
 #define SEVERITY_MEDIUM 2
 #define SEVERITY_HIGH 3
 #define SEVERITY_CRITICAL 4
 
-// Default trigger probability (2%)
 #define DEFAULT_EMERGENCY_PROBABILITY 2
 #define EMERGENCY_TYPE_COUNT 3
 
 #define EMERGENCY_TYPE_SIZE 20
-
-// ==================== STRUCTURES ====================
-
-// Result of a single evaluation
 typedef struct
 {
-    int emergency_code;                       // 0 = no emergency, 2001/2002/2003
-    char emergency_type[EMERGENCY_TYPE_SIZE]; // "WEATHER", "INFECTION", "ENEMY_THREAT"
-    int severity;                             // 0-4
+    int emergency_code;
+    char emergency_type[EMERGENCY_TYPE_SIZE];
+    int severity;
 } emergency_result_t;
 
-// Configuration (pass NULL to use defaults)
 typedef struct
 {
-    int probability_percent; // Probability of triggering an emergency per evaluation (default: 2)
+    int probability_percent;
 } emergency_config_t;
-
-// ==================== PUBLIC API ====================
 
 /**
  * @brief Returns the library version string (used to verify compatibility at load time).
@@ -67,4 +55,4 @@ const char* emergency_lib_version(void);
  */
 emergency_result_t evaluate_emergency(const emergency_config_t* config);
 
-#endif // EMERGENCY_DETECTOR_H
+#endif

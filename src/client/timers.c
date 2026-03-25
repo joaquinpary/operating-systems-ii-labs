@@ -14,6 +14,9 @@
 #define TIMER_CRITICAL_STOCK_THRESHOLD 5
 #define TIMER_MAX_STOCK_PER_ITEM 100
 #define TIMER_EMERGENCY_CHECK_INTERVAL_MS 30000
+#define TIMER_ACK_CHECK_INTERVAL_SEC 1
+#define TIMER_RECV_TIMEOUT_SEC 1
+#define TIMER_LOOP_TIMEOUT_SEC 1
 #define TIMER_ACK_TIMEOUT_MS 5000
 #define TIMER_MAX_RETRIES 3
 #define TIMER_RESPONSE_DELAY_MIN_MS 50
@@ -29,6 +32,9 @@ static timer_config_t timer_config = {
     .critical_stock_threshold = TIMER_CRITICAL_STOCK_THRESHOLD,
     .max_stock_per_item = TIMER_MAX_STOCK_PER_ITEM,
     .emergency_check_interval_ms = TIMER_EMERGENCY_CHECK_INTERVAL_MS,
+    .ack_check_interval_sec = TIMER_ACK_CHECK_INTERVAL_SEC,
+    .recv_timeout_sec = TIMER_RECV_TIMEOUT_SEC,
+    .loop_timeout_sec = TIMER_LOOP_TIMEOUT_SEC,
     .ack_timeout_ms = TIMER_ACK_TIMEOUT_MS,
     .max_retries = TIMER_MAX_RETRIES,
     .response_delay_min_ms = TIMER_RESPONSE_DELAY_MIN_MS,
@@ -70,6 +76,10 @@ void load_timer_config(void)
     timer_config.max_stock_per_item = parse_positive_env("CLIENT_MAX_STOCK_PER_ITEM", timer_config.max_stock_per_item);
     timer_config.emergency_check_interval_ms =
         parse_positive_env("CLIENT_EMERGENCY_INTERVAL_MS", timer_config.emergency_check_interval_ms);
+    timer_config.ack_check_interval_sec =
+        parse_positive_env("CLIENT_ACK_CHECK_INTERVAL_SEC", timer_config.ack_check_interval_sec);
+    timer_config.recv_timeout_sec = parse_positive_env("CLIENT_RECV_TIMEOUT_SEC", timer_config.recv_timeout_sec);
+    timer_config.loop_timeout_sec = parse_positive_env("CLIENT_LOOP_TIMEOUT_SEC", timer_config.loop_timeout_sec);
     timer_config.ack_timeout_ms = parse_positive_env("CLIENT_ACK_TIMEOUT_MS", timer_config.ack_timeout_ms);
     timer_config.max_retries = parse_positive_env("CLIENT_MAX_RETRIES", timer_config.max_retries);
     timer_config.response_delay_min_ms =
@@ -101,13 +111,13 @@ void load_timer_config(void)
         timer_config.consume_max_amount = tmp;
     }
 
-    LOG_INFO_MSG(
-        "Timer config loaded: inv=%dms consume=[%d,%d]ms consume_amount=[%d,%d] emergency=%dms ack=%dms retries=%d "
-        "response_delay=[%d,%d]ms",
-        timer_config.inventory_update_interval_ms, timer_config.consume_stock_min_ms, timer_config.consume_stock_max_ms,
-        timer_config.consume_min_amount, timer_config.consume_max_amount, timer_config.emergency_check_interval_ms,
-        timer_config.ack_timeout_ms, timer_config.max_retries, timer_config.response_delay_min_ms,
-        timer_config.response_delay_max_ms);
+    LOG_INFO_MSG("Timer config loaded: inv=%dms consume=[%d,%d]ms consume_amount=[%d,%d] emergency=%dms ack_check=%ds "
+                 "recv_timeout=%ds loop_timeout=%ds ack=%dms retries=%d response_delay=[%d,%d]ms",
+                 timer_config.inventory_update_interval_ms, timer_config.consume_stock_min_ms,
+                 timer_config.consume_stock_max_ms, timer_config.consume_min_amount, timer_config.consume_max_amount,
+                 timer_config.emergency_check_interval_ms, timer_config.ack_check_interval_sec,
+                 timer_config.recv_timeout_sec, timer_config.loop_timeout_sec, timer_config.ack_timeout_ms,
+                 timer_config.max_retries, timer_config.response_delay_min_ms, timer_config.response_delay_max_ms);
 }
 
 const timer_config_t* get_timer_config(void)

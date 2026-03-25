@@ -122,12 +122,11 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
         pqxx::work insert_txn(*conn);
         try
         {
-            insert_txn.exec(
-                pqxx::zview("INSERT INTO credentials (username, password_hash, client_type, is_active) "
-                            "VALUES ($1, $2, $3, $4) "
-                            "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, "
-                            "is_active = EXCLUDED.is_active"),
-                pqxx::params{"test_user", "test_hash", "HUB", true});
+            insert_txn.exec(pqxx::zview("INSERT INTO credentials (username, password_hash, client_type, is_active) "
+                                        "VALUES ($1, $2, $3, $4) "
+                                        "ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash, "
+                                        "is_active = EXCLUDED.is_active"),
+                            pqxx::params{"test_user", "test_hash", "HUB", true});
             insert_txn.commit();
         }
         catch (const std::exception& ex)
@@ -355,48 +354,60 @@ TEST_F(DatabaseTest, PopulateCredentialsTableMissingFields)
     std::filesystem::remove_all(test_dir);
 }
 
+// Helper to save and restore an environment variable
+static std::string save_env(const char* name)
+{
+    const char* v = std::getenv(name);
+    return v ? v : "";
+}
+static void restore_env(const char* name, const std::string& saved)
+{
+    if (saved.empty())
+        unsetenv(name);
+    else
+        setenv(name, saved.c_str(), 1);
+}
+
 // Test build_connection_string with environment variables
 TEST_F(DatabaseTest, BuildConnectionStringWithEnvVars)
 {
-    // Set environment variables
+    std::string s_host = save_env("POSTGRES_HOST");
+    std::string s_db = save_env("POSTGRES_DB");
+    std::string s_user = save_env("POSTGRES_USER");
+    std::string s_pass = save_env("POSTGRES_PASSWORD");
+    std::string s_port = save_env("POSTGRES_PORT");
+
     setenv("POSTGRES_HOST", "test_host", 1);
     setenv("POSTGRES_DB", "test_db", 1);
     setenv("POSTGRES_USER", "test_user", 1);
     setenv("POSTGRES_PASSWORD", "test_pass", 1);
     setenv("POSTGRES_PORT", "5433", 1);
 
-    // Cannot directly test build_connection_string as it's in anonymous namespace
-    // But we can test connect_to_database which uses it
-    // This will fail to connect with fake credentials, but tests env var usage
     auto conn = connect_to_database();
 
-    // Cleanup environment
-    unsetenv("POSTGRES_HOST");
-    unsetenv("POSTGRES_DB");
-    unsetenv("POSTGRES_USER");
-    unsetenv("POSTGRES_PASSWORD");
-    unsetenv("POSTGRES_PORT");
+    restore_env("POSTGRES_HOST", s_host);
+    restore_env("POSTGRES_DB", s_db);
+    restore_env("POSTGRES_USER", s_user);
+    restore_env("POSTGRES_PASSWORD", s_pass);
+    restore_env("POSTGRES_PORT", s_port);
 
-    // Connection should fail (or succeed if those creds actually exist)
-    // Either outcome is acceptable for this test
     SUCCEED();
 }
 
 // Test connect_to_database error handling
 TEST_F(DatabaseTest, ConnectToDatabaseErrorHandling)
 {
-    // Set invalid environment variables to force connection failure
+    std::string s_host = save_env("POSTGRES_HOST");
+    std::string s_port = save_env("POSTGRES_PORT");
+
     setenv("POSTGRES_HOST", "invalid_host_12345", 1);
     setenv("POSTGRES_PORT", "99999", 1);
 
     auto conn = connect_to_database();
-
-    // Should return nullptr on connection failure
     EXPECT_EQ(conn, nullptr);
 
-    // Cleanup
-    unsetenv("POSTGRES_HOST");
-    unsetenv("POSTGRES_PORT");
+    restore_env("POSTGRES_HOST", s_host);
+    restore_env("POSTGRES_PORT", s_port);
 }
 // ==================== INVENTORY TESTS ====================
 
@@ -561,6 +572,369 @@ TEST_F(DatabaseTest, TransactionStateWorkflow)
         pqxx::params{tid});
     EXPECT_EQ(res[0][0].as<std::string>(), "COMPLETED");
     EXPECT_FALSE(res[0][1].is_null());
+}
+
+// ==================== get_transaction_by_id ====================
+
+TEST_F(DatabaseTest, GetTransactionByIdFound)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int q[6] = {3, 4, 5, 0, 0, 0};
+    int tid = create_transaction(*conn, "STOCK_REQUEST", "hub_gt", "HUB", q, "2026-02-26T17:00:00Z");
+    ASSERT_GT(tid, 0);
+
+    transaction_record out{};
+    EXPECT_EQ(get_transaction_by_id(*conn, tid, out), 0);
+    EXPECT_EQ(out.transaction_id, tid);
+    EXPECT_EQ(out.transaction_type, "STOCK_REQUEST");
+    EXPECT_EQ(out.destination_id, "hub_gt");
+    EXPECT_EQ(out.food, 3);
+    EXPECT_EQ(out.water, 4);
+    EXPECT_EQ(out.medicine, 5);
+}
+
+TEST_F(DatabaseTest, GetTransactionByIdNotFound)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    transaction_record out{};
+    EXPECT_EQ(get_transaction_by_id(*conn, 999999, out), -1);
+}
+
+// ==================== get_client_inventory ====================
+
+TEST_F(DatabaseTest, GetClientInventoryNewClient)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    // Clean up first
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM client_inventory WHERE client_id = 'new_hub'");
+        txn.commit();
+    }
+
+    int out[6] = {0};
+    EXPECT_EQ(get_client_inventory(*conn, "new_hub", "HUB", out), 0);
+    // New HUB gets INITIAL_STOCK_HUB = 100
+    for (int i = 0; i < 6; i++)
+        EXPECT_EQ(out[i], 100);
+}
+
+TEST_F(DatabaseTest, GetClientInventoryNewWarehouse)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM client_inventory WHERE client_id = 'new_wh'");
+        txn.commit();
+    }
+
+    int out[6] = {0};
+    EXPECT_EQ(get_client_inventory(*conn, "new_wh", "WAREHOUSE", out), 0);
+    // New WAREHOUSE gets INITIAL_STOCK_WAREHOUSE = 500
+    for (int i = 0; i < 6; i++)
+        EXPECT_EQ(out[i], 500);
+}
+
+TEST_F(DatabaseTest, GetClientInventoryExisting)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int stock[6] = {11, 22, 33, 44, 55, 66};
+    update_client_inventory(*conn, "inv_hub", "HUB", stock, "2026-02-26T18:00:00Z");
+
+    int out[6] = {0};
+    EXPECT_EQ(get_client_inventory(*conn, "inv_hub", "HUB", out), 0);
+    EXPECT_EQ(out[0], 11);
+    EXPECT_EQ(out[1], 22);
+    EXPECT_EQ(out[2], 33);
+    EXPECT_EQ(out[3], 44);
+    EXPECT_EQ(out[4], 55);
+    EXPECT_EQ(out[5], 66);
+}
+
+TEST_F(DatabaseTest, GetClientInventoryInvalidParams)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int out[6] = {0};
+    EXPECT_EQ(get_client_inventory(*conn, "", "HUB", out), -1);
+    EXPECT_EQ(get_client_inventory(*conn, "c1", "", out), -1);
+    EXPECT_EQ(get_client_inventory(*conn, "c1", "HUB", nullptr), -1);
+}
+
+// ==================== adjust_client_inventory ====================
+
+TEST_F(DatabaseTest, AdjustClientInventoryAdd)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int base[6] = {10, 20, 30, 40, 50, 60};
+    update_client_inventory(*conn, "adj_hub", "HUB", base, "2026-02-26T19:00:00Z");
+
+    int delta[6] = {5, 5, 5, 5, 5, 5};
+    EXPECT_EQ(adjust_client_inventory(*conn, "adj_hub", delta, true), 0);
+
+    int out[6] = {0};
+    get_client_inventory(*conn, "adj_hub", "HUB", out);
+    EXPECT_EQ(out[0], 15);
+    EXPECT_EQ(out[1], 25);
+    EXPECT_EQ(out[2], 35);
+}
+
+TEST_F(DatabaseTest, AdjustClientInventorySubtract)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int base[6] = {10, 20, 30, 40, 50, 60};
+    update_client_inventory(*conn, "adj_hub2", "HUB", base, "2026-02-26T19:00:00Z");
+
+    int delta[6] = {5, 25, 5, 5, 5, 5};
+    EXPECT_EQ(adjust_client_inventory(*conn, "adj_hub2", delta, false), 0);
+
+    int out[6] = {0};
+    get_client_inventory(*conn, "adj_hub2", "HUB", out);
+    EXPECT_EQ(out[0], 5);
+    EXPECT_EQ(out[1], 0); // clamped to 0
+    EXPECT_EQ(out[2], 25);
+}
+
+TEST_F(DatabaseTest, AdjustClientInventoryInvalidParams)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int delta[6] = {1, 1, 1, 1, 1, 1};
+    EXPECT_EQ(adjust_client_inventory(*conn, "", delta, true), -1);
+    EXPECT_EQ(adjust_client_inventory(*conn, "hub", nullptr, true), -1);
+}
+
+// ==================== set_client_active ====================
+
+TEST_F(DatabaseTest, SetClientActive)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_credentials_table(*conn);
+
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM credentials WHERE username = 'active_test'");
+        txn.exec("INSERT INTO credentials (username, password_hash, client_type, is_active) "
+                 "VALUES ('active_test', 'hash', 'HUB', FALSE)");
+        txn.commit();
+    }
+
+    EXPECT_EQ(set_client_active(*conn, "active_test", true), 0);
+    {
+        auto cred = query_credentials_by_username(*conn, "active_test");
+        ASSERT_NE(cred, nullptr);
+        EXPECT_TRUE(cred->is_active);
+    }
+
+    EXPECT_EQ(set_client_active(*conn, "active_test", false), 0);
+    {
+        auto cred = query_credentials_by_username(*conn, "active_test");
+        ASSERT_NE(cred, nullptr);
+        EXPECT_FALSE(cred->is_active);
+    }
+
+    // Cleanup
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM credentials WHERE username = 'active_test'");
+        txn.commit();
+    }
+}
+
+TEST_F(DatabaseTest, SetClientActiveInvalidParams)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+
+    EXPECT_EQ(set_client_active(*conn, "", true), -1);
+}
+
+// ==================== reset_all_clients_inactive ====================
+
+TEST_F(DatabaseTest, ResetAllClientsInactive)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_credentials_table(*conn);
+
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM credentials WHERE username IN ('ra1', 'ra2')");
+        txn.exec("INSERT INTO credentials (username, password_hash, client_type, is_active) "
+                 "VALUES ('ra1', 'h', 'HUB', TRUE), ('ra2', 'h', 'WAREHOUSE', TRUE)");
+        txn.commit();
+    }
+
+    EXPECT_EQ(reset_all_clients_inactive(*conn), 0);
+
+    {
+        auto c1 = query_credentials_by_username(*conn, "ra1");
+        ASSERT_NE(c1, nullptr);
+        EXPECT_FALSE(c1->is_active);
+        auto c2 = query_credentials_by_username(*conn, "ra2");
+        ASSERT_NE(c2, nullptr);
+        EXPECT_FALSE(c2->is_active);
+    }
+
+    // Cleanup
+    {
+        pqxx::work txn(*conn);
+        txn.exec("DELETE FROM credentials WHERE username IN ('ra1', 'ra2')");
+        txn.commit();
+    }
+}
+
+// ==================== Additional validation paths ====================
+
+TEST_F(DatabaseTest, UpdateClientInventoryEmptyClientType)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int q[6] = {1, 1, 1, 1, 1, 1};
+    EXPECT_EQ(update_client_inventory(*conn, "valid_id", "", q, "2026-02-26T14:00:00Z"), -1);
+}
+
+TEST_F(DatabaseTest, CreateTransactionEmptyType)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    int q[6] = {1, 1, 1, 1, 1, 1};
+    EXPECT_EQ(create_transaction(*conn, "", "hub", "HUB", q, "2026-02-26T14:00:00Z"), -1);
+}
+
+TEST_F(DatabaseTest, GetWarehouseWithAllStockNullQuantities)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    EXPECT_EQ(get_warehouse_with_all_stock(*conn, nullptr), "");
+}
+
+TEST_F(DatabaseTest, FindTransactionIdNotFound)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    create_inventory_tables(*conn);
+
+    EXPECT_EQ(find_transaction_id(*conn, "nonexistent_src", "nonexistent_dst", "ASSIGNED"), -1);
+}
+
+// ==================== Closed connection catch-block tests ====================
+
+TEST_F(DatabaseTest, ClosedConnectionCatchBlocks)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    conn->close();
+
+    int q[6] = {1, 1, 1, 1, 1, 1};
+    int inv[6] = {0};
+    transaction_record out{};
+    transaction_record recs[1];
+
+    EXPECT_EQ(create_credentials_table(*conn), 1);
+    EXPECT_EQ(query_credentials_by_username(*conn, "x"), nullptr);
+    EXPECT_EQ(create_inventory_tables(*conn), 1);
+    EXPECT_EQ(update_client_inventory(*conn, "x", "HUB", q, "2026-01-01T00:00:00Z"), -1);
+    EXPECT_EQ(get_warehouse_with_all_stock(*conn, q), "");
+    EXPECT_EQ(create_transaction(*conn, "T", "d", "HUB", q, "2026-01-01T00:00:00Z"), -1);
+    EXPECT_EQ(set_transaction_destination(*conn, 1, "c", "HUB"), -1);
+    EXPECT_EQ(set_transaction_source(*conn, 1, "c", "HUB"), -1);
+    EXPECT_EQ(mark_transaction_dispatched(*conn, 1, "2026-01-01T00:00:00Z"), -1);
+    EXPECT_EQ(mark_transaction_assigned(*conn, 1), -1);
+    EXPECT_EQ(complete_transaction(*conn, 1, "2026-01-01T00:00:00Z"), -1);
+    EXPECT_EQ(get_pending_transactions(*conn, recs, 1), 0);
+    EXPECT_EQ(find_transaction_id(*conn, "s", "d", "PENDING"), -1);
+    EXPECT_EQ(get_transaction_by_id(*conn, 1, out), -1);
+    EXPECT_EQ(get_client_inventory(*conn, "c", "HUB", inv), -1);
+    EXPECT_EQ(adjust_client_inventory(*conn, "c", q, true), -1);
+    EXPECT_EQ(set_client_active(*conn, "c", true), -1);
+    EXPECT_EQ(reset_all_clients_inactive(*conn), -1);
+    EXPECT_EQ(populate_credentials_table(*conn, "/tmp"), 1);
+}
+
+TEST_F(DatabaseTest, InitializeDatabaseFailsOnClosedConnection)
+{
+    auto conn = connect_to_database();
+    if (!conn)
+        GTEST_SKIP() << "Database not available";
+    conn->close();
+    EXPECT_EQ(initialize_database(*conn, "/tmp"), -1);
+}
+
+// ==================== Environment variable edge cases ====================
+
+TEST_F(DatabaseTest, ConnectToDatabaseMissingEnvVar)
+{
+    std::string s_host = save_env("POSTGRES_HOST");
+    unsetenv("POSTGRES_HOST");
+
+    auto conn = connect_to_database();
+    EXPECT_EQ(conn, nullptr);
+
+    restore_env("POSTGRES_HOST", s_host);
+}
+
+TEST_F(DatabaseTest, BuildConnectionStringInvalidPort)
+{
+    if (!std::getenv("POSTGRES_HOST"))
+        GTEST_SKIP() << "Database env vars not set";
+
+    std::string s_port = save_env("POSTGRES_PORT");
+    setenv("POSTGRES_PORT", "not_a_number", 1);
+
+    std::string cs = build_connection_string();
+    EXPECT_NE(cs.find("port=5432"), std::string::npos);
+
+    restore_env("POSTGRES_PORT", s_port);
 }
 
 int main(int argc, char** argv)

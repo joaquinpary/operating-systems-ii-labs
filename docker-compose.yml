@@ -81,7 +81,7 @@ services:
       - ./scripts:/app/scripts
       - ./logs/clients:/var/log/dhl
     shm_size: '512m'
-    command: ["/bin/bash", "/app/scripts/run_n_clients_docker.sh"]
+    command: ["/bin/bash", "/app/scripts/run_clients.sh"]
 
   grafana:
     image: grafana/grafana-oss:11.6.0

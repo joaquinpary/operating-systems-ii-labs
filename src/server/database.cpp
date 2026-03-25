@@ -1,5 +1,7 @@
 #include "database.hpp"
 
+#include <common/json_manager.h>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -10,6 +12,26 @@
 #define DEFAULT_DB_PORT 5432
 #define INITIAL_STOCK_HUB 100
 #define INITIAL_STOCK_WAREHOUSE 500
+
+namespace
+{
+enum txn_col
+{
+    TXN_ID = 0,
+    TXN_TYPE,
+    TXN_SOURCE_ID,
+    TXN_SOURCE_TYPE,
+    TXN_DEST_ID,
+    TXN_DEST_TYPE,
+    TXN_STATUS,
+    TXN_FOOD,
+    TXN_WATER,
+    TXN_MEDICINE,
+    TXN_TOOLS,
+    TXN_GUNS,
+    TXN_AMMO
+};
+} // namespace
 
 namespace
 {
@@ -81,7 +103,6 @@ std::string build_connection_string()
     std::string user = require_env_var("POSTGRES_USER");
     std::string password = require_env_var("POSTGRES_PASSWORD");
 
-    // Port can also be overridden by environment variable
     int port = DEFAULT_DB_PORT;
     const char* port_env = std::getenv("POSTGRES_PORT");
     if (port_env)
@@ -277,7 +298,6 @@ int create_inventory_tables(pqxx::connection& conn)
     try
     {
         pqxx::work txn(conn);
-        // Create client_inventory table - one row per client with all 6 items
         std::string sql_inventory = "CREATE TABLE IF NOT EXISTS client_inventory ("
                                     "client_id TEXT PRIMARY KEY, "
                                     "client_type TEXT NOT NULL, "
@@ -291,7 +311,6 @@ int create_inventory_tables(pqxx::connection& conn)
                                     ");";
 
         txn.exec(sql_inventory);
-        // Create inventory_transactions table - audit trail with embedded items
         std::string sql_transactions = "CREATE TABLE IF NOT EXISTS inventory_transactions ("
                                        "transaction_id SERIAL PRIMARY KEY, "
                                        "transaction_type TEXT NOT NULL, "
@@ -313,7 +332,6 @@ int create_inventory_tables(pqxx::connection& conn)
 
         txn.exec(sql_transactions);
 
-        // Indexes for inventory_transactions — critical for performance at scale
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_status "
                  "ON inventory_transactions (status) WHERE status IN ('PENDING', 'ASSIGNED', 'DISPATCHED')");
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_source_status "
@@ -321,7 +339,6 @@ int create_inventory_tables(pqxx::connection& conn)
         txn.exec("CREATE INDEX IF NOT EXISTS idx_transactions_dest_status "
                  "ON inventory_transactions (destination_id, status)");
 
-        // Index for warehouse stock lookups
         txn.exec("CREATE INDEX IF NOT EXISTS idx_inventory_warehouse_type "
                  "ON client_inventory (client_type) WHERE client_type = 'WAREHOUSE'");
 
@@ -463,10 +480,6 @@ int create_transaction(pqxx::connection& conn, const std::string& transaction_ty
     }
 }
 
-// is this set_transaction_destination needed? maybe we can just set the destination when we create the transaction
-// because the transaction is created when a hub or warehouse requests stock, so we already know the destination at that
-// point
-
 int set_transaction_destination(pqxx::connection& conn, int transaction_id, const std::string& client_id,
                                 const std::string& client_type)
 {
@@ -598,19 +611,21 @@ static int parse_transaction_rows(const pqxx::result& result, transaction_record
         if (count >= max_count)
             break;
 
-        out_transactions[count].transaction_id = row[0].as<int>();
-        out_transactions[count].transaction_type = row[1].as<std::string>();
-        out_transactions[count].source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-        out_transactions[count].source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-        out_transactions[count].destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-        out_transactions[count].destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-        out_transactions[count].status = row[6].as<std::string>();
-        out_transactions[count].food = row[7].as<int>();
-        out_transactions[count].water = row[8].as<int>();
-        out_transactions[count].medicine = row[9].as<int>();
-        out_transactions[count].tools = row[10].as<int>();
-        out_transactions[count].guns = row[11].as<int>();
-        out_transactions[count].ammo = row[12].as<int>();
+        out_transactions[count].transaction_id = row[TXN_ID].as<int>();
+        out_transactions[count].transaction_type = row[TXN_TYPE].as<std::string>();
+        out_transactions[count].source_id = row[TXN_SOURCE_ID].is_null() ? "" : row[TXN_SOURCE_ID].as<std::string>();
+        out_transactions[count].source_type =
+            row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
+        out_transactions[count].destination_id = row[TXN_DEST_ID].is_null() ? "" : row[TXN_DEST_ID].as<std::string>();
+        out_transactions[count].destination_type =
+            row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
+        out_transactions[count].status = row[TXN_STATUS].as<std::string>();
+        out_transactions[count].food = row[TXN_FOOD].as<int>();
+        out_transactions[count].water = row[TXN_WATER].as<int>();
+        out_transactions[count].medicine = row[TXN_MEDICINE].as<int>();
+        out_transactions[count].tools = row[TXN_TOOLS].as<int>();
+        out_transactions[count].guns = row[TXN_GUNS].as<int>();
+        out_transactions[count].ammo = row[TXN_AMMO].as<int>();
 
         count++;
     }
@@ -696,19 +711,19 @@ int get_transaction_by_id(pqxx::work& txn, int transaction_id, transaction_recor
         return -1;
 
     const auto& row = result[0];
-    out.transaction_id = row[0].as<int>();
-    out.transaction_type = row[1].as<std::string>();
-    out.source_id = row[2].is_null() ? "" : row[2].as<std::string>();
-    out.source_type = row[3].is_null() ? "" : row[3].as<std::string>();
-    out.destination_id = row[4].is_null() ? "" : row[4].as<std::string>();
-    out.destination_type = row[5].is_null() ? "" : row[5].as<std::string>();
-    out.status = row[6].as<std::string>();
-    out.food = row[7].as<int>();
-    out.water = row[8].as<int>();
-    out.medicine = row[9].as<int>();
-    out.tools = row[10].as<int>();
-    out.guns = row[11].as<int>();
-    out.ammo = row[12].as<int>();
+    out.transaction_id = row[TXN_ID].as<int>();
+    out.transaction_type = row[TXN_TYPE].as<std::string>();
+    out.source_id = row[TXN_SOURCE_ID].is_null() ? "" : row[TXN_SOURCE_ID].as<std::string>();
+    out.source_type = row[TXN_SOURCE_TYPE].is_null() ? "" : row[TXN_SOURCE_TYPE].as<std::string>();
+    out.destination_id = row[TXN_DEST_ID].is_null() ? "" : row[TXN_DEST_ID].as<std::string>();
+    out.destination_type = row[TXN_DEST_TYPE].is_null() ? "" : row[TXN_DEST_TYPE].as<std::string>();
+    out.status = row[TXN_STATUS].as<std::string>();
+    out.food = row[TXN_FOOD].as<int>();
+    out.water = row[TXN_WATER].as<int>();
+    out.medicine = row[TXN_MEDICINE].as<int>();
+    out.tools = row[TXN_TOOLS].as<int>();
+    out.guns = row[TXN_GUNS].as<int>();
+    out.ammo = row[TXN_AMMO].as<int>();
 
     return 0;
 }
@@ -737,7 +752,7 @@ int get_client_inventory(pqxx::work& txn, const std::string& client_id, const st
     }
 
     int initial_stock = (client_type == "WAREHOUSE") ? INITIAL_STOCK_WAREHOUSE : INITIAL_STOCK_HUB;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
         quantities_out[i] = initial_stock;
 
     std::string sql = "SELECT food, water, medicine, tools, guns, ammo FROM client_inventory WHERE client_id = $1";
@@ -752,12 +767,8 @@ int get_client_inventory(pqxx::work& txn, const std::string& client_id, const st
         return 0;
     }
 
-    quantities_out[0] = result[0][0].as<int>();
-    quantities_out[1] = result[0][1].as<int>();
-    quantities_out[2] = result[0][2].as<int>();
-    quantities_out[3] = result[0][3].as<int>();
-    quantities_out[4] = result[0][4].as<int>();
-    quantities_out[5] = result[0][5].as<int>();
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+        quantities_out[i] = result[0][i].as<int>();
 
     return 0;
 }

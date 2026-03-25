@@ -9,6 +9,8 @@
 #include <zlib.h>
 
 #define TIMESTAMP_BASE_BUFFER_SIZE 32
+#define DJB2_HASH_SEED 5381UL
+#define CHECKSUM_BITMASK 0xFFFFFF
 
 static void safe_strcpy(char* dest, size_t size, const char* src)
 {
@@ -38,7 +40,6 @@ static cJSON* serialize_items_list(const void* ptr)
     }
     cJSON_AddItemToObject(root, "items", items_array);
 
-    // Add order_timestamp if present (not empty)
     if (payload->order_timestamp[0] != '\0')
     {
         cJSON_AddStringToObject(root, "order_timestamp", payload->order_timestamp);
@@ -127,7 +128,6 @@ static void deserialize_items_list(const cJSON* root, void* ptr)
         }
     }
 
-    // Deserialize order_timestamp if present
     cJSON* order_ts = cJSON_GetObjectItemCaseSensitive(root, "order_timestamp");
     if (cJSON_IsString(order_ts))
     {
@@ -135,7 +135,7 @@ static void deserialize_items_list(const cJSON* root, void* ptr)
     }
     else
     {
-        payload->order_timestamp[0] = '\0'; // Empty if not present
+        payload->order_timestamp[0] = '\0';
     }
 }
 
@@ -196,7 +196,7 @@ static void deserialize_client_emergency(const cJSON* root, void* ptr)
     if (cJSON_IsNumber(code))
         payload->emergency_code = code->valueint;
     if (cJSON_IsString(type))
-        safe_strcpy(payload->emergency_type, 20, type->valuestring);
+        safe_strcpy(payload->emergency_type, EMERGENCY_TYPE_SIZE, type->valuestring);
 }
 
 static void deserialize_server_emergency(const cJSON* root, void* ptr)
@@ -208,7 +208,7 @@ static void deserialize_server_emergency(const cJSON* root, void* ptr)
     if (cJSON_IsNumber(code))
         payload->emergency_code = code->valueint;
     if (cJSON_IsString(instr))
-        safe_strcpy(payload->instructions, 100, instr->valuestring);
+        safe_strcpy(payload->instructions, EMERGENCY_INSTRUCTIONS_SIZE, instr->valuestring);
 }
 
 typedef struct
@@ -353,7 +353,6 @@ static void generate_timestamp(char* buffer, size_t size)
 
     struct tm* tm_info = gmtime(&tv.tv_sec);
 
-    // Format: YYYY-MM-DDTHH:MM:SS.mmmZ (with milliseconds)
     char base[TIMESTAMP_BASE_BUFFER_SIZE];
     strftime(base, sizeof(base), "%Y-%m-%dT%H:%M:%S", tm_info);
 
@@ -363,7 +362,7 @@ static void generate_timestamp(char* buffer, size_t size)
 
 static void generate_checksum(const message_t* msg, char* checksum_out)
 {
-    unsigned long hash = 5381;
+    unsigned long hash = DJB2_HASH_SEED;
     const char* str = msg->msg_type;
     while (*str)
         hash = ((hash << 5) + hash) + (unsigned char)(*str++);
@@ -371,7 +370,7 @@ static void generate_checksum(const message_t* msg, char* checksum_out)
     while (*str)
         hash = ((hash << 5) + hash) + (unsigned char)(*str++);
 
-    snprintf(checksum_out, CHECKSUM_SIZE, "%lX", hash & 0xFFFFFF);
+    snprintf(checksum_out, CHECKSUM_SIZE, "%lX", hash & CHECKSUM_BITMASK);
 }
 
 static int create_message(message_t* out, const char* msg_type, const char* source_role, const char* source_id,
@@ -443,7 +442,6 @@ int create_items_message(message_t* out, const char* msg_type, const char* sourc
         payload.items[i] = items[i];
     }
 
-    // Set order_timestamp only for receipt confirmation messages
     if (order_timestamp != NULL && (strcmp(msg_type, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0 ||
                                     strcmp(msg_type, WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0))
     {
@@ -451,7 +449,7 @@ int create_items_message(message_t* out, const char* msg_type, const char* sourc
     }
     else
     {
-        payload.order_timestamp[0] = '\0'; // Empty string for other message types
+        payload.order_timestamp[0] = '\0';
     }
 
     const char* source_role = NULL;
@@ -479,7 +477,7 @@ int create_items_message(message_t* out, const char* msg_type, const char* sourc
     }
     else
     {
-        return -1; // Unknown message type format
+        return -1;
     }
 
     return create_message(out, msg_type, source_role, source_id, target_role, target_id, &payload, sizeof(payload));
@@ -543,7 +541,7 @@ int create_client_emergency_message(message_t* out, const char* source_role, con
 
     payload_client_emergency_alert payload = {0};
     payload.emergency_code = emergency_code;
-    safe_strcpy(payload.emergency_type, 20, emergency_type);
+    safe_strcpy(payload.emergency_type, EMERGENCY_TYPE_SIZE, emergency_type);
 
     const char* msg_type =
         (strcmp(source_role, HUB) == 0) ? HUB_TO_SERVER__EMERGENCY_ALERT : WAREHOUSE_TO_SERVER__EMERGENCY_ALERT;
@@ -558,9 +556,8 @@ int create_server_emergency_message(message_t* out, int emergency_code, const ch
 
     payload_server_emergency_alert payload = {0};
     payload.emergency_code = emergency_code;
-    safe_strcpy(payload.instructions, 100, instructions);
+    safe_strcpy(payload.instructions, EMERGENCY_INSTRUCTIONS_SIZE, instructions);
 
-    // Placeholder
     return create_message(out, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, SERVER, "SERVER", CLI, "ALL", &payload,
                           sizeof(payload));
 }

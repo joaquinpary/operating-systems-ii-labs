@@ -7,12 +7,9 @@
 #include <sys/mman.h>
 #include <time.h>
 
-// Configuration constants
 #define MAX_PENDING_ACKS 10
+#define MAX_PENDING_MESSAGES 10
 
-// ==================== DATA STRUCTURES ====================
-
-// Structure to track pending ACKs
 typedef struct
 {
     struct timespec send_time;
@@ -23,33 +20,26 @@ typedef struct
     int active;
 } pending_ack_t;
 
-// Shared memory structure
 typedef struct
 {
-    char client_role[ROLE_SIZE]; // "HUB" or "WAREHOUSE"
-    char client_id[ID_SIZE];     // username (e.g., "client_0001")
+    char client_role[ROLE_SIZE];
+    char client_id[ID_SIZE];
 
     inventory_item_t inventory_item[QUANTITY_ITEMS];
-    int pending_stock_request[QUANTITY_ITEMS]; // 1 if item already requested and waiting for replenishment
+    int pending_stock_request[QUANTITY_ITEMS];
 
-    char pending_messages[10][BUFFER_SIZE];
+    char pending_messages[MAX_PENDING_MESSAGES][BUFFER_SIZE];
     int message_count;
 
-    // ACK tracking
     pending_ack_t pending_acks[MAX_PENDING_ACKS];
     int ack_timeout_occurred;
 
-    // Inventory control flags
-    volatile sig_atomic_t inventory_updated; // Flag set when inventory is updated
+    volatile sig_atomic_t inventory_updated;
 
-    // Emergency control flags
-    volatile sig_atomic_t emergency_active; // Flag set while an emergency alert is pending ACK
+    volatile sig_atomic_t emergency_active;
 
-    // Control flags
     volatile sig_atomic_t should_exit;
 } shared_data_t;
-
-// ==================== IPC LIFECYCLE ====================
 
 /**
  * Initialize IPC resources (shared memory and semaphores)
@@ -62,8 +52,6 @@ int ipc_init(const char* client_id);
  * Cleanup IPC resources
  */
 void ipc_cleanup(void);
-
-// ==================== MESSAGE QUEUE ====================
 
 /**
  * Add a message to the pending queue (serializes message_t to JSON)
@@ -92,8 +80,6 @@ int pop_pending_message(message_t* msg);
  */
 int has_pending_messages(void);
 
-// ==================== ACK TRACKING ====================
-
 /**
  * Add a pending ACK for tracking
  * @param msg_id Message ID (timestamp)
@@ -116,8 +102,6 @@ int remove_pending_ack(const char* msg_id);
  */
 int check_ack_timeouts(void);
 
-// ==================== INVENTORY ====================
-
 /**
  * Modify inventory by adding or reducing quantities (thread-safe)
  *
@@ -130,8 +114,8 @@ int check_ack_timeouts(void);
  */
 typedef enum
 {
-    INVENTORY_ADD,   // Add quantities to inventory (restocking)
-    INVENTORY_REDUCE // Reduce quantities from inventory (consumption/dispatch)
+    INVENTORY_ADD,
+    INVENTORY_REDUCE
 } inventory_operation_t;
 
 int modify_inventory(const inventory_item_t* items, inventory_operation_t operation);
@@ -222,8 +206,6 @@ int wait_for_message(int timeout_seconds);
  * Wake sender thread blocked on wait_for_message
  */
 void wake_sender_thread(void);
-
-// ==================== SHARED DATA ACCESS ====================
 
 /**
  * Get pointer to shared data

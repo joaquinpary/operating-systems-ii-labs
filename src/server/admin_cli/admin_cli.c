@@ -19,11 +19,38 @@
 #define ADMIN_CLI_VERSION "1.0.0"
 #define CLIENTS_PAGE_SIZE 10
 #define TRANSACTIONS_PAGE_SIZE 3
+#define CMD_TOKEN_BUF_SIZE 64
 
-/* ---- internal state ----------------------------------------------------- */
+enum inv_col
+{
+    INV_CLIENT_TYPE,
+    INV_FOOD,
+    INV_WATER,
+    INV_MEDICINE,
+    INV_TOOLS,
+    INV_GUNS,
+    INV_AMMO,
+    INV_LAST_UPDATED
+};
+
+enum txn_col
+{
+    TXN_ID,
+    TXN_TYPE,
+    TXN_SRC,
+    TXN_SRC_TYPE,
+    TXN_DST,
+    TXN_DST_TYPE,
+    TXN_STATUS,
+    TXN_FOOD,
+    TXN_WATER,
+    TXN_MEDICINE,
+    TXN_TOOLS,
+    TXN_GUNS,
+    TXN_AMMO
+};
+
 static PGconn* s_conn = NULL;
-
-/* ===== exported symbols ================================================== */
 
 const char* admin_cli_version(void)
 {
@@ -55,10 +82,6 @@ void admin_cli_shutdown(void)
     }
 }
 
-/* ===== argument parsing ================================================== */
-
-/** Find "key VALUE" in a space-separated args string and return VALUE as int.
- *  Returns default_val if not found. */
 static int parse_int_arg(const char* args, const char* key, int default_val)
 {
     if (!args || !key)
@@ -89,15 +112,12 @@ static int parse_str_arg(const char* args, const char* key, char* buf, size_t bu
         p++;
     if (*p == '\0')
         return -1;
-    /* copy until next space or end */
     size_t i = 0;
     while (*p && *p != ' ' && i < buf_len - 1)
         buf[i++] = *p++;
     buf[i] = '\0';
     return i > 0 ? 0 : -1;
 }
-
-/* ===== JSON helpers ====================================================== */
 
 static int build_error(char* out, size_t max_len, const char* message)
 {
@@ -147,20 +167,16 @@ static int build_ok(char* out, size_t max_len, const char* key, cJSON* data)
     return 0;
 }
 
-/* ===== command handlers ================================================== */
-
 static int cmd_help(char* out, size_t max_len)
 {
     cJSON* cmds = cJSON_CreateArray();
 
     const char* names[] = {"help", "clients", "inventory", "transactions"};
-    const char* descs[] = {
-        "Show available commands",
-        "List clients (args: [active true|false] [page N])",
-        "Get inventory for a client (args: <client_id>)",
-        "List transactions (args: [<client_id>|all] [page N])"};
+    const char* descs[] = {"Show available commands", "List clients (args: [active true|false] [page N])",
+                           "Get inventory for a client (args: <client_id>)",
+                           "List transactions (args: [<client_id>|all] [page N])"};
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < (int)(sizeof(names) / sizeof(names[0])); ++i)
     {
         cJSON* e = cJSON_CreateObject();
         cJSON_AddStringToObject(e, "command", names[i]);
@@ -175,8 +191,7 @@ static int cmd_clients(const char* args, char* out, size_t max_len)
     if (!s_conn)
         return build_error(out, max_len, "no database connection");
 
-    /* Parse "active true/false" — default: active true */
-    int filter_active = 1; /* 1 = true, 0 = false */
+    int filter_active = 1;
     char active_val[8] = {0};
     if (parse_str_arg(args, "active ", active_val, sizeof(active_val)) == 0)
     {
@@ -186,12 +201,10 @@ static int cmd_clients(const char* args, char* out, size_t max_len)
 
     int page = parse_int_arg(args, "page ", 1);
 
-    /* Count total matching rows */
     const char* active_str = filter_active ? "true" : "false";
     const char* count_params[1] = {active_str};
-    PGresult* cnt_res = PQexecParams(s_conn,
-                                     "SELECT COUNT(*) FROM credentials WHERE is_active = $1",
-                                     1, NULL, count_params, NULL, NULL, 0);
+    PGresult* cnt_res = PQexecParams(s_conn, "SELECT COUNT(*) FROM credentials WHERE is_active = $1", 1, NULL,
+                                     count_params, NULL, NULL, 0);
 
     if (PQresultStatus(cnt_res) != PGRES_TUPLES_OK)
     {
@@ -266,14 +279,14 @@ static int cmd_inventory(const char* client_id, char* out, size_t max_len)
 
     cJSON* obj = cJSON_CreateObject();
     cJSON_AddStringToObject(obj, "client_id", client_id);
-    cJSON_AddStringToObject(obj, "client_type", PQgetvalue(res, 0, 0));
-    cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, 0, 1)));
-    cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, 0, 2)));
-    cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, 0, 3)));
-    cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, 0, 4)));
-    cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, 0, 5)));
-    cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, 0, 6)));
-    cJSON_AddStringToObject(obj, "last_updated", PQgetvalue(res, 0, 7));
+    cJSON_AddStringToObject(obj, "client_type", PQgetvalue(res, 0, INV_CLIENT_TYPE));
+    cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, 0, INV_FOOD)));
+    cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, 0, INV_WATER)));
+    cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, 0, INV_MEDICINE)));
+    cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, 0, INV_TOOLS)));
+    cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, 0, INV_GUNS)));
+    cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, 0, INV_AMMO)));
+    cJSON_AddStringToObject(obj, "last_updated", PQgetvalue(res, 0, INV_LAST_UPDATED));
 
     PQclear(res);
     return build_ok(out, max_len, "inventory", obj);
@@ -286,20 +299,17 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
 
     int page = parse_int_arg(args, "page ", 1);
 
-    /* Determine if filtering by a specific client. The first token in args
-       (if not "page" or "all") is the client_id filter. */
-    char client_filter[64] = {0};
+    char client_filter[CMD_TOKEN_BUF_SIZE] = {0};
     int has_filter = 0;
 
     if (args && args[0] != '\0')
     {
-        /* grab first token */
-        char first[64] = {0};
+        char first[CMD_TOKEN_BUF_SIZE] = {0};
         int i = 0;
         const char* p = args;
         while (*p == ' ')
             p++;
-        while (*p && *p != ' ' && i < 63)
+        while (*p && *p != ' ' && i < CMD_TOKEN_BUF_SIZE - 1)
             first[i++] = *p++;
         first[i] = '\0';
 
@@ -310,7 +320,6 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
         }
     }
 
-    /* Count total */
     PGresult* cnt_res;
     if (has_filter)
     {
@@ -379,24 +388,22 @@ static int cmd_transactions(const char* args, char* out, size_t max_len)
     for (int i = 0; i < rows; ++i)
     {
         cJSON* obj = cJSON_CreateObject();
-        cJSON_AddNumberToObject(obj, "id", atoi(PQgetvalue(res, i, 0)));
-        cJSON_AddStringToObject(obj, "type", PQgetvalue(res, i, 1));
-        cJSON_AddStringToObject(obj, "src", PQgetvalue(res, i, 2));
-        cJSON_AddStringToObject(obj, "dst", PQgetvalue(res, i, 4));
-        cJSON_AddStringToObject(obj, "status", PQgetvalue(res, i, 6));
-        cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, i, 7)));
-        cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, i, 8)));
-        cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, i, 9)));
-        cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, i, 10)));
-        cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, i, 11)));
-        cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, i, 12)));
+        cJSON_AddNumberToObject(obj, "id", atoi(PQgetvalue(res, i, TXN_ID)));
+        cJSON_AddStringToObject(obj, "type", PQgetvalue(res, i, TXN_TYPE));
+        cJSON_AddStringToObject(obj, "src", PQgetvalue(res, i, TXN_SRC));
+        cJSON_AddStringToObject(obj, "dst", PQgetvalue(res, i, TXN_DST));
+        cJSON_AddStringToObject(obj, "status", PQgetvalue(res, i, TXN_STATUS));
+        cJSON_AddNumberToObject(obj, "food", atoi(PQgetvalue(res, i, TXN_FOOD)));
+        cJSON_AddNumberToObject(obj, "water", atoi(PQgetvalue(res, i, TXN_WATER)));
+        cJSON_AddNumberToObject(obj, "medicine", atoi(PQgetvalue(res, i, TXN_MEDICINE)));
+        cJSON_AddNumberToObject(obj, "tools", atoi(PQgetvalue(res, i, TXN_TOOLS)));
+        cJSON_AddNumberToObject(obj, "guns", atoi(PQgetvalue(res, i, TXN_GUNS)));
+        cJSON_AddNumberToObject(obj, "ammo", atoi(PQgetvalue(res, i, TXN_AMMO)));
         cJSON_AddItemToArray(arr, obj);
     }
     PQclear(res);
     return build_paged(out, max_len, "transactions", arr, page, total_pages, total);
 }
-
-/* ===== main dispatch ===================================================== */
 
 int admin_cli_handle(const char* raw_json, char* resp_json, size_t max_len)
 {
@@ -407,7 +414,6 @@ int admin_cli_handle(const char* raw_json, char* resp_json, size_t max_len)
     if (!root)
         return build_error(resp_json, max_len, "invalid JSON");
 
-    /* Extract payload.command and payload.args */
     const char* command = NULL;
     const char* args = NULL;
 

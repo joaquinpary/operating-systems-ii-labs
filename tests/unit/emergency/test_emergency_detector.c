@@ -2,8 +2,12 @@
 #include "unity.h"
 #include <string.h>
 
-void setUp(void)  { /* nothing required */ }
-void tearDown(void) { /* nothing required */ }
+void setUp(void)
+{ /* nothing required */
+}
+void tearDown(void)
+{ /* nothing required */
+}
 
 /* ------------------------------------------------------------------ */
 /* emergency_lib_version                                                */
@@ -27,7 +31,7 @@ void test_version_not_empty(void)
 
 void test_probability_zero_returns_none(void)
 {
-    emergency_config_t cfg = { .probability_percent = 0 };
+    emergency_config_t cfg = {.probability_percent = 0};
 
     /* Run many iterations to be statistically certain */
     for (int i = 0; i < 500; i++)
@@ -43,7 +47,7 @@ void test_probability_zero_returns_none(void)
 
 void test_probability_hundred_always_triggers(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
+    emergency_config_t cfg = {.probability_percent = 100};
 
     for (int i = 0; i < 100; i++)
     {
@@ -54,11 +58,10 @@ void test_probability_hundred_always_triggers(void)
 
 void test_probability_hundred_valid_code(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
-    emergency_result_t r   = evaluate_emergency(&cfg);
+    emergency_config_t cfg = {.probability_percent = 100};
+    emergency_result_t r = evaluate_emergency(&cfg);
 
-    int valid = (r.emergency_code == EMERGENCY_CODE_WEATHER   ||
-                 r.emergency_code == EMERGENCY_CODE_INFECTION  ||
+    int valid = (r.emergency_code == EMERGENCY_CODE_WEATHER || r.emergency_code == EMERGENCY_CODE_INFECTION ||
                  r.emergency_code == EMERGENCY_CODE_ENEMY_THREAT);
 
     TEST_ASSERT_TRUE(valid);
@@ -66,15 +69,15 @@ void test_probability_hundred_valid_code(void)
 
 void test_probability_hundred_nonempty_type(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
-    emergency_result_t r   = evaluate_emergency(&cfg);
+    emergency_config_t cfg = {.probability_percent = 100};
+    emergency_result_t r = evaluate_emergency(&cfg);
     TEST_ASSERT_GREATER_THAN(0, (int)strlen(r.emergency_type));
 }
 
 void test_probability_hundred_positive_severity(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
-    emergency_result_t r   = evaluate_emergency(&cfg);
+    emergency_config_t cfg = {.probability_percent = 100};
+    emergency_result_t r = evaluate_emergency(&cfg);
     TEST_ASSERT_GREATER_THAN(0, r.severity);
 }
 
@@ -85,7 +88,7 @@ void test_probability_hundred_positive_severity(void)
 void test_weather_severity(void)
 {
     /* Force many iterations and check every WEATHER result has severity == 3 */
-    emergency_config_t cfg = { .probability_percent = 100 };
+    emergency_config_t cfg = {.probability_percent = 100};
 
     for (int i = 0; i < 300; i++)
     {
@@ -100,7 +103,7 @@ void test_weather_severity(void)
 
 void test_infection_severity(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
+    emergency_config_t cfg = {.probability_percent = 100};
 
     for (int i = 0; i < 300; i++)
     {
@@ -115,7 +118,7 @@ void test_infection_severity(void)
 
 void test_enemy_threat_severity(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
+    emergency_config_t cfg = {.probability_percent = 100};
 
     for (int i = 0; i < 300; i++)
     {
@@ -134,24 +137,28 @@ void test_enemy_threat_severity(void)
 
 void test_all_three_types_appear(void)
 {
-    emergency_config_t cfg = { .probability_percent = 100 };
+    emergency_config_t cfg = {.probability_percent = 100};
 
-    int saw_weather      = 0;
-    int saw_infection    = 0;
+    int saw_weather = 0;
+    int saw_infection = 0;
     int saw_enemy_threat = 0;
 
     for (int i = 0; i < 1000; i++)
     {
         emergency_result_t r = evaluate_emergency(&cfg);
-        if (r.emergency_code == EMERGENCY_CODE_WEATHER)      saw_weather      = 1;
-        if (r.emergency_code == EMERGENCY_CODE_INFECTION)    saw_infection    = 1;
-        if (r.emergency_code == EMERGENCY_CODE_ENEMY_THREAT) saw_enemy_threat = 1;
+        if (r.emergency_code == EMERGENCY_CODE_WEATHER)
+            saw_weather = 1;
+        if (r.emergency_code == EMERGENCY_CODE_INFECTION)
+            saw_infection = 1;
+        if (r.emergency_code == EMERGENCY_CODE_ENEMY_THREAT)
+            saw_enemy_threat = 1;
 
-        if (saw_weather && saw_infection && saw_enemy_threat) break;
+        if (saw_weather && saw_infection && saw_enemy_threat)
+            break;
     }
 
-    TEST_ASSERT_TRUE_MESSAGE(saw_weather,      "WEATHER type never generated");
-    TEST_ASSERT_TRUE_MESSAGE(saw_infection,    "INFECTION type never generated");
+    TEST_ASSERT_TRUE_MESSAGE(saw_weather, "WEATHER type never generated");
+    TEST_ASSERT_TRUE_MESSAGE(saw_infection, "INFECTION type never generated");
     TEST_ASSERT_TRUE_MESSAGE(saw_enemy_threat, "ENEMY_THREAT type never generated");
 }
 
@@ -165,10 +172,8 @@ void test_null_config_no_crash(void)
     emergency_result_t r = evaluate_emergency(NULL);
 
     /* Code must be NONE or a known code */
-    int valid = (r.emergency_code == EMERGENCY_CODE_NONE         ||
-                 r.emergency_code == EMERGENCY_CODE_WEATHER       ||
-                 r.emergency_code == EMERGENCY_CODE_INFECTION      ||
-                 r.emergency_code == EMERGENCY_CODE_ENEMY_THREAT);
+    int valid = (r.emergency_code == EMERGENCY_CODE_NONE || r.emergency_code == EMERGENCY_CODE_WEATHER ||
+                 r.emergency_code == EMERGENCY_CODE_INFECTION || r.emergency_code == EMERGENCY_CODE_ENEMY_THREAT);
 
     TEST_ASSERT_TRUE(valid);
 }
@@ -179,8 +184,8 @@ void test_null_config_no_crash(void)
 
 void test_none_result_code_zero(void)
 {
-    emergency_config_t cfg = { .probability_percent = 0 };
-    emergency_result_t r   = evaluate_emergency(&cfg);
+    emergency_config_t cfg = {.probability_percent = 0};
+    emergency_result_t r = evaluate_emergency(&cfg);
     TEST_ASSERT_EQUAL_INT(EMERGENCY_CODE_NONE, r.emergency_code);
 }
 

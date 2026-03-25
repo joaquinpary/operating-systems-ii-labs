@@ -13,6 +13,9 @@
 #include <cstring>
 #include <iostream>
 #include <thread>
+
+static constexpr size_t SERVER_LOG_MAX_FILE_SIZE = 50 * 1024 * 1024;
+static constexpr int SERVER_LOG_MAX_BACKUPS = 1000;
 #include <unistd.h>
 #include <vector>
 
@@ -32,7 +35,6 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
 
     while (shm.wait_request(request))
     {
-        // Deserialize once for logging (type, timestamp, source)
         message_t log_msg;
         bool deserialized = (deserialize_message_from_json(request.raw_json, &log_msg) == 0);
 
@@ -46,7 +48,6 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
             LOG_INFO_MSG("[T%d] IN disconnect user=%s sess=%s", thread_id, request.username, request.session_id);
         }
 
-        // 1. Send ACK immediately (lightweight — no DB access)
         auto ack = handler.generate_ack(request);
         if (ack)
         {
@@ -57,10 +58,8 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
             }
         }
 
-        // 2. Process the request (heavy business logic — DB queries, inventory, etc.)
         std::vector<response_slot_t> responses = handler.process_request(request);
 
-        // 3. Push all remaining responses back to the reactor
         for (const auto& resp : responses)
         {
             shm.push_response(resp, response_efd);
@@ -77,36 +76,32 @@ static void worker_thread_func(shared_queue& shm, message_handler& handler, int 
 
 void run_worker_process(int response_efd, const config::server_config& cfg)
 {
-    // Initialize logger for the worker process (separate file from reactor)
     {
         const char* log_dir = std::getenv("LOG_DIR");
         if (!log_dir)
             log_dir = "logs/server";
-        logger_config_t log_cfg = {.max_file_size = 50 * 1024 * 1024, .max_backup_files = 1000, .min_level = LOG_DEBUG};
+        logger_config_t log_cfg = {.max_file_size = SERVER_LOG_MAX_FILE_SIZE,
+                                   .max_backup_files = SERVER_LOG_MAX_BACKUPS,
+                                   .min_level = LOG_DEBUG};
         snprintf(log_cfg.log_file_path, sizeof(log_cfg.log_file_path), "%s/server_worker.log", log_dir);
         log_init(&log_cfg);
     }
 
     LOG_INFO_MSG("[WORKER] pid=%d started", getpid());
-    // Open shared memory segment (created by reactor before fork)
     shared_queue shm = shared_queue::open();
 
-    // Create our own connection pool (worker process has its own DB connections)
     auto pool = std::make_shared<connection_pool>(build_connection_string(), cfg.pool_size);
 
-    // Reset all clients to inactive on startup
     {
         auto guard = pool->acquire();
         reset_all_clients_inactive(guard.get());
     }
 
-    // Create processing modules (direct DB access via pool)
     auth_module auth(*pool);
     inventory_manager inv_mgr(*pool);
     message_handler handler(auth, inv_mgr, cfg.ack_timeout, cfg.max_retries, cfg.keepalive_timeout,
                             build_connection_string());
 
-    // Spawn worker threads
     static constexpr std::uint32_t DEFAULT_WORKER_THREADS = 4;
 
     std::uint32_t num_threads = cfg.worker_threads;

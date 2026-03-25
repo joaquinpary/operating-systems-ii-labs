@@ -163,7 +163,8 @@ void test_serialize_deserialize_server_emergency(void)
     fill_header(&original_msg, SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT);
 
     original_msg.payload.server_emergency.emergency_code = 999;
-    strncpy(original_msg.payload.server_emergency.instructions, "EVACUATE IMMEDIATELY", EMERGENCY_INSTRUCTIONS_SIZE - 1);
+    strncpy(original_msg.payload.server_emergency.instructions, "EVACUATE IMMEDIATELY",
+            EMERGENCY_INSTRUCTIONS_SIZE - 1);
 
     char buffer[BUFFER_SIZE];
     int ret = serialize_message_to_json(&original_msg, buffer);
@@ -207,13 +208,12 @@ void test_create_keepalive_message(void)
 
 void test_create_items_message_stock_request(void)
 {
-    inventory_item_t items[QUANTITY_ITEMS] = {
-        {1, "FOOD", 10},     {2, "WATER", 20},    {3, "MEDICINE", 5},
-        {4, "TOOLS", 0},     {5, "GUNS", 0},      {6, "AMMO", 0}
-    };
+    inventory_item_t items[QUANTITY_ITEMS] = {{1, "FOOD", 10}, {2, "WATER", 20}, {3, "MEDICINE", 5},
+                                              {4, "TOOLS", 0}, {5, "GUNS", 0},   {6, "AMMO", 0}};
 
     message_t msg;
-    int ret = create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, "client_0001", SERVER, items, QUANTITY_ITEMS, NULL);
+    int ret =
+        create_items_message(&msg, HUB_TO_SERVER__STOCK_REQUEST, "client_0001", SERVER, items, QUANTITY_ITEMS, NULL);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__STOCK_REQUEST, msg.msg_type);
     TEST_ASSERT_EQUAL_STRING(HUB, msg.source_role);
@@ -228,13 +228,12 @@ void test_create_items_message_stock_request(void)
 
 void test_create_items_message_inventory_update(void)
 {
-    inventory_item_t items[QUANTITY_ITEMS] = {
-        {1, "FOOD", 15},     {2, "WATER", 8},     {3, "MEDICINE", 0},
-        {4, "TOOLS", 0},     {5, "GUNS", 0},      {6, "AMMO", 0}
-    };
+    inventory_item_t items[QUANTITY_ITEMS] = {{1, "FOOD", 15}, {2, "WATER", 8}, {3, "MEDICINE", 0},
+                                              {4, "TOOLS", 0}, {5, "GUNS", 0},  {6, "AMMO", 0}};
 
     message_t msg;
-    int ret = create_items_message(&msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_001", SERVER, items, QUANTITY_ITEMS, NULL);
+    int ret = create_items_message(&msg, WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, "warehouse_001", SERVER, items,
+                                   QUANTITY_ITEMS, NULL);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_EQUAL_STRING(WAREHOUSE_TO_SERVER__INVENTORY_UPDATE, msg.msg_type);
     TEST_ASSERT_EQUAL_INT(1, msg.payload.inventory_update.items[0].item_id);
@@ -334,14 +333,13 @@ void test_serialize_deserialize_acknowledgment(void)
 
 void test_create_items_message_stock_receipt_confirmation(void)
 {
-    inventory_item_t items[QUANTITY_ITEMS] = {
-        {1, "FOOD", 10},     {2, "WATER", 20},    {3, "MEDICINE", 5},
-        {4, "TOOLS", 0},     {5, "GUNS", 0},      {6, "AMMO", 0}
-    };
+    inventory_item_t items[QUANTITY_ITEMS] = {{1, "FOOD", 10}, {2, "WATER", 20}, {3, "MEDICINE", 5},
+                                              {4, "TOOLS", 0}, {5, "GUNS", 0},   {6, "AMMO", 0}};
 
     const char* order_ts = "2025-12-10T15:00:00Z";
     message_t msg;
-    int ret = create_items_message(&msg, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, "client_0001", SERVER, items, QUANTITY_ITEMS, order_ts);
+    int ret = create_items_message(&msg, HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, "client_0001", SERVER, items,
+                                   QUANTITY_ITEMS, order_ts);
     TEST_ASSERT_EQUAL_INT(0, ret);
     TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, msg.msg_type);
     TEST_ASSERT_EQUAL_STRING(order_ts, msg.payload.receipt_confirmation.order_timestamp);

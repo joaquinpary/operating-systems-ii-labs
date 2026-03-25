@@ -11,20 +11,16 @@
 #include <time.h>
 #include <unistd.h>
 
-// ==================== CONSTANTS ====================
-
 #define TIMESTAMP_BUFFER_SIZE 64
 #define LOG_PATH_BUFFER_SIZE 512
-
-// ==================== PRIVATE STATE ====================
+#define DEFAULT_LOG_MAX_FILE_SIZE (10 * 1024 * 1024)
+#define DEFAULT_LOG_MAX_BACKUPS 5
 
 static logger_config_t g_config;
 static FILE* g_log_file = NULL;
 static pthread_mutex_t g_log_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_initialized = 0;
-static int g_next_index = 1; // Next backup number to use (append-forward: .1=oldest, .N=newest)
-
-// ==================== PRIVATE FUNCTIONS ====================
+static int g_next_index = 1;
 
 /**
  * @brief Get current timestamp in ISO 8601 format with milliseconds
@@ -40,7 +36,6 @@ static void get_timestamp(char* buffer, size_t size)
 
     strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
 
-    // Append milliseconds
     snprintf(buffer + strlen(buffer), size - strlen(buffer), ".%03ldZ", tv.tv_usec / 1000);
 }
 
@@ -83,7 +78,6 @@ static int rotate_files(void)
 {
     char new_name[LOG_PATH_BUFFER_SIZE];
 
-    // Single rename: app.log -> app.log.{next}
     snprintf(new_name, sizeof(new_name), "%s.%d", g_config.log_file_path, g_next_index);
     if (rename(g_config.log_file_path, new_name) != 0)
     {
@@ -92,7 +86,6 @@ static int rotate_files(void)
     }
     g_next_index++;
 
-    // Delete the oldest backup if we exceeded max_backup_files
     if (g_config.max_backup_files > 0)
     {
         int oldest = g_next_index - g_config.max_backup_files - 1;
@@ -100,7 +93,7 @@ static int rotate_files(void)
         {
             char old_name[LOG_PATH_BUFFER_SIZE];
             snprintf(old_name, sizeof(old_name), "%s.%d", g_config.log_file_path, oldest);
-            remove(old_name); // Best-effort
+            remove(old_name);
         }
     }
 
@@ -117,23 +110,18 @@ static int check_and_rotate(void)
         return -1;
     }
 
-    // Get current file size
     long current_size = get_file_size(g_config.log_file_path);
 
     if (current_size >= (long)g_config.max_file_size)
     {
-        // Close current file
         fclose(g_log_file);
         g_log_file = NULL;
 
-        // Rotate files
         if (rotate_files() != 0)
         {
             fprintf(stderr, "[LOGGER] File rotation failed\n");
-            // Try to reopen the file anyway
         }
 
-        // Open new log file
         g_log_file = fopen(g_config.log_file_path, "a");
         if (g_log_file == NULL)
         {
@@ -141,14 +129,11 @@ static int check_and_rotate(void)
             return -1;
         }
 
-        // Set line buffering for immediate writes
         setvbuf(g_log_file, NULL, _IOLBF, 0);
     }
 
     return 0;
 }
-
-// ==================== PUBLIC API IMPLEMENTATION ====================
 
 const char* log_level_to_string(log_level_t level)
 {
@@ -177,7 +162,6 @@ int log_init(const logger_config_t* config)
 
     pthread_mutex_lock(&g_log_mutex);
 
-    // Check if already initialized
     if (g_initialized)
     {
         fprintf(stderr, "[LOGGER] Already initialized\n");
@@ -185,24 +169,20 @@ int log_init(const logger_config_t* config)
         return -1;
     }
 
-    // Copy configuration
     memcpy(&g_config, config, sizeof(logger_config_t));
 
-    // Validate configuration
     if (g_config.max_file_size == 0)
     {
-        g_config.max_file_size = 10 * 1024 * 1024; // Default: 10 MB
+        g_config.max_file_size = DEFAULT_LOG_MAX_FILE_SIZE;
     }
 
     if (g_config.max_backup_files < 0)
     {
-        g_config.max_backup_files = 5; // Default: 5 backup files
+        g_config.max_backup_files = DEFAULT_LOG_MAX_BACKUPS;
     }
 
-    // Scan existing backups so rotate_files() knows where to continue
     scan_existing_backups();
 
-    // Open log file in append mode
     g_log_file = fopen(g_config.log_file_path, "a");
     if (g_log_file == NULL)
     {
@@ -211,14 +191,12 @@ int log_init(const logger_config_t* config)
         return -1;
     }
 
-    // Set line buffering for immediate writes
     setvbuf(g_log_file, NULL, _IOLBF, 0);
 
     g_initialized = 1;
 
     pthread_mutex_unlock(&g_log_mutex);
 
-    // Log initialization
     log_write(LOG_INFO, "Logger initialized: max_size=%zu bytes, max_backups=%d", g_config.max_file_size,
               g_config.max_backup_files);
 
@@ -233,7 +211,6 @@ void log_write(log_level_t level, const char* format, ...)
         return;
     }
 
-    // Filter messages below minimum level
     if (level < g_config.min_level)
     {
         return;
@@ -247,29 +224,22 @@ void log_write(log_level_t level, const char* format, ...)
         return;
     }
 
-    // Check if rotation is needed
     check_and_rotate();
 
-    // Get timestamp
     char timestamp[TIMESTAMP_BUFFER_SIZE];
     get_timestamp(timestamp, sizeof(timestamp));
 
-    // Get log level string
     const char* level_str = log_level_to_string(level);
 
-    // Write log prefix: [timestamp] [LEVEL]
     fprintf(g_log_file, "[%s] [%s] ", timestamp, level_str);
 
-    // Write user message
     va_list args;
     va_start(args, format);
     vfprintf(g_log_file, format, args);
     va_end(args);
 
-    // Write newline
     fprintf(g_log_file, "\n");
 
-    // Flush to ensure write (line buffering should handle this, but explicit is safer)
     fflush(g_log_file);
 
     pthread_mutex_unlock(&g_log_mutex);
@@ -286,7 +256,6 @@ void log_close(void)
 
     if (g_log_file != NULL)
     {
-        // Write shutdown message directly without calling log_write (avoid deadlock)
         char timestamp[TIMESTAMP_BUFFER_SIZE];
         get_timestamp(timestamp, sizeof(timestamp));
         fprintf(g_log_file, "[%s] [INFO] Logger shutting down\n", timestamp);
@@ -317,14 +286,11 @@ int log_rotate(void)
         return -1;
     }
 
-    // Close current file
     fclose(g_log_file);
     g_log_file = NULL;
 
-    // Rotate files
     int result = rotate_files();
 
-    // Reopen log file
     g_log_file = fopen(g_config.log_file_path, "a");
     if (g_log_file == NULL)
     {

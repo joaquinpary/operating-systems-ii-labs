@@ -66,6 +66,29 @@ static void create_test_config(const char* path, const char* content)
     }
 }
 
+void test_build_log_file_path_normal(void)
+{
+    char path[FILE_PATH];
+
+    TEST_ASSERT_EQUAL_INT(0, build_log_file_path(path, sizeof(path), "/tmp", "client_test"));
+    TEST_ASSERT_EQUAL_STRING("/tmp/client_test.log", path);
+}
+
+void test_build_log_file_path_trailing_slashes(void)
+{
+    char path[FILE_PATH];
+
+    TEST_ASSERT_EQUAL_INT(0, build_log_file_path(path, sizeof(path), "/tmp///", "client_test"));
+    TEST_ASSERT_EQUAL_STRING("/tmp/client_test.log", path);
+}
+
+void test_build_log_file_path_overflow(void)
+{
+    char path[12];
+
+    TEST_ASSERT_EQUAL_INT(-1, build_log_file_path(path, sizeof(path), "/tmp", "client_test"));
+}
+
 void test_parse_conf_valid_tcp_config(void)
 {
     const char* config_content = "host = localhost\n"
@@ -247,6 +270,25 @@ void test_parse_conf_ipversion_variants(void)
     TEST_ASSERT_EQUAL_INT(AF_UNSPEC, config.ip_version);
 }
 
+void test_parse_conf_ipversion_ipv4_keyword(void)
+{
+    const char* config_ipv4 = "host = localhost\n"
+                              "port = 8080\n"
+                              "protocol = tcp\n"
+                              "ipversion = ipv4\n"
+                              "type = HUB\n"
+                              "username = user\n"
+                              "password = pass\n";
+
+    create_test_config(TEST_CONFIG_VALID, config_ipv4);
+
+    client_config config;
+    client_credentials creds;
+
+    TEST_ASSERT_EQUAL_INT(0, parse_conf(TEST_CONFIG_VALID, &config, &creds));
+    TEST_ASSERT_EQUAL_INT(AF_INET, config.ip_version);
+}
+
 void test_authenticate_success(void)
 {
     message_t response_msg;
@@ -263,12 +305,10 @@ void test_authenticate_success(void)
         return;
     }
 
-    mock_server_args_t server_args = {
-        .port = TEST_AUTH_SUCCESS_PORT,
-        .response_msg = success_response,
-        .ready_sem = NULL,
-        .behavior = MOCK_BEHAVIOR_NORMAL
-    };
+    mock_server_args_t server_args = {.port = TEST_AUTH_SUCCESS_PORT,
+                                      .response_msg = success_response,
+                                      .ready_sem = NULL,
+                                      .behavior = MOCK_BEHAVIOR_NORMAL};
 
     sem_t ready_sem;
     sem_init(&ready_sem, 0, 0);
@@ -282,12 +322,7 @@ void test_authenticate_success(void)
 
     usleep(TEST_SETUP_DELAY_US);
 
-    client_config config = {
-        .host = "localhost",
-        .port = "9999",
-        .protocol = PROTO_TCP,
-        .ip_version = AF_INET
-    };
+    client_config config = {.host = "localhost", .port = "9999", .protocol = PROTO_TCP, .ip_version = AF_INET};
 
     client_context ctx;
     int init_result = client_init(&ctx, &config);
@@ -299,11 +334,7 @@ void test_authenticate_success(void)
         return;
     }
 
-    client_credentials creds = {
-        .type = "HUB",
-        .username = "test_user",
-        .password = "test_pass"
-    };
+    client_credentials creds = {.type = "HUB", .username = "test_user", .password = "test_pass"};
 
     int result = authenticate(&ctx, &creds);
 
@@ -329,12 +360,10 @@ void test_authenticate_failure(void)
         return;
     }
 
-    mock_server_args_t server_args = {
-        .port = TEST_AUTH_FAILURE_PORT,
-        .response_msg = failure_response,
-        .ready_sem = NULL,
-        .behavior = MOCK_BEHAVIOR_NORMAL
-    };
+    mock_server_args_t server_args = {.port = TEST_AUTH_FAILURE_PORT,
+                                      .response_msg = failure_response,
+                                      .ready_sem = NULL,
+                                      .behavior = MOCK_BEHAVIOR_NORMAL};
 
     sem_t ready_sem;
     sem_init(&ready_sem, 0, 0);
@@ -348,12 +377,7 @@ void test_authenticate_failure(void)
 
     usleep(TEST_SETUP_DELAY_US);
 
-    client_config config = {
-        .host = "localhost",
-        .port = "9998",
-        .protocol = PROTO_TCP,
-        .ip_version = AF_INET
-    };
+    client_config config = {.host = "localhost", .port = "9998", .protocol = PROTO_TCP, .ip_version = AF_INET};
 
     client_context ctx;
     int init_result = client_init(&ctx, &config);
@@ -365,11 +389,7 @@ void test_authenticate_failure(void)
         return;
     }
 
-    client_credentials creds = {
-        .type = "HUB",
-        .username = "test_user",
-        .password = "wrong_pass"
-    };
+    client_credentials creds = {.type = "HUB", .username = "test_user", .password = "wrong_pass"};
 
     int result = authenticate(&ctx, &creds);
 
@@ -450,6 +470,10 @@ int main(void)
 {
     UNITY_BEGIN();
 
+    RUN_TEST(test_build_log_file_path_normal);
+    RUN_TEST(test_build_log_file_path_trailing_slashes);
+    RUN_TEST(test_build_log_file_path_overflow);
+
     RUN_TEST(test_parse_conf_valid_tcp_config);
     RUN_TEST(test_parse_conf_valid_udp_config);
     RUN_TEST(test_parse_conf_with_spaces_and_tabs);
@@ -458,6 +482,7 @@ int main(void)
     RUN_TEST(test_parse_conf_missing_credentials);
     RUN_TEST(test_parse_conf_file_not_found);
     RUN_TEST(test_parse_conf_ipversion_variants);
+    RUN_TEST(test_parse_conf_ipversion_ipv4_keyword);
 
     RUN_TEST(test_authenticate_success);
     RUN_TEST(test_authenticate_failure);

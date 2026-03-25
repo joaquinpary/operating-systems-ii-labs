@@ -22,7 +22,6 @@ event_loop::event_loop() : m_running(false)
         throw std::runtime_error(std::string("eventfd (wakeup) failed: ") + strerror(errno));
     }
 
-    // Register the wakeup fd in epoll (level-triggered)
     struct epoll_event ev
     {
     };
@@ -97,7 +96,7 @@ void event_loop::run()
         {
             if (errno == EINTR)
             {
-                continue; // Interrupted by signal, retry
+                continue;
             }
             std::cerr << "[EVENT_LOOP] epoll_wait error: " << strerror(errno) << std::endl;
             break;
@@ -107,7 +106,6 @@ void event_loop::run()
         {
             int fd = events[i].data.fd;
 
-            // Drain the wakeup fd — no callback needed
             if (fd == m_wakeup_fd)
             {
                 std::uint64_t val;
@@ -118,8 +116,6 @@ void event_loop::run()
             auto it = m_callbacks.find(fd);
             if (it != m_callbacks.end())
             {
-                // Copy callback so it survives even if the handler
-                // removes itself from m_callbacks (e.g. timer expiry).
                 auto cb = it->second;
                 cb(events[i].events);
             }
@@ -130,7 +126,6 @@ void event_loop::run()
 void event_loop::stop()
 {
     m_running = false;
-    // Wake up epoll_wait so it can check m_running and exit
     std::uint64_t val = 1;
     (void)write(m_wakeup_fd, &val, sizeof(val));
 }

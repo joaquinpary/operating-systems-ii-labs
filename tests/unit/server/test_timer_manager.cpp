@@ -60,7 +60,9 @@ class TimerManagerTest : public ::testing::Test
         int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
         ASSERT_GE(tfd, 0);
 
-        struct itimerspec ts {};
+        struct itimerspec ts
+        {
+        };
         if (delay_ms <= 0)
         {
             ts.it_value.tv_nsec = 1; // fire on next epoll_wait iteration
@@ -89,9 +91,7 @@ TEST_F(TimerManagerTest, StartAckTimer)
 {
     std::atomic<bool> timeout_called{false};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_called]() { timeout_called = true; });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -105,14 +105,10 @@ TEST_F(TimerManagerTest, CancelAckTimer)
 {
     std::atomic<bool> timeout_called{false};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_called]() { timeout_called = true; });
 
     // Cancel on the reactor thread (50 ms in, well before 2s timeout)
-    schedule_on_loop(50, [this]() {
-        tm->cancel_ack_timer("session_1", "timestamp_1");
-    });
+    schedule_on_loop(50, [this]() { tm->cancel_ack_timer("session_1", "timestamp_1"); });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -135,15 +131,9 @@ TEST_F(TimerManagerTest, MultipleAckTimersPerSession)
 {
     std::atomic<int> timeout_count{0};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_count]() {
-        timeout_count++;
-    });
-    tm->start_ack_timer("session_1", "timestamp_2", 0, [&timeout_count]() {
-        timeout_count++;
-    });
-    tm->start_ack_timer("session_1", "timestamp_3", 0, [&timeout_count]() {
-        timeout_count++;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_count]() { timeout_count++; });
+    tm->start_ack_timer("session_1", "timestamp_2", 0, [&timeout_count]() { timeout_count++; });
+    tm->start_ack_timer("session_1", "timestamp_3", 0, [&timeout_count]() { timeout_count++; });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -158,12 +148,8 @@ TEST_F(TimerManagerTest, MultipleSessionsAckTimers)
     std::atomic<int> session1_count{0};
     std::atomic<int> session2_count{0};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 0, [&session1_count]() {
-        session1_count++;
-    });
-    tm->start_ack_timer("session_2", "timestamp_1", 0, [&session2_count]() {
-        session2_count++;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 0, [&session1_count]() { session1_count++; });
+    tm->start_ack_timer("session_2", "timestamp_1", 0, [&session2_count]() { session2_count++; });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -178,12 +164,8 @@ TEST_F(TimerManagerTest, ClearSessionTimers)
 {
     std::atomic<int> timeout_count{0};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_count]() {
-        timeout_count++;
-    });
-    tm->start_ack_timer("session_1", "timestamp_2", 2, [&timeout_count]() {
-        timeout_count++;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_count]() { timeout_count++; });
+    tm->start_ack_timer("session_1", "timestamp_2", 2, [&timeout_count]() { timeout_count++; });
 
     // Clear on reactor thread then stop loop so we don't wait 2s
     schedule_on_loop(50, [this]() {
@@ -207,9 +189,7 @@ TEST_F(TimerManagerTest, StartKeepaliveTimer)
 {
     std::atomic<bool> timeout_called{false};
 
-    tm->start_keepalive_timer("session_1", 0, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_keepalive_timer("session_1", 0, [&timeout_called]() { timeout_called = true; });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -223,13 +203,9 @@ TEST_F(TimerManagerTest, CancelKeepaliveTimer)
 {
     std::atomic<bool> timeout_called{false};
 
-    tm->start_keepalive_timer("session_1", 2, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_keepalive_timer("session_1", 2, [&timeout_called]() { timeout_called = true; });
 
-    schedule_on_loop(50, [this]() {
-        tm->cancel_keepalive_timer("session_1");
-    });
+    schedule_on_loop(50, [this]() { tm->cancel_keepalive_timer("session_1"); });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
@@ -251,12 +227,8 @@ TEST_F(TimerManagerTest, ClearMixedTimers)
 {
     std::atomic<int> timeout_count{0};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_count]() {
-        timeout_count++;
-    });
-    tm->start_keepalive_timer("session_1", 2, [&timeout_count]() {
-        timeout_count++;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 2, [&timeout_count]() { timeout_count++; });
+    tm->start_keepalive_timer("session_1", 2, [&timeout_count]() { timeout_count++; });
 
     schedule_on_loop(50, [this]() {
         tm->clear_session_timers("session_1");
@@ -279,9 +251,7 @@ TEST_F(TimerManagerTest, VeryShortTimeout)
 {
     std::atomic<bool> timeout_called{false};
 
-    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 0, [&timeout_called]() { timeout_called = true; });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -296,14 +266,11 @@ TEST_F(TimerManagerTest, CancelTimerWrongSession)
     std::atomic<bool> timeout_called{false};
 
     // 1s timeout — gives us time to attempt cancel from reactor thread
-    tm->start_ack_timer("session_1", "timestamp_1", 1, [&timeout_called]() {
-        timeout_called = true;
-    });
+    tm->start_ack_timer("session_1", "timestamp_1", 1, [&timeout_called]() { timeout_called = true; });
 
     std::atomic<bool> cancel_result{true};
-    schedule_on_loop(50, [this, &cancel_result]() {
-        cancel_result = tm->cancel_ack_timer("session_2", "timestamp_1");
-    });
+    schedule_on_loop(50,
+                     [this, &cancel_result]() { cancel_result = tm->cancel_ack_timer("session_2", "timestamp_1"); });
 
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(1200));
@@ -322,9 +289,7 @@ TEST_F(TimerManagerTest, MultipleTimersFromReactorThread)
     {
         std::string session_id = "session_" + std::to_string(i);
         schedule_on_loop(0, [this, session_id, &timeout_count]() {
-            tm->start_ack_timer(session_id, "timestamp_1", 0, [&timeout_count]() {
-                timeout_count++;
-            });
+            tm->start_ack_timer(session_id, "timestamp_1", 0, [&timeout_count]() { timeout_count++; });
         });
     }
 
