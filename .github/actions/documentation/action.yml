@@ -45,7 +45,7 @@ runs:
           echo "Documentation generated successfully!"
           exit 0
     # Upload errors as an artifact, when failed
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: Doxygen errors!!!
