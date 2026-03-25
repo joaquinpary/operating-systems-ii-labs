@@ -52,6 +52,7 @@ services:
       LOG_DIR: /var/log/dhl
     ports:
       - "9999:9999"
+      - "8080:8080"
     volumes:
       - ./config/server_config.json:/etc/server/config.json
       - ./config/server:/etc/server/clients

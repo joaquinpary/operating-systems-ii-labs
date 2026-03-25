@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 project(DHL_LOGISTICS
         LANGUAGES CXX C)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 20)  # C++20
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,6 +14,9 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(BUILD_TARGET "Build target: server or client" "server")
 option(RUN_TEST "Run tests" OFF)
+option(ENABLE_MONGO_REST_STORAGE "Enable MongoDB-backed REST storage for the server API" ON)
+option(FETCH_MONGOCXX_IF_MISSING "Fetch mongo-cxx-driver with FetchContent when system packages are unavailable" ON)
+option(KAUFMAN_WITH_OPENMP "Compile Kaufman with OpenMP support" OFF)
 
 # Download UNITY
 include(FetchContent)
@@ -55,6 +60,19 @@ include_directories(include/common)
 
 if(BUILD_TARGET STREQUAL "server")
 
+    set(MONGO_CXX_DRIVER_GIT_URL "https://github.com/mongodb/mongo-cxx-driver.git")
+    set(MONGO_CXX_DRIVER_GIT_TAG "r4.1.4")
+
+    set(CPP_HTTPLIB_GIT_URL "https://github.com/yhirose/cpp-httplib.git")
+    FetchContent_Declare(
+        cpp_httplib
+        GIT_REPOSITORY ${CPP_HTTPLIB_GIT_URL}
+        GIT_TAG        master
+        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/cpp-httplib
+        UPDATE_COMMAND ""
+    )
+    FetchContent_MakeAvailable(cpp_httplib)
+
     set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
     FetchContent_Declare(
         pqxx
@@ -66,6 +84,7 @@ if(BUILD_TARGET STREQUAL "server")
     FetchContent_MakeAvailable(pqxx)
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
+    include_directories(${cpp_httplib_SOURCE_DIR})
 
     find_package(PostgreSQL REQUIRED)
     include_directories(${PostgreSQL_INCLUDE_DIRS})
@@ -85,6 +104,45 @@ if(BUILD_TARGET STREQUAL "server")
         SOVERSION 1
         VERSION 1.0.0
     )
+
+    if(KAUFMAN_WITH_OPENMP)
+        find_package(OpenMP QUIET)
+    endif()
+
+    set(MONGO_LINK_TARGETS "")
+    if(ENABLE_MONGO_REST_STORAGE)
+        find_package(mongocxx QUIET)
+        find_package(bsoncxx QUIET)
+
+        if(mongocxx_FOUND AND bsoncxx_FOUND)
+            list(APPEND MONGO_LINK_TARGETS mongo::mongocxx_shared mongo::bsoncxx_shared)
+        elseif(FETCH_MONGOCXX_IF_MISSING)
+            set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries" FORCE)
+            set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
+            set(BUILD_TESTING OFF CACHE BOOL "Disable subproject testing" FORCE)
+            set(ENABLE_TESTS OFF CACHE BOOL "Disable subproject tests" FORCE)
+            set(ENABLE_UNINSTALL OFF CACHE BOOL "Disable subproject uninstall target" FORCE)
+            set(MONGOC_ENABLE_CLIENT_SIDE_ENCRYPTION OFF CACHE BOOL "Disable libmongocrypt support" FORCE)
+            set(BUILD_VERSION "4.1.4" CACHE STRING "Library version (for both bsoncxx and mongocxx)" FORCE)
+
+            FetchContent_Declare(
+                mongo_cxx_driver
+                GIT_REPOSITORY ${MONGO_CXX_DRIVER_GIT_URL}
+                GIT_TAG        ${MONGO_CXX_DRIVER_GIT_TAG}
+                SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/mongo-cxx-driver
+                UPDATE_COMMAND ""
+            )
+            FetchContent_MakeAvailable(mongo_cxx_driver)
+
+            if(TARGET mongocxx_shared AND TARGET bsoncxx_shared)
+                list(APPEND MONGO_LINK_TARGETS mongocxx_shared bsoncxx_shared)
+            elseif(TARGET mongo::mongocxx_shared AND TARGET mongo::bsoncxx_shared)
+                list(APPEND MONGO_LINK_TARGETS mongo::mongocxx_shared mongo::bsoncxx_shared)
+            else()
+                message(FATAL_ERROR "mongo-cxx-driver was fetched but the expected targets were not created")
+            endif()
+        endif()
+    endif()
     
     file(GLOB SOURCES
         src/server/*.cpp
@@ -92,10 +150,36 @@ if(BUILD_TARGET STREQUAL "server")
         src/common/*.c
         include/server/*.hpp
     )
+    list(REMOVE_ITEM SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/server/kaufman.cpp)
     set(TARGET_EXEC dhl_server)
+    # add_library(kaufman STATIC src/server/kaufman.cpp)
+    # target_include_directories(kaufman PRIVATE include include/server ${cjson_SOURCE_DIR})
+    # target_link_libraries(kaufman cjson)
+    # if(KAUFMAN_WITH_OPENMP)
+    #     if(OpenMP_CXX_FOUND)
+    #         target_compile_definitions(kaufman PRIVATE KAUFMAN_ENABLE_OPENMP=1)
+    #         target_link_libraries(kaufman OpenMP::OpenMP_CXX)
+    #         message(STATUS "Kaufman will be compiled with OpenMP support")
+    #     else()
+    #         message(WARNING "KAUFMAN_WITH_OPENMP=ON but OpenMP was not found; building Kaufman sequentially")
+    #     endif()
+    # endif()
+
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
+    # target_link_libraries(${TARGET_EXEC} kaufman)
+    set_target_properties(${TARGET_EXEC} PROPERTIES
+        BUILD_RPATH  "${CMAKE_BINARY_DIR}"
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+    )
+
+    if(MONGO_LINK_TARGETS)
+        target_compile_definitions(${TARGET_EXEC} PRIVATE HAVE_MONGOCXX=1)
+        target_link_libraries(${TARGET_EXEC} ${MONGO_LINK_TARGETS})
+    else()
+        message(STATUS "mongocxx/bsoncxx not found: REST API will use in-memory storage for now")
+    endif()
 
     # Embed build-tree location of libadmin_cli.so into RPATH
     set_target_properties(${TARGET_EXEC} PROPERTIES
