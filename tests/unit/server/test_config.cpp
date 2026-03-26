@@ -35,10 +35,11 @@ class ConfigTest : public ::testing::Test
     void create_valid_config_file(const std::string& path)
     {
         std::ofstream file(path);
-        file << "{\n"
+         file << "{\n"
              << "  \"ip_v4\": \"127.0.0.1\",\n"
              << "  \"ip_v6\": \"::1\",\n"
              << "  \"network_port\": 9999,\n"
+             << "  \"api_rest_port\": 8080,\n"
              << "  \"ack_timeout\": 5000,\n"
              << "  \"max_auth_attempts\": 3,\n"
              << "  \"max_retries\": 3,\n"
@@ -78,6 +79,7 @@ TEST_F(ConfigTest, LoadValidConfig)
     EXPECT_EQ(cfg.ip_v4, "127.0.0.1");
     EXPECT_EQ(cfg.ip_v6, "::1");
     EXPECT_EQ(cfg.network_port, 9999);
+    EXPECT_EQ(cfg.api_rest_port, 8080);
     EXPECT_EQ(cfg.ack_timeout, 5000);
     EXPECT_EQ(cfg.max_auth_attempts, 3);
     EXPECT_EQ(cfg.max_retries, 3);
@@ -111,6 +113,7 @@ TEST_F(ConfigTest, LoadConfigMissingIpV4)
     file << "{\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -130,6 +133,7 @@ TEST_F(ConfigTest, LoadConfigMissingIpV6)
     file << "{\n"
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -149,6 +153,27 @@ TEST_F(ConfigTest, LoadConfigMissingPort)
     file << "{\n"
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
+         << "  \"api_rest_port\": 8080,\n"
+         << "  \"ack_timeout\": 5000,\n"
+         << "  \"max_auth_attempts\": 3,\n"
+         << "  \"max_retries\": 3,\n"
+         << "  \"pool_size\": 8,\n"
+         << "  \"credentials_path\": \"config/clients\"\n"
+         << "}";
+    file.close();
+
+    config::server_config cfg;
+    EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
+}
+
+// Test load_config_from_file with missing api_rest_port
+TEST_F(ConfigTest, LoadConfigMissingApiRestPort)
+{
+    std::ofstream file(test_config_path);
+    file << "{\n"
+         << "  \"ip_v4\": \"127.0.0.1\",\n"
+         << "  \"ip_v6\": \"::1\",\n"
+         << "  \"network_port\": 9999,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -169,6 +194,7 @@ TEST_F(ConfigTest, LoadConfigMissingAckTimeout)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
          << "  \"pool_size\": 8,\n"
@@ -188,6 +214,7 @@ TEST_F(ConfigTest, LoadConfigMissingMaxAuthAttempts)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_retries\": 3,\n"
          << "  \"pool_size\": 8,\n"
@@ -207,6 +234,7 @@ TEST_F(ConfigTest, LoadConfigInvalidIpV4Type)
          << "  \"ip_v4\": 127,\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -227,6 +255,7 @@ TEST_F(ConfigTest, LoadConfigInvalidPortType)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": \"not_a_number\",\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -264,6 +293,7 @@ TEST_F(ConfigTest, LoadConfigMissingMaxRetries)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"pool_size\": 8,\n"
@@ -282,6 +312,7 @@ TEST_F(ConfigTest, LoadConfigMissingPoolSize)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
@@ -300,6 +331,7 @@ TEST_F(ConfigTest, LoadConfigMissingCredentialsPath)
          << "  \"ip_v4\": \"127.0.0.1\",\n"
          << "  \"ip_v6\": \"::1\",\n"
          << "  \"network_port\": 9999,\n"
+         << "  \"api_rest_port\": 8080,\n"
          << "  \"ack_timeout\": 5000,\n"
          << "  \"max_auth_attempts\": 3,\n"
          << "  \"max_retries\": 3,\n"
