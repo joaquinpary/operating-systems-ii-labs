@@ -1,6 +1,7 @@
 #include "api_rest.hpp"
 
 #include <common/logger.h>
+#include "map_parser.hpp"
 #include <httplib.h>
 
 #include <csignal>
@@ -53,10 +54,37 @@ void run_api_rest_process(const config::server_config& cfg)
 
         install_signal_waiter(server);
 
-        server.Post("/map", [](const httplib::Request&, httplib::Response& response) {
-            response.status = 200;
-            response.set_header("Content-Type", "application/json");
-            response.set_content(R"({"status":"ok","map_id":"dummy_map_1"})", "application/json");
+        server.Post("/map", [](const httplib::Request& request, httplib::Response& response) {
+            try
+            {
+                server::MapParseResult parsed_map = server::parse_map_json(request.body);
+                
+                std::string accepted_ids = "[";
+                for (size_t i = 0; i < parsed_map.nodes.size(); ++i)
+                {
+                    accepted_ids += "\"" + parsed_map.nodes[i].node_id + "\"";
+                    if (i < parsed_map.nodes.size() - 1)
+                        accepted_ids += ", ";
+                }
+                accepted_ids += "]";
+
+                response.status = 200;
+                response.set_header("Content-Type", "application/json");
+                
+                char res_buf[512];
+                std::snprintf(res_buf, sizeof(res_buf),
+                    R"({"status":"ok","accepted":%d,"discarded":%d,"nodes":%s})",
+                    (int)parsed_map.nodes.size(), parsed_map.total_discarded, accepted_ids.c_str());
+                
+                response.set_content(res_buf, "application/json");
+            }
+            catch (const std::exception& e)
+            {
+                response.status = 400;
+                response.set_header("Content-Type", "application/json");
+                std::string err_json = R"({"status":"error","message":")" + std::string(e.what()) + R"("})";
+                response.set_content(err_json, "application/json");
+            }
         });
 
         server.Post("/request", [](const httplib::Request&, httplib::Response& response) {
