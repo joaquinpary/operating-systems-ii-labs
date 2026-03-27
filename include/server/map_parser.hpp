@@ -17,6 +17,7 @@ struct MapEdge
 {
     std::string to;
     std::string connection_type;
+    double base_weight;
     std::vector<std::string> connection_conditions;
 };
 
