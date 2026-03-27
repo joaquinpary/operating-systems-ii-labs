@@ -126,6 +126,7 @@ TEST(MapParserTest, AcceptValidFulfillmentCenter)
     const MapEdge& edge = node.connections[0];
     EXPECT_EQ(edge.to, "N002");
     EXPECT_EQ(edge.connection_type, "road");
+    EXPECT_DOUBLE_EQ(edge.base_weight, 1.0);
     ASSERT_EQ(edge.connection_conditions.size(), 1);
     EXPECT_EQ(edge.connection_conditions[0], "infected_activity");
 }
@@ -180,6 +181,53 @@ TEST(MapParserTest, MixedBatch)
     ASSERT_EQ(result.nodes.size(), 2);
     EXPECT_EQ(result.nodes[0].node_type, "fulfillment_center");
     EXPECT_EQ(result.nodes[1].node_type, "market");
+}
+
+TEST(MapParserTest, ParsesBaseWeight)
+{
+    std::string json = R"([
+        {
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "N002",
+                    "connection_type": "road",
+                    "base_weight": 65.5,
+                    "connection_conditions": []
+                }
+            ]
+        }
+    ])";
+
+    MapParseResult result = parse_map_json(json);
+    ASSERT_EQ(result.nodes.size(), 1);
+    ASSERT_EQ(result.nodes[0].connections.size(), 1);
+    EXPECT_DOUBLE_EQ(result.nodes[0].connections[0].base_weight, 65.5);
+}
+
+TEST(MapParserTest, DefaultBaseWeight)
+{
+    std::string json = R"([
+        {
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "N002",
+                    "connection_type": "road",
+                    "connection_conditions": []
+                }
+            ]
+        }
+    ])";
+
+    MapParseResult result = parse_map_json(json);
+    ASSERT_EQ(result.nodes.size(), 1);
+    ASSERT_EQ(result.nodes[0].connections.size(), 1);
+    EXPECT_DOUBLE_EQ(result.nodes[0].connections[0].base_weight, 1.0);
 }
 
 } // namespace

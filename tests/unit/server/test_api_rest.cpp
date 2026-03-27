@@ -77,6 +77,7 @@ TEST_F(ApiRestTest, PostMapValidJsonReturns200) {
     EXPECT_TRUE(res->body.find(R"("status":"ok")") != std::string::npos);
     EXPECT_TRUE(res->body.find(R"("accepted":1)") != std::string::npos);
     EXPECT_TRUE(res->body.find(R"("discarded":1)") != std::string::npos);
+    EXPECT_TRUE(res->body.find(R"("matrix_size":1)") != std::string::npos);
     EXPECT_TRUE(res->body.find(R"("market_1")") != std::string::npos);
     EXPECT_TRUE(res->body.find(R"("invalid_node")") == std::string::npos);
 }

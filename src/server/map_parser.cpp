@@ -139,6 +139,7 @@ MapParseResult parse_map_json(const std::string& json_body)
                     MapEdge edge;
                     extract_string(edge_item, "to", edge.to);
                     extract_string(edge_item, "connection_type", edge.connection_type);
+                    extract_double(edge_item, "base_weight", edge.base_weight, 1.0);
 
                     cJSON* cond_json = cJSON_GetObjectItemCaseSensitive(edge_item, "connection_conditions");
                     extract_string_array(cond_json, edge.connection_conditions);

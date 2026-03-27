@@ -2,6 +2,7 @@
 
 #include <common/logger.h>
 #include "map_parser.hpp"
+#include "graph_builder.hpp"
 #include <httplib.h>
 
 #include <csignal>
@@ -58,7 +59,22 @@ void run_api_rest_process(const config::server_config& cfg)
             try
             {
                 server::MapParseResult parsed_map = server::parse_map_json(request.body);
-                
+                server::GraphData graph = server::build_adjacency_matrix(parsed_map.nodes);
+
+                int matrix_size = static_cast<int>(graph.adj_matrix.size());
+
+                for (int i = 0; i < matrix_size; ++i)
+                {
+                    std::string row_str;
+                    for (int j = 0; j < matrix_size; ++j)
+                    {
+                        char val_buf[32];
+                        std::snprintf(val_buf, sizeof(val_buf), "%8.2f", graph.adj_matrix[i][j]);
+                        row_str += val_buf;
+                    }
+                    LOG_INFO_MSG("[API] adj_matrix[%d]: %s", i, row_str.c_str());
+                }
+
                 std::string accepted_ids = "[";
                 for (size_t i = 0; i < parsed_map.nodes.size(); ++i)
                 {
@@ -73,8 +89,8 @@ void run_api_rest_process(const config::server_config& cfg)
                 
                 char res_buf[512];
                 std::snprintf(res_buf, sizeof(res_buf),
-                    R"({"status":"ok","accepted":%d,"discarded":%d,"nodes":%s})",
-                    (int)parsed_map.nodes.size(), parsed_map.total_discarded, accepted_ids.c_str());
+                    R"({"status":"ok","accepted":%d,"discarded":%d,"matrix_size":%d,"nodes":%s})",
+                    (int)parsed_map.nodes.size(), parsed_map.total_discarded, matrix_size, accepted_ids.c_str());
                 
                 response.set_content(res_buf, "application/json");
             }
