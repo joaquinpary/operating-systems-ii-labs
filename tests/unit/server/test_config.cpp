@@ -35,7 +35,7 @@ class ConfigTest : public ::testing::Test
     void create_valid_config_file(const std::string& path)
     {
         std::ofstream file(path);
-         file << "{\n"
+        file << "{\n"
              << "  \"ip_v4\": \"127.0.0.1\",\n"
              << "  \"ip_v6\": \"::1\",\n"
              << "  \"network_port\": 9999,\n"

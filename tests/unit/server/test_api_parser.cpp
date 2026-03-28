@@ -1,28 +1,28 @@
+#include "api_parser.hpp"
 #include <gtest/gtest.h>
-#include "map_parser.hpp"
 
-namespace server 
+namespace server
 {
 namespace
 {
 
-TEST(MapParserTest, EmptyArray)
+TEST(ApiParserTest, EmptyArray)
 {
     std::string json = "[]";
     MapParseResult result = parse_map_json(json);
-    
+
     EXPECT_EQ(result.total_received, 0);
     EXPECT_EQ(result.total_discarded, 0);
     EXPECT_TRUE(result.nodes.empty());
 }
 
-TEST(MapParserTest, InvalidJson)
+TEST(ApiParserTest, InvalidJson)
 {
     std::string json = "{ malformed ";
     EXPECT_THROW(parse_map_json(json), std::runtime_error);
 }
 
-TEST(MapParserTest, FilterType)
+TEST(ApiParserTest, FilterType)
 {
     std::string json = R"([
         {
@@ -31,14 +31,14 @@ TEST(MapParserTest, FilterType)
             "is_secure": true
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 1);
     EXPECT_EQ(result.total_discarded, 1);
     EXPECT_TRUE(result.nodes.empty());
 }
 
-TEST(MapParserTest, FilterInactive)
+TEST(ApiParserTest, FilterInactive)
 {
     std::string json = R"([
         {
@@ -47,14 +47,14 @@ TEST(MapParserTest, FilterInactive)
             "is_secure": true
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 1);
     EXPECT_EQ(result.total_discarded, 1);
     EXPECT_TRUE(result.nodes.empty());
 }
 
-TEST(MapParserTest, FilterInsecure)
+TEST(ApiParserTest, FilterInsecure)
 {
     std::string json = R"([
         {
@@ -63,14 +63,14 @@ TEST(MapParserTest, FilterInsecure)
             "is_secure": false
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 1);
     EXPECT_EQ(result.total_discarded, 1);
     EXPECT_TRUE(result.nodes.empty());
 }
 
-TEST(MapParserTest, AcceptValidFulfillmentCenter)
+TEST(ApiParserTest, AcceptValidFulfillmentCenter)
 {
     std::string json = R"([
         {
@@ -102,12 +102,12 @@ TEST(MapParserTest, AcceptValidFulfillmentCenter)
             }
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 1);
     EXPECT_EQ(result.total_discarded, 0);
     ASSERT_EQ(result.nodes.size(), 1);
-    
+
     const MapNode& node = result.nodes[0];
     EXPECT_EQ(node.node_id, "N001");
     EXPECT_EQ(node.node_name, "East Fulfillment Center");
@@ -117,11 +117,11 @@ TEST(MapParserTest, AcceptValidFulfillmentCenter)
     EXPECT_DOUBLE_EQ(node.location.longitude, -74.006);
     EXPECT_TRUE(node.is_secure);
     EXPECT_TRUE(node.is_active);
-    
+
     ASSERT_EQ(node.node_tags.size(), 2);
     EXPECT_EQ(node.node_tags[0], "food");
     EXPECT_EQ(node.node_tags[1], "ammo");
-    
+
     ASSERT_EQ(node.connections.size(), 1);
     const MapEdge& edge = node.connections[0];
     EXPECT_EQ(edge.to, "N002");
@@ -131,7 +131,7 @@ TEST(MapParserTest, AcceptValidFulfillmentCenter)
     EXPECT_EQ(edge.connection_conditions[0], "infected_activity");
 }
 
-TEST(MapParserTest, AcceptValidMarket)
+TEST(ApiParserTest, AcceptValidMarket)
 {
     std::string json = R"([
         {
@@ -141,7 +141,7 @@ TEST(MapParserTest, AcceptValidMarket)
             "is_active": true
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 1);
     EXPECT_EQ(result.total_discarded, 0);
@@ -150,7 +150,7 @@ TEST(MapParserTest, AcceptValidMarket)
     EXPECT_EQ(result.nodes[0].node_type, "market");
 }
 
-TEST(MapParserTest, MixedBatch)
+TEST(ApiParserTest, MixedBatch)
 {
     std::string json = R"([
         {
@@ -174,7 +174,7 @@ TEST(MapParserTest, MixedBatch)
             "is_secure": true
         }
     ])";
-    
+
     MapParseResult result = parse_map_json(json);
     EXPECT_EQ(result.total_received, 4);
     EXPECT_EQ(result.total_discarded, 2);
@@ -183,7 +183,7 @@ TEST(MapParserTest, MixedBatch)
     EXPECT_EQ(result.nodes[1].node_type, "market");
 }
 
-TEST(MapParserTest, ParsesBaseWeight)
+TEST(ApiParserTest, ParsesBaseWeight)
 {
     std::string json = R"([
         {
@@ -207,7 +207,7 @@ TEST(MapParserTest, ParsesBaseWeight)
     EXPECT_DOUBLE_EQ(result.nodes[0].connections[0].base_weight, 65.5);
 }
 
-TEST(MapParserTest, DefaultBaseWeight)
+TEST(ApiParserTest, DefaultBaseWeight)
 {
     std::string json = R"([
         {
@@ -228,6 +228,26 @@ TEST(MapParserTest, DefaultBaseWeight)
     ASSERT_EQ(result.nodes.size(), 1);
     ASSERT_EQ(result.nodes[0].connections.size(), 1);
     EXPECT_DOUBLE_EQ(result.nodes[0].connections[0].base_weight, 1.0);
+}
+
+TEST(ApiParserTest, ParseFlowRequestValid)
+{
+    std::string json = R"({ "source": "A", "sink": "B" })";
+    FlowRequest req = parse_flow_request_json(json);
+    EXPECT_EQ(req.source, "A");
+    EXPECT_EQ(req.sink, "B");
+}
+
+TEST(ApiParserTest, ParseFlowRequestInvalidJson)
+{
+    std::string json = "{ malformed ";
+    EXPECT_THROW(parse_flow_request_json(json), std::runtime_error);
+}
+
+TEST(ApiParserTest, ParseFlowRequestMissingFields)
+{
+    std::string json = R"({ "source": "A" })";
+    EXPECT_THROW(parse_flow_request_json(json), std::runtime_error);
 }
 
 } // namespace

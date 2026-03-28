@@ -1,3 +1,4 @@
+#include "api_rest.hpp"
 #include "config.hpp"
 #include "connection_pool.hpp"
 #include "database.hpp"
@@ -7,7 +8,6 @@
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
 #include "worker.hpp"
-#include "api_rest.hpp"
 
 #include <common/logger.h>
 

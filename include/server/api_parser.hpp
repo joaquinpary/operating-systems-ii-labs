@@ -1,5 +1,5 @@
-#ifndef MAP_PARSER_HPP
-#define MAP_PARSER_HPP
+#ifndef API_PARSER_HPP
+#define API_PARSER_HPP
 
 #include <string>
 #include <vector>
@@ -43,7 +43,7 @@ struct MapParseResult
 
 /**
  * Parses a JSON array of map nodes, verifying security and activation.
- * Keeps only nodes of type "fulfillment_center" and "market" that are 
+ * Keeps only nodes of type "fulfillment_center" and "market" that are
  * both secure and active.
  *
  * @param json_body The payload string received at POST /map
@@ -52,6 +52,21 @@ struct MapParseResult
  */
 MapParseResult parse_map_json(const std::string& json_body);
 
+struct FlowRequest
+{
+    std::string source;
+    std::string sink;
+};
+
+/**
+ * Parses a JSON object containing a source and a sink node ID.
+ *
+ * @param json_body The payload string received at POST /request/fulfillment-flow
+ * @return Struct containing the parsed source and sink strings
+ * @throws std::runtime_error If the payload is not valid JSON or missing fields
+ */
+FlowRequest parse_flow_request_json(const std::string& json_body);
+
 } // namespace server
 
-#endif // MAP_PARSER_HPP
+#endif // API_PARSER_HPP
