@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include "graph_builder.hpp"
+#include <gtest/gtest.h>
 
 namespace server
 {
@@ -181,10 +181,11 @@ TEST(GraphBuilderTest, BuildMatrixMultipleEdges)
 {
     // A -> B (road, 50), A -> C (rail, 100, infected), B -> C (trail, 80)
     std::vector<MapNode> nodes = {
-        make_node("A", {
-            make_edge("B", CONN_TYPE_ROAD, 50.0),
-            make_edge("C", CONN_TYPE_RAIL, 100.0, {COND_INFECTED_ACTIVITY}),
-        }),
+        make_node("A",
+                  {
+                      make_edge("B", CONN_TYPE_ROAD, 50.0),
+                      make_edge("C", CONN_TYPE_RAIL, 100.0, {COND_INFECTED_ACTIVITY}),
+                  }),
         make_node("B", {make_edge("C", CONN_TYPE_TRAIL, 80.0)}),
         make_node("C"),
     };

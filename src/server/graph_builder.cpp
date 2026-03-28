@@ -7,14 +7,9 @@ namespace server
 {
 
 static const std::unordered_map<std::string, double> type_modifiers = {
-    {CONN_TYPE_ROAD, MOD_ROAD},
-    {CONN_TYPE_RAIL, MOD_RAIL},
-    {CONN_TYPE_TRAIL, MOD_TRAIL},
-    {CONN_TYPE_TUNNEL, MOD_TUNNEL},
-    {CONN_TYPE_BRIDGE, MOD_BRIDGE},
-    {CONN_TYPE_WATERWAY, MOD_WATERWAY},
-    {CONN_TYPE_DRONE, MOD_DRONE},
-    {CONN_TYPE_MANUAL, MOD_MANUAL},
+    {CONN_TYPE_ROAD, MOD_ROAD},     {CONN_TYPE_RAIL, MOD_RAIL},     {CONN_TYPE_TRAIL, MOD_TRAIL},
+    {CONN_TYPE_TUNNEL, MOD_TUNNEL}, {CONN_TYPE_BRIDGE, MOD_BRIDGE}, {CONN_TYPE_WATERWAY, MOD_WATERWAY},
+    {CONN_TYPE_DRONE, MOD_DRONE},   {CONN_TYPE_MANUAL, MOD_MANUAL},
 };
 
 static const std::unordered_map<std::string, double> condition_modifiers = {

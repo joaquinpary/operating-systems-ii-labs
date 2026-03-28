@@ -1,7 +1,7 @@
-#include "map_parser.hpp"
+#include "api_parser.hpp"
 #include <cJSON.h>
-#include <stdexcept>
 #include <cstring>
+#include <stdexcept>
 
 namespace server
 {
@@ -154,6 +154,31 @@ MapParseResult parse_map_json(const std::string& json_body)
 
     cJSON_Delete(root);
     return result;
+}
+
+FlowRequest parse_flow_request_json(const std::string& json_body)
+{
+    cJSON* root = cJSON_Parse(json_body.c_str());
+    if (!root)
+    {
+        throw std::runtime_error("Invalid JSON format");
+    }
+
+    cJSON* source_item = cJSON_GetObjectItemCaseSensitive(root, "source");
+    cJSON* sink_item = cJSON_GetObjectItemCaseSensitive(root, "sink");
+
+    if (!source_item || !cJSON_IsString(source_item) || !sink_item || !cJSON_IsString(sink_item))
+    {
+        cJSON_Delete(root);
+        throw std::runtime_error("Missing or invalid 'source' or 'sink' fields");
+    }
+
+    FlowRequest req;
+    req.source = source_item->valuestring;
+    req.sink = sink_item->valuestring;
+
+    cJSON_Delete(root);
+    return req;
 }
 
 } // namespace server
