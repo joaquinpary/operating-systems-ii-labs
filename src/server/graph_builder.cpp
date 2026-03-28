@@ -51,13 +51,18 @@ GraphData build_adjacency_matrix(const std::vector<MapNode>& nodes)
 {
     GraphData data;
 
+    int n = static_cast<int>(nodes.size());
+    data.index_to_node_id.resize(static_cast<size_t>(n));
+
     int index = 0;
     for (const auto& node : nodes)
     {
-        data.node_to_index[node.node_id] = index++;
+        data.node_to_index[node.node_id] = index;
+        data.index_to_node_id[static_cast<size_t>(index)] = node.node_id;
+        data.node_id_to_type[node.node_id] = node.node_type;
+        ++index;
     }
 
-    int n = static_cast<int>(nodes.size());
     data.adj_matrix.assign(n, std::vector<double>(n, NO_CONNECTION));
 
     for (const auto& node : nodes)

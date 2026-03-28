@@ -1,7 +1,10 @@
 #include "api_parser.hpp"
+
 #include <cJSON.h>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 namespace server
 {
@@ -55,6 +58,11 @@ static void extract_string_array(cJSON* arr, std::vector<std::string>& out)
             out.push_back(item->valuestring);
         }
     }
+}
+
+static bool is_blank_json_body(const std::string& json_body)
+{
+    return json_body.find_first_not_of(" \t\r\n") == std::string::npos;
 }
 
 MapParseResult parse_map_json(const std::string& json_body)
@@ -179,6 +187,73 @@ FlowRequest parse_flow_request_json(const std::string& json_body)
 
     cJSON_Delete(root);
     return req;
+}
+
+CircuitRequest parse_circuit_request_json(const std::string& json_body)
+{
+    CircuitRequest req;
+
+    if (is_blank_json_body(json_body))
+    {
+        return req;
+    }
+
+    cJSON* root = cJSON_Parse(json_body.c_str());
+    if (!root)
+    {
+        throw std::runtime_error("Invalid JSON format");
+    }
+
+    if (!cJSON_IsObject(root))
+    {
+        cJSON_Delete(root);
+        throw std::runtime_error("Expected a JSON object");
+    }
+
+    cJSON* start_item = cJSON_GetObjectItemCaseSensitive(root, "start");
+    if (start_item != nullptr)
+    {
+        if (!cJSON_IsString(start_item) || start_item->valuestring == nullptr)
+        {
+            cJSON_Delete(root);
+            throw std::runtime_error("Invalid 'start' field");
+        }
+
+        req.start = start_item->valuestring;
+    }
+
+    cJSON_Delete(root);
+    return req;
+}
+
+std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
+                                        const CircuitResult& circuit_result)
+{
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "ok");
+    cJSON_AddBoolToObject(root, "has_circuit", circuit_result.has_circuit ? 1 : 0);
+    cJSON_AddNumberToObject(root, "node_count", static_cast<double>(subgraph_node_ids.size()));
+
+    cJSON* circuits_json = cJSON_AddArrayToObject(root, "circuits");
+    for (const auto& circuit : circuit_result.circuits)
+    {
+        cJSON* circuit_json = cJSON_CreateArray();
+        for (int node_index : circuit)
+        {
+            cJSON_AddItemToArray(
+                circuit_json,
+                cJSON_CreateString(subgraph_node_ids.at(static_cast<size_t>(node_index)).c_str()));
+        }
+        cJSON_AddItemToArray(circuits_json, circuit_json);
+    }
+
+    char* raw_json = cJSON_PrintUnformatted(root);
+    std::string response =
+        raw_json != nullptr ? raw_json : R"({"status":"error","message":"Failed to build response"})";
+
+    std::free(raw_json);
+    cJSON_Delete(root);
+    return response;
 }
 
 } // namespace server

@@ -1,6 +1,8 @@
 #ifndef API_PARSER_HPP
 #define API_PARSER_HPP
 
+#include "circuit_solver.hpp"
+
 #include <string>
 #include <vector>
 
@@ -66,6 +68,32 @@ struct FlowRequest
  * @throws std::runtime_error If the payload is not valid JSON or missing fields
  */
 FlowRequest parse_flow_request_json(const std::string& json_body);
+
+struct CircuitRequest
+{
+    std::string start;
+};
+
+/**
+ * Parses a JSON object containing an optional start node ID.
+ *
+ * Empty payloads are accepted and interpreted as no preferred start node.
+ *
+ * @param json_body The payload string received at POST /request/fulfillment-circuit
+ * @return Struct containing the optional start node string
+ * @throws std::runtime_error If the payload is not valid JSON or the start field is invalid
+ */
+CircuitRequest parse_circuit_request_json(const std::string& json_body);
+
+/**
+ * Serializes a circuit result into a JSON response string.
+ *
+ * @param subgraph_node_ids Ordered node IDs matching the subgraph indices
+ * @param circuit_result The result returned by find_hamiltonian_circuits
+ * @return JSON string with status, has_circuit, node_count, and circuits
+ */
+std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
+                                        const CircuitResult& circuit_result);
 
 } // namespace server
 

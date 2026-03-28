@@ -16,7 +16,6 @@ option(BUILD_TARGET "Build target: server or client" "server")
 option(RUN_TEST "Run tests" OFF)
 option(ENABLE_MONGO_REST_STORAGE "Enable MongoDB-backed REST storage for the server API" ON)
 option(FETCH_MONGOCXX_IF_MISSING "Fetch mongo-cxx-driver with FetchContent when system packages are unavailable" ON)
-option(KAUFMAN_WITH_OPENMP "Compile Kaufman with OpenMP support" OFF)
 
 # Download UNITY
 include(FetchContent)
@@ -105,10 +104,6 @@ if(BUILD_TARGET STREQUAL "server")
         VERSION 1.0.0
     )
 
-    if(KAUFMAN_WITH_OPENMP)
-        find_package(OpenMP QUIET)
-    endif()
-
     set(MONGO_LINK_TARGETS "")
     if(ENABLE_MONGO_REST_STORAGE)
         find_package(mongocxx QUIET)
@@ -150,25 +145,11 @@ if(BUILD_TARGET STREQUAL "server")
         src/common/*.c
         include/server/*.hpp
     )
-    list(REMOVE_ITEM SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/server/kaufman.cpp)
     set(TARGET_EXEC dhl_server)
-    # add_library(kaufman STATIC src/server/kaufman.cpp)
-    # target_include_directories(kaufman PRIVATE include include/server ${cjson_SOURCE_DIR})
-    # target_link_libraries(kaufman cjson)
-    # if(KAUFMAN_WITH_OPENMP)
-    #     if(OpenMP_CXX_FOUND)
-    #         target_compile_definitions(kaufman PRIVATE KAUFMAN_ENABLE_OPENMP=1)
-    #         target_link_libraries(kaufman OpenMP::OpenMP_CXX)
-    #         message(STATUS "Kaufman will be compiled with OpenMP support")
-    #     else()
-    #         message(WARNING "KAUFMAN_WITH_OPENMP=ON but OpenMP was not found; building Kaufman sequentially")
-    #     endif()
-    # endif()
 
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
-    # target_link_libraries(${TARGET_EXEC} kaufman)
     set_target_properties(${TARGET_EXEC} PROPERTIES
         BUILD_RPATH  "${CMAKE_BINARY_DIR}"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
