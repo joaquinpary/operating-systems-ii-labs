@@ -126,6 +126,21 @@ TEST(GraphBuilderTest, NodeToIndexMapping)
     EXPECT_EQ(data.node_to_index.at("M003"), 2);
 }
 
+TEST(GraphBuilderTest, StoresReverseIdsAndNodeTypes)
+{
+    MapNode market = make_node("M003");
+    market.node_type = "market";
+
+    std::vector<MapNode> nodes = {make_node("N001"), market};
+    GraphData data = build_adjacency_matrix(nodes);
+
+    ASSERT_EQ(data.index_to_node_id.size(), 2);
+    EXPECT_EQ(data.index_to_node_id[0], "N001");
+    EXPECT_EQ(data.index_to_node_id[1], "M003");
+    EXPECT_EQ(data.node_id_to_type.at("N001"), "fulfillment_center");
+    EXPECT_EQ(data.node_id_to_type.at("M003"), "market");
+}
+
 TEST(GraphBuilderTest, BuildMatrixDirected)
 {
     // A -> B with road, weight 50. B has no connection back to A.

@@ -250,5 +250,33 @@ TEST(ApiParserTest, ParseFlowRequestMissingFields)
     EXPECT_THROW(parse_flow_request_json(json), std::runtime_error);
 }
 
+TEST(ApiParserTest, ParseCircuitRequestEmptyBody)
+{
+    CircuitRequest req = parse_circuit_request_json("");
+    EXPECT_TRUE(req.start.empty());
+}
+
+TEST(ApiParserTest, ParseCircuitRequestEmptyObject)
+{
+    CircuitRequest req = parse_circuit_request_json("{}");
+    EXPECT_TRUE(req.start.empty());
+}
+
+TEST(ApiParserTest, ParseCircuitRequestValidStart)
+{
+    CircuitRequest req = parse_circuit_request_json(R"({ "start": "FC2" })");
+    EXPECT_EQ(req.start, "FC2");
+}
+
+TEST(ApiParserTest, ParseCircuitRequestInvalidStartType)
+{
+    EXPECT_THROW(parse_circuit_request_json(R"({ "start": 42 })"), std::runtime_error);
+}
+
+TEST(ApiParserTest, ParseCircuitRequestInvalidShape)
+{
+    EXPECT_THROW(parse_circuit_request_json("[]"), std::runtime_error);
+}
+
 } // namespace
 } // namespace server
