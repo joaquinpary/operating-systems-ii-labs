@@ -233,6 +233,7 @@ std::string build_circuit_response_json(const std::vector<std::string>& subgraph
     cJSON_AddStringToObject(root, "status", "ok");
     cJSON_AddBoolToObject(root, "has_circuit", circuit_result.has_circuit ? 1 : 0);
     cJSON_AddNumberToObject(root, "node_count", static_cast<double>(subgraph_node_ids.size()));
+    cJSON_AddNumberToObject(root, "execution_time_ms", circuit_result.execution_time_ms);
 
     cJSON* circuits_json = cJSON_AddArrayToObject(root, "circuits");
     for (const auto& circuit : circuit_result.circuits)
@@ -240,9 +241,8 @@ std::string build_circuit_response_json(const std::vector<std::string>& subgraph
         cJSON* circuit_json = cJSON_CreateArray();
         for (int node_index : circuit)
         {
-            cJSON_AddItemToArray(
-                circuit_json,
-                cJSON_CreateString(subgraph_node_ids.at(static_cast<size_t>(node_index)).c_str()));
+            cJSON_AddItemToArray(circuit_json,
+                                 cJSON_CreateString(subgraph_node_ids.at(static_cast<size_t>(node_index)).c_str()));
         }
         cJSON_AddItemToArray(circuits_json, circuit_json);
     }

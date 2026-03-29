@@ -14,6 +14,7 @@ struct CircuitResult
 {
     bool has_circuit;
     std::vector<SymPath> circuits;
+    double execution_time_ms;
 };
 
 SymMatrix build_symbolic_matrix(const std::vector<std::vector<double>>& adj_matrix);

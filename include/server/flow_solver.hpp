@@ -17,15 +17,21 @@ namespace server
  */
 bool bfs(const std::vector<std::vector<double>>& residual_graph, int s, int t, std::vector<int>& parent);
 
+struct FlowResult
+{
+    double max_flow;
+    double execution_time_ms;
+};
+
 /**
  * @brief Calculates the maximum flow using the Ford-Fulkerson algorithm (Edmonds-Karp BFS variation).
  *
  * @param capacity_graph The initial capacity matrix (costs represent max flow capacity).
  * @param source Source node index.
  * @param sink Sink node index.
- * @return The maximum flow value from source to sink.
+ * @return Struct containing maximum flow value and execution time.
  */
-double ford_fulkerson(const std::vector<std::vector<double>>& capacity_graph, int source, int sink);
+FlowResult ford_fulkerson(const std::vector<std::vector<double>>& capacity_graph, int source, int sink);
 
 } // namespace server
 

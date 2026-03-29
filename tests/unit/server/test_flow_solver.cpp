@@ -9,13 +9,13 @@ namespace
 TEST(FlowSolverTest, SingleNodeTrivial)
 {
     std::vector<std::vector<double>> graph = {{0.0}};
-    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 0), 0.0);
+    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 0).max_flow, 0.0);
 }
 
 TEST(FlowSolverTest, DisconnectedNodes)
 {
     std::vector<std::vector<double>> graph = {{0.0, 0.0}, {0.0, 0.0}};
-    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 1), 0.0);
+    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 1).max_flow, 0.0);
 }
 
 TEST(FlowSolverTest, SinglePath)
@@ -23,7 +23,7 @@ TEST(FlowSolverTest, SinglePath)
     // 0 -> 1 -> 2
     // Minimum capacity is 5.0
     std::vector<std::vector<double>> graph = {{0.0, 10.0, 0.0}, {0.0, 0.0, 5.0}, {0.0, 0.0, 0.0}};
-    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 2), 5.0);
+    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 2).max_flow, 5.0);
 }
 
 TEST(FlowSolverTest, ParallelPaths)
@@ -33,7 +33,7 @@ TEST(FlowSolverTest, ParallelPaths)
     // Total max flow should be 15
     std::vector<std::vector<double>> graph = {
         {0.0, 10.0, 5.0, 0.0}, {0.0, 0.0, 0.0, 10.0}, {0.0, 0.0, 0.0, 5.0}, {0.0, 0.0, 0.0, 0.0}};
-    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 3), 15.0);
+    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 3).max_flow, 15.0);
 }
 
 TEST(FlowSolverTest, ClassicSixNode)
@@ -49,7 +49,7 @@ TEST(FlowSolverTest, ClassicSixNode)
         {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}    // 5
     };
     // From 0 to 5, the expected max flow is 23.5
-    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 5), 23.5);
+    EXPECT_DOUBLE_EQ(ford_fulkerson(graph, 0, 5).max_flow, 23.5);
 }
 
 } // namespace
