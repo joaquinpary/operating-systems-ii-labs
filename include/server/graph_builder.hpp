@@ -53,6 +53,8 @@ inline constexpr double NO_CONNECTION = 0.0;
 struct GraphData
 {
     std::unordered_map<std::string, int> node_to_index;
+    std::vector<std::string> index_to_node_id;
+    std::unordered_map<std::string, std::string> node_id_to_type;
     std::vector<std::vector<double>> adj_matrix;
 };
 

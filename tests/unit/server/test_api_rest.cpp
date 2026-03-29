@@ -97,6 +97,159 @@ TEST_F(ApiRestTest, PostMapInvalidJsonReturns400)
     EXPECT_TRUE(res->body.find(R"("status":"error")") != std::string::npos);
 }
 
+TEST_F(ApiRestTest, PostFulfillmentCircuitWithoutMapReturns400)
+{
+    httplib::Client cli("localhost", 18080);
+
+    auto res = cli.Post("/request/fulfillment-circuit", "", "application/json");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 400);
+    EXPECT_TRUE(res->body.find("No map data loaded") != std::string::npos);
+}
+
+TEST_F(ApiRestTest, PostFulfillmentCircuitFiltersMarketsAndFindsCircuit)
+{
+    httplib::Client cli("localhost", 18080);
+
+    std::string map_json = R"([
+        {
+            "node_id": "FC1",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC2",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "FC2",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC3",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                },
+                {
+                    "to": "MK1",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "FC3",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC1",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "MK1",
+            "node_type": "market",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC1",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        }
+    ])";
+
+    auto map_res = cli.Post("/map", map_json, "application/json");
+    ASSERT_TRUE(map_res);
+    ASSERT_EQ(map_res->status, 200);
+
+    auto circuit_res = cli.Post("/request/fulfillment-circuit", "", "application/json");
+    ASSERT_TRUE(circuit_res);
+    EXPECT_EQ(circuit_res->status, 200);
+    EXPECT_TRUE(circuit_res->body.find(R"("has_circuit":true)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("node_count":3)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find("FC1") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find("FC2") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find("FC3") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find("MK1") == std::string::npos);
+}
+
+TEST_F(ApiRestTest, PostFulfillmentCircuitSupportsStartNode)
+{
+    httplib::Client cli("localhost", 18080);
+
+    std::string map_json = R"([
+        {
+            "node_id": "FC1",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC2",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "FC2",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC3",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "FC3",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC1",
+                    "connection_type": "road",
+                    "base_weight": 1.0,
+                    "connection_conditions": []
+                }
+            ]
+        }
+    ])";
+
+    auto map_res = cli.Post("/map", map_json, "application/json");
+    ASSERT_TRUE(map_res);
+    ASSERT_EQ(map_res->status, 200);
+
+    auto circuit_res = cli.Post("/request/fulfillment-circuit", R"({"start":"FC2"})", "application/json");
+    ASSERT_TRUE(circuit_res);
+    EXPECT_EQ(circuit_res->status, 200);
+    EXPECT_TRUE(circuit_res->body.find(R"(["FC2","FC3","FC1","FC2"])") != std::string::npos);
+}
+
 int main(int argc, char** argv)
 {
     ::testing::InitGoogleTest(&argc, argv);

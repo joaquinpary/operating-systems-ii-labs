@@ -1,20 +1,29 @@
 #include "api_rest.hpp"
 
 #include "api_parser.hpp"
+#include "circuit_solver.hpp"
 #include "flow_solver.hpp"
 #include "graph_builder.hpp"
 #include <common/logger.h>
 #include <httplib.h>
 
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <pthread.h>
 #include <stdexcept>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace
 {
+constexpr const char* FULFILLMENT_CENTER_NODE_TYPE = "fulfillment_center";
+constexpr size_t MAX_FULFILLMENT_CIRCUIT_NODES = 15;
+
 void install_signal_waiter(httplib::Server& server)
 {
     sigset_t mask;
@@ -32,6 +41,51 @@ void install_signal_waiter(httplib::Server& server)
         }
     }).detach();
 }
+
+bool is_graph_loaded(const server::GraphData& graph)
+{
+    return !graph.node_to_index.empty() && !graph.adj_matrix.empty();
+}
+
+std::vector<int> collect_node_indices_by_type(const server::GraphData& graph, const std::string& node_type)
+{
+    std::vector<int> indices;
+    indices.reserve(graph.index_to_node_id.size());
+
+    for (size_t index = 0; index < graph.index_to_node_id.size(); ++index)
+    {
+        const std::string& node_id = graph.index_to_node_id[index];
+        auto type_it = graph.node_id_to_type.find(node_id);
+        if (type_it != graph.node_id_to_type.end() && type_it->second == node_type)
+        {
+            indices.push_back(static_cast<int>(index));
+        }
+    }
+
+    return indices;
+}
+
+std::vector<std::vector<double>> build_binary_subgraph(const server::GraphData& graph,
+                                                       const std::vector<int>& selected_indices)
+{
+    std::vector<std::vector<double>> subgraph(
+        selected_indices.size(), std::vector<double>(selected_indices.size(), 0.0));
+
+    for (size_t row = 0; row < selected_indices.size(); ++row)
+    {
+        for (size_t column = 0; column < selected_indices.size(); ++column)
+        {
+            if (graph.adj_matrix[static_cast<size_t>(selected_indices[row])]
+                                [static_cast<size_t>(selected_indices[column])] > 0.0)
+            {
+                subgraph[row][column] = 1.0;
+            }
+        }
+    }
+
+    return subgraph;
+}
+
 } // namespace
 
 void run_api_rest_process(const config::server_config& cfg)
@@ -128,7 +182,7 @@ void run_api_rest_process(const config::server_config& cfg)
                 server::FlowRequest req = server::parse_flow_request_json(request.body);
 
                 std::lock_guard<std::mutex> lock(*graph_mutex);
-                if (shared_graph->node_to_index.empty() || shared_graph->adj_matrix.empty())
+                if (!is_graph_loaded(*shared_graph))
                 {
                     throw std::runtime_error("No map data loaded. Call /map first.");
                 }
@@ -168,10 +222,62 @@ void run_api_rest_process(const config::server_config& cfg)
             }
         });
 
-        server.Post("/request/fulfillment-circuit", [](const httplib::Request&, httplib::Response& response) {
-            response.status = 200;
-            response.set_header("Content-Type", "application/json");
-            response.set_content(R"({"status":"ok","message":"dummy fulfillment-circuit"})", "application/json");
+        server.Post("/request/fulfillment-circuit", [shared_graph, graph_mutex](const httplib::Request& request,
+                                                                                  httplib::Response& response) {
+            try
+            {
+                server::CircuitRequest req = server::parse_circuit_request_json(request.body);
+
+                std::lock_guard<std::mutex> lock(*graph_mutex);
+                if (!is_graph_loaded(*shared_graph))
+                {
+                    throw std::runtime_error("No map data loaded. Call /map first.");
+                }
+
+                std::vector<int> fulfillment_indices =
+                    collect_node_indices_by_type(*shared_graph, FULFILLMENT_CENTER_NODE_TYPE);
+                if (fulfillment_indices.size() > MAX_FULFILLMENT_CIRCUIT_NODES)
+                {
+                    throw std::runtime_error("Fulfillment-center subgraph exceeds the supported limit of 15 nodes");
+                }
+
+                std::vector<std::string> subgraph_node_ids;
+                subgraph_node_ids.reserve(fulfillment_indices.size());
+                for (int index : fulfillment_indices)
+                {
+                    subgraph_node_ids.push_back(shared_graph->index_to_node_id.at(static_cast<size_t>(index)));
+                }
+
+                int start_index = -1;
+                if (!req.start.empty())
+                {
+                    auto start_it = std::find(subgraph_node_ids.begin(), subgraph_node_ids.end(), req.start);
+                    if (start_it == subgraph_node_ids.end())
+                    {
+                        throw std::runtime_error("Start node is not a secure active fulfillment center: " +
+                                                 req.start);
+                    }
+
+                    start_index = static_cast<int>(std::distance(subgraph_node_ids.begin(), start_it));
+                }
+
+                const std::vector<std::vector<double>> fulfillment_subgraph =
+                    build_binary_subgraph(*shared_graph, fulfillment_indices);
+                const server::CircuitResult circuit_result =
+                    server::find_hamiltonian_circuits(fulfillment_subgraph, start_index);
+
+                response.status = 200;
+                response.set_header("Content-Type", "application/json");
+                response.set_content(server::build_circuit_response_json(subgraph_node_ids, circuit_result),
+                                     "application/json");
+            }
+            catch (const std::exception& e)
+            {
+                response.status = 400;
+                response.set_header("Content-Type", "application/json");
+                std::string err_json = R"({"status":"error","message":")" + std::string(e.what()) + R"("})";
+                response.set_content(err_json, "application/json");
+            }
         });
 
         auto get_results_handler = [](const httplib::Request&, httplib::Response& response) {
