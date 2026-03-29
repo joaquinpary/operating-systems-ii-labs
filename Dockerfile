@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     pkg-config \
     zlib1g-dev \
+    libomp-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -25,11 +26,11 @@ COPY tests/ ./tests/
 
 # Build argument to determine what to build (client or server)
 ARG BUILD_TARGET=server
-ARG KAUFMAN_WITH_OPENMP=OFF
+ARG ENABLE_OPENMP=OFF
 
 # Build the project
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TARGET=${BUILD_TARGET} -DKAUFMAN_WITH_OPENMP=${KAUFMAN_WITH_OPENMP} .. && \
+    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP=${ENABLE_OPENMP} .. && \
     make
 
 # Runtime stage
@@ -42,6 +43,7 @@ RUN apt-get update && apt-get install -y \
     libsasl2-2 \
     libssl3 \
     zlib1g \
+    libomp5 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

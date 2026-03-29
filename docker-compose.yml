@@ -39,6 +39,7 @@ services:
       dockerfile: Dockerfile
       args:
         BUILD_TARGET: server
+        ENABLE_OPENMP: "OFF"
     container_name: dhl_server
     depends_on:
       db:

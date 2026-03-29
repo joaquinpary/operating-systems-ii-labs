@@ -14,32 +14,10 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(BUILD_TARGET "Build target: server or client" "server")
 option(RUN_TEST "Run tests" OFF)
-option(ENABLE_MONGO_REST_STORAGE "Enable MongoDB-backed REST storage for the server API" ON)
-option(FETCH_MONGOCXX_IF_MISSING "Fetch mongo-cxx-driver with FetchContent when system packages are unavailable" ON)
+option(ENABLE_OPENMP "Enable OpenMP parallelization for heavy algorithms" OFF)
 
-# Download UNITY
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
-set(UNITY_GIT_URL "https://github.com/ThrowTheSwitch/Unity.git")
-FetchContent_Declare(
-    unity
-    GIT_REPOSITORY ${UNITY_GIT_URL}
-    GIT_TAG        master
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/client/unity
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(unity)
-
-# DownLoad gtest
-set(GTEST_GIT_URL "https://github.com/google/googletest.git")
-FetchContent_Declare(
-    gtest
-    GIT_REPOSITORY ${GTEST_GIT_URL}
-    GIT_TAG        main
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/gtest
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(gtest)
 
 set(CJSON_GIT_URL "https://github.com/DaveGamble/cJSON.git")
 set(ENABLE_CJSON_TEST OFF CACHE INTERNAL "Disable cJSON tests")
@@ -58,9 +36,6 @@ include_directories(include)
 include_directories(include/common)
 
 if(BUILD_TARGET STREQUAL "server")
-
-    set(MONGO_CXX_DRIVER_GIT_URL "https://github.com/mongodb/mongo-cxx-driver.git")
-    set(MONGO_CXX_DRIVER_GIT_TAG "r4.1.4")
 
     set(CPP_HTTPLIB_GIT_URL "https://github.com/yhirose/cpp-httplib.git")
     FetchContent_Declare(
@@ -103,41 +78,6 @@ if(BUILD_TARGET STREQUAL "server")
         SOVERSION 1
         VERSION 1.0.0
     )
-
-    set(MONGO_LINK_TARGETS "")
-    if(ENABLE_MONGO_REST_STORAGE)
-        find_package(mongocxx QUIET)
-        find_package(bsoncxx QUIET)
-
-        if(mongocxx_FOUND AND bsoncxx_FOUND)
-            list(APPEND MONGO_LINK_TARGETS mongo::mongocxx_shared mongo::bsoncxx_shared)
-        elseif(FETCH_MONGOCXX_IF_MISSING)
-            set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries" FORCE)
-            set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "Build static libraries" FORCE)
-            set(BUILD_TESTING OFF CACHE BOOL "Disable subproject testing" FORCE)
-            set(ENABLE_TESTS OFF CACHE BOOL "Disable subproject tests" FORCE)
-            set(ENABLE_UNINSTALL OFF CACHE BOOL "Disable subproject uninstall target" FORCE)
-            set(MONGOC_ENABLE_CLIENT_SIDE_ENCRYPTION OFF CACHE BOOL "Disable libmongocrypt support" FORCE)
-            set(BUILD_VERSION "4.1.4" CACHE STRING "Library version (for both bsoncxx and mongocxx)" FORCE)
-
-            FetchContent_Declare(
-                mongo_cxx_driver
-                GIT_REPOSITORY ${MONGO_CXX_DRIVER_GIT_URL}
-                GIT_TAG        ${MONGO_CXX_DRIVER_GIT_TAG}
-                SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/mongo-cxx-driver
-                UPDATE_COMMAND ""
-            )
-            FetchContent_MakeAvailable(mongo_cxx_driver)
-
-            if(TARGET mongocxx_shared AND TARGET bsoncxx_shared)
-                list(APPEND MONGO_LINK_TARGETS mongocxx_shared bsoncxx_shared)
-            elseif(TARGET mongo::mongocxx_shared AND TARGET mongo::bsoncxx_shared)
-                list(APPEND MONGO_LINK_TARGETS mongo::mongocxx_shared mongo::bsoncxx_shared)
-            else()
-                message(FATAL_ERROR "mongo-cxx-driver was fetched but the expected targets were not created")
-            endif()
-        endif()
-    endif()
     
     file(GLOB SOURCES
         src/server/*.cpp
@@ -155,11 +95,10 @@ if(BUILD_TARGET STREQUAL "server")
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
     )
 
-    if(MONGO_LINK_TARGETS)
-        target_compile_definitions(${TARGET_EXEC} PRIVATE HAVE_MONGOCXX=1)
-        target_link_libraries(${TARGET_EXEC} ${MONGO_LINK_TARGETS})
-    else()
-        message(STATUS "mongocxx/bsoncxx not found: REST API will use in-memory storage for now")
+    if(ENABLE_OPENMP)
+        find_package(OpenMP REQUIRED)
+        target_link_libraries(${TARGET_EXEC} OpenMP::OpenMP_CXX)
+        target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP=1)
     endif()
 
     # Embed build-tree location of libadmin_cli.so into RPATH
