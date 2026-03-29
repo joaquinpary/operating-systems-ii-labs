@@ -1,8 +1,15 @@
 #include "circuit_solver.hpp"
 
+#include <chrono>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+
+#ifdef USE_OPENMP
+#include <omp.h>
+#endif
+
+#include <common/logger.h>
 
 namespace server
 {
@@ -134,8 +141,7 @@ SymMatrix build_symbolic_matrix(const std::vector<std::vector<double>>& adj_matr
         {
             if (row != column && adj_matrix[row][column] > 0.0)
             {
-                matrix[row][column].push_back(
-                    {static_cast<int>(row), static_cast<int>(column)});
+                matrix[row][column].push_back({static_cast<int>(row), static_cast<int>(column)});
             }
         }
     }
@@ -156,6 +162,9 @@ SymMatrix symbolic_matrix_multiply(const SymMatrix& left, const SymMatrix& right
     const size_t size = left.size();
     SymMatrix result(size, std::vector<SymPaths>(size));
 
+#ifdef USE_OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
     for (size_t row = 0; row < size; ++row)
     {
         for (size_t column = 0; column < size; ++column)
@@ -232,13 +241,19 @@ CircuitResult find_hamiltonian_circuits(const std::vector<std::vector<double>>& 
     const size_t size = adj_matrix.size();
     if (size < 2)
     {
-        return {false, {}};
+        return {false, {}, 0.0};
     }
 
     if (start_node < -1 || start_node >= static_cast<int>(size))
     {
         throw std::invalid_argument("Start node index is out of range");
     }
+
+#ifdef USE_OPENMP
+    double t_start = omp_get_wtime();
+#else
+    auto t_start = std::chrono::high_resolution_clock::now();
+#endif
 
     const SymMatrix base_matrix = build_symbolic_matrix(adj_matrix);
     SymMatrix current = base_matrix;
@@ -284,7 +299,18 @@ CircuitResult find_hamiltonian_circuits(const std::vector<std::vector<double>>& 
         }
     }
 
-    return {!circuits.empty(), std::move(circuits)};
+#ifdef USE_OPENMP
+    double t_end = omp_get_wtime();
+    LOG_INFO_MSG("[Profiling] Kaufmann-Malgrange executed in %.6f seconds (OpenMP)", t_end - t_start);
+    double exec_time = (t_end - t_start) * 1000.0;
+#else
+    auto t_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = t_end - t_start;
+    LOG_INFO_MSG("[Profiling] Kaufmann-Malgrange executed in %.6f seconds (Sequential)", diff.count());
+    double exec_time = diff.count() * 1000.0;
+#endif
+
+    return {!circuits.empty(), std::move(circuits), exec_time};
 }
 
 } // namespace server

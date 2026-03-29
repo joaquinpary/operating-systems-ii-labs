@@ -22,7 +22,7 @@
 namespace
 {
 constexpr const char* FULFILLMENT_CENTER_NODE_TYPE = "fulfillment_center";
-constexpr size_t MAX_FULFILLMENT_CIRCUIT_NODES = 15;
+constexpr size_t MAX_FULFILLMENT_CIRCUIT_NODES = 20;
 
 void install_signal_waiter(httplib::Server& server)
 {
@@ -68,8 +68,8 @@ std::vector<int> collect_node_indices_by_type(const server::GraphData& graph, co
 std::vector<std::vector<double>> build_binary_subgraph(const server::GraphData& graph,
                                                        const std::vector<int>& selected_indices)
 {
-    std::vector<std::vector<double>> subgraph(
-        selected_indices.size(), std::vector<double>(selected_indices.size(), 0.0));
+    std::vector<std::vector<double>> subgraph(selected_indices.size(),
+                                              std::vector<double>(selected_indices.size(), 0.0));
 
     for (size_t row = 0; row < selected_indices.size(); ++row)
     {
@@ -202,14 +202,15 @@ void run_api_rest_process(const config::server_config& cfg)
                 int source_idx = source_it->second;
                 int sink_idx = sink_it->second;
 
-                double max_flow = server::ford_fulkerson(shared_graph->adj_matrix, source_idx, sink_idx);
+                server::FlowResult flow_res = server::ford_fulkerson(shared_graph->adj_matrix, source_idx, sink_idx);
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
 
                 char res_buf[256];
-                std::snprintf(res_buf, sizeof(res_buf), R"({"status":"ok","source":"%s","sink":"%s","max_flow":%.2f})",
-                              req.source.c_str(), req.sink.c_str(), max_flow);
+                std::snprintf(res_buf, sizeof(res_buf),
+                              R"({"status":"ok","source":"%s","sink":"%s","max_flow":%.2f,"execution_time_ms":%.2f})",
+                              req.source.c_str(), req.sink.c_str(), flow_res.max_flow, flow_res.execution_time_ms);
 
                 response.set_content(res_buf, "application/json");
             }
@@ -223,7 +224,7 @@ void run_api_rest_process(const config::server_config& cfg)
         });
 
         server.Post("/request/fulfillment-circuit", [shared_graph, graph_mutex](const httplib::Request& request,
-                                                                                  httplib::Response& response) {
+                                                                                httplib::Response& response) {
             try
             {
                 server::CircuitRequest req = server::parse_circuit_request_json(request.body);
@@ -254,8 +255,7 @@ void run_api_rest_process(const config::server_config& cfg)
                     auto start_it = std::find(subgraph_node_ids.begin(), subgraph_node_ids.end(), req.start);
                     if (start_it == subgraph_node_ids.end())
                     {
-                        throw std::runtime_error("Start node is not a secure active fulfillment center: " +
-                                                 req.start);
+                        throw std::runtime_error("Start node is not a secure active fulfillment center: " + req.start);
                     }
 
                     start_index = static_cast<int>(std::distance(subgraph_node_ids.begin(), start_it));
