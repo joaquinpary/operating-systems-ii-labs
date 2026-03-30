@@ -147,7 +147,9 @@ foreach(test_file ${SERVER_TEST})
     
     # Find PostgreSQL for server tests
     find_package(PostgreSQL REQUIRED)
-    
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
         ${PROJECT_SOURCE_DIR}/include/common
@@ -159,6 +161,7 @@ foreach(test_file ${SERVER_TEST})
         pthread
         rt
         pqxx
+        PkgConfig::MONGOC
         ${PostgreSQL_LIBRARIES}
     )
     target_compile_definitions(${exec_name} PRIVATE TESTING)

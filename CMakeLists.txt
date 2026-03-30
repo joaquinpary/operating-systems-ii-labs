@@ -56,6 +56,10 @@ if(BUILD_TARGET STREQUAL "server")
         UPDATE_COMMAND ""
     )
     FetchContent_MakeAvailable(pqxx)
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
     include_directories(${cpp_httplib_SOURCE_DIR})
@@ -90,6 +94,7 @@ if(BUILD_TARGET STREQUAL "server")
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
+    target_link_libraries(${TARGET_EXEC} PkgConfig::MONGOC)
     set_target_properties(${TARGET_EXEC} PROPERTIES
         BUILD_RPATH  "${CMAKE_BINARY_DIR}"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"

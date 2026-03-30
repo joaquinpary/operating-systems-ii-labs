@@ -3,6 +3,7 @@
 
 #include "circuit_solver.hpp"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -93,7 +94,8 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body);
  * @return JSON string with status, has_circuit, node_count, and circuits
  */
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
-                                        const CircuitResult& circuit_result);
+                                        const CircuitResult& circuit_result,
+                                        std::int64_t timestamp_ms);
 
 } // namespace server
 

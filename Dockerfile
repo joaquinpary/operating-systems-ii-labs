@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     zlib1g-dev \
     libomp-dev \
+    libmongoc-dev \
+    libbson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -44,6 +46,8 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     zlib1g \
     libomp5 \
+    libmongoc-1.0-0t64 \
+    libbson-1.0-0t64 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -76,16 +80,5 @@ RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
     if [ -d /tmp/build/_deps/pqxx-build/src ]; then \
         cp /tmp/build/_deps/pqxx-build/src/libpqxx*.so* /usr/local/lib/ || true; \
     fi
-
-# Copy MongoDB driver shared libraries built via CMake FetchContent (server only)
-RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
-    find /tmp/build/_deps \( \
-        -name 'libmongocxx*.so*' -o \
-        -name 'libbsoncxx*.so*' -o \
-        -name 'libmongoc2*.so*' -o \
-        -name 'libbson2*.so*' -o \
-        -name 'libmongoc-1.0*.so*' -o \
-        -name 'libbson-1.0*.so*' \
-    \) -exec cp -P {} /usr/local/lib/ \; 2>/dev/null || true
 
 RUN ldconfig
