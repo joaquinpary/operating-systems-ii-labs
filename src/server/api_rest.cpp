@@ -27,6 +27,12 @@ namespace
 constexpr const char* FULFILLMENT_CENTER_NODE_TYPE = "fulfillment_center";
 constexpr size_t MAX_FULFILLMENT_CIRCUIT_NODES = 20;
 
+#ifdef USE_OPENMP
+constexpr bool kUseOpenMP = true;
+#else
+constexpr bool kUseOpenMP = false;
+#endif
+
 std::int64_t current_timestamp_ms()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
@@ -195,6 +201,7 @@ void run_api_rest_process(const config::server_config& cfg)
             {
                 server::FlowRequest req = server::parse_flow_request_json(request.body);
                 server::FlowResult flow_res;
+                int node_count = 0;
 
                 {
                     std::lock_guard<std::mutex> lock(*graph_mutex);
@@ -217,21 +224,29 @@ void run_api_rest_process(const config::server_config& cfg)
 
                     int source_idx = source_it->second;
                     int sink_idx = sink_it->second;
+                    node_count = static_cast<int>(shared_graph->adj_matrix.size());
 
                     flow_res = server::ford_fulkerson(shared_graph->adj_matrix, source_idx, sink_idx);
                 }
 
                 const std::int64_t timestamp_ms = current_timestamp_ms();
-                server::save_flow_result(req.source, req.sink, flow_res.max_flow, flow_res.execution_time_ms, timestamp_ms);
+                const std::string timestamp = server::format_timestamp_iso(timestamp_ms);
+                server::save_flow_result(req.source,
+                                         req.sink,
+                                         node_count,
+                                         flow_res.max_flow,
+                                         flow_res.execution_time_ms,
+                                         timestamp,
+                                         kUseOpenMP);
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
 
-                char res_buf[320];
+                char res_buf[512];
                 std::snprintf(res_buf, sizeof(res_buf),
-                              R"({"status":"ok","source":"%s","sink":"%s","max_flow":%.2f,"execution_time_ms":%.2f,"timestamp_ms":%lld})",
-                              req.source.c_str(), req.sink.c_str(), flow_res.max_flow, flow_res.execution_time_ms,
-                              static_cast<long long>(timestamp_ms));
+                              R"({"status":"ok","source":"%s","sink":"%s","node_count":%d,"max_flow":%.2f,"execution_time_ms":%.2f,"use_openmp":%s,"timestamp":"%s"})",
+                              req.source.c_str(), req.sink.c_str(), node_count, flow_res.max_flow,
+                              flow_res.execution_time_ms, kUseOpenMP ? "true" : "false", timestamp.c_str());
 
                 response.set_content(res_buf, "application/json");
             }
@@ -263,7 +278,8 @@ void run_api_rest_process(const config::server_config& cfg)
                         collect_node_indices_by_type(*shared_graph, FULFILLMENT_CENTER_NODE_TYPE);
                     if (fulfillment_indices.size() > MAX_FULFILLMENT_CIRCUIT_NODES)
                     {
-                        throw std::runtime_error("Fulfillment-center subgraph exceeds the supported limit of 15 nodes");
+                        throw std::runtime_error("Fulfillment-center subgraph exceeds the supported limit of "
+                                                 + std::to_string(MAX_FULFILLMENT_CIRCUIT_NODES) + " nodes");
                     }
 
                     subgraph_node_ids.reserve(fulfillment_indices.size());
@@ -290,12 +306,13 @@ void run_api_rest_process(const config::server_config& cfg)
                 }
 
                 const std::int64_t timestamp_ms = current_timestamp_ms();
-                server::save_circuit_result(req.start, subgraph_node_ids, circuit_result, timestamp_ms);
+                const std::string timestamp = server::format_timestamp_iso(timestamp_ms);
+                server::save_circuit_result(req.start, subgraph_node_ids, circuit_result, timestamp, kUseOpenMP);
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
                 response.set_content(
-                    server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp_ms),
+                    server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp, kUseOpenMP),
                     "application/json");
             }
             catch (const std::exception& e)

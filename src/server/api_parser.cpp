@@ -228,14 +228,16 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body)
 
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
                                         const CircuitResult& circuit_result,
-                                        std::int64_t timestamp_ms)
+                                        const std::string& timestamp,
+                                        bool use_openmp)
 {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "ok");
     cJSON_AddBoolToObject(root, "has_circuit", circuit_result.has_circuit ? 1 : 0);
     cJSON_AddNumberToObject(root, "node_count", static_cast<double>(subgraph_node_ids.size()));
     cJSON_AddNumberToObject(root, "execution_time_ms", circuit_result.execution_time_ms);
-    cJSON_AddNumberToObject(root, "timestamp_ms", static_cast<double>(timestamp_ms));
+    cJSON_AddBoolToObject(root, "use_openmp", use_openmp ? 1 : 0);
+    cJSON_AddStringToObject(root, "timestamp", timestamp.c_str());
 
     cJSON* circuits_json = cJSON_AddArrayToObject(root, "circuits");
     for (const auto& circuit : circuit_result.circuits)

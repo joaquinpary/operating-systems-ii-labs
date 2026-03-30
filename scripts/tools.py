@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from modules import gen_credentials
 from modules import admin_cli
 from modules import rest_api_client
+from modules import benchmark
+from modules import profiling_graph
 
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -36,6 +38,8 @@ def _header():
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}1){RESET} Generate Credentials              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}2){RESET} Admin CLI                         {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}3){RESET} REST API Client                   {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}4){RESET} Benchmark                         {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}5){RESET} Profiling Graph                   {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {RED}0){RESET} Exit                              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}╚═══════════════════════════════════════╝{RESET}")
     print()
@@ -71,6 +75,11 @@ def _prompt_float(text, default=None):
 
 def _pause():
     input(f"\n  {DIM}Press Enter to return to the menu...{RESET}")
+
+
+def _print_result_error(result):
+    if isinstance(result, dict) and result.get("status") == "error":
+        print(f"  {RED}{result.get('message', 'Unknown error')}{RESET}")
 
 
 # ── Option 1: Generate Credentials ─────────────────────────────────────────
@@ -204,6 +213,85 @@ def menu_rest_api():
             return
 
 
+def menu_benchmark():
+    print(f"\n  {BOLD}── Benchmark ───────────────────────────{RESET}\n")
+    base_url = _prompt("Base URL", rest_api_client.DEFAULT_BASE_URL)
+    print(f"  {GREEN}1){RESET} Fulfillment Flow")
+    print(f"  {GREEN}2){RESET} Fulfillment Circuit")
+    print(f"  {GREEN}3){RESET} Both")
+    print(f"  {RED}0){RESET} Back")
+    print()
+
+    choice = _prompt("Select", "0")
+    if choice == "0":
+        return
+
+    try:
+        if choice in {"1", "3"}:
+            max_nodes = _prompt_int("Flow max nodes", 1000)
+            step = _prompt_int("Flow node step", 10)
+            iterations = _prompt_int("Flow iterations", 5)
+            density = _prompt_float("Flow edge density (0.0-1.0)", 0.3)
+            result = benchmark.run_flow_benchmark(
+                base_url,
+                max_nodes=max_nodes,
+                step=step,
+                iterations=iterations,
+                density=density,
+            )
+            _print_result_error(result)
+
+        if choice in {"2", "3"}:
+            max_nodes = _prompt_int("Circuit max nodes", 15)
+            iterations = _prompt_int("Circuit iterations", 5)
+            density = _prompt_float("Circuit edge density (0.0-1.0)", 0.5)
+            result = benchmark.run_circuit_benchmark(
+                base_url,
+                max_nodes=max_nodes,
+                iterations=iterations,
+                density=density,
+            )
+            _print_result_error(result)
+
+        if choice not in {"1", "2", "3"}:
+            print(f"  {RED}Invalid option.{RESET}")
+    except KeyboardInterrupt:
+        print()
+
+    _pause()
+
+
+def menu_profiling_graph():
+    print(f"\n  {BOLD}── Profiling Graph ─────────────────────{RESET}\n")
+    print(f"  {GREEN}1){RESET} Fetch from server")
+    print(f"  {GREEN}2){RESET} Load benchmark JSON")
+    print(f"  {RED}0){RESET} Back")
+    print()
+
+    choice = _prompt("Select", "0")
+    if choice == "0":
+        return
+
+    output_path = _prompt("Output PNG path (Enter for default)", "")
+    output_path = output_path if output_path else None
+
+    try:
+        if choice == "1":
+            base_url = _prompt("Base URL", rest_api_client.DEFAULT_BASE_URL)
+            result = profiling_graph.plot_from_server(base_url, output_path=output_path)
+            _print_result_error(result)
+        elif choice == "2":
+            file_path = _prompt("Benchmark JSON file path")
+            result = profiling_graph.plot_from_file(file_path, output_path=output_path)
+            _print_result_error(result)
+        else:
+            print(f"  {RED}Invalid option.{RESET}")
+    except KeyboardInterrupt:
+        print()
+
+    _pause()
+
+
 # ── Main loop ───────────────────────────────────────────────────────────────
 
 def main():
@@ -218,6 +306,10 @@ def main():
                 menu_admin_cli()
             elif choice == "3":
                 menu_rest_api()
+            elif choice == "4":
+                menu_benchmark()
+            elif choice == "5":
+                menu_profiling_graph()
             elif choice == "0":
                 print(f"\n  {DIM}Bye!{RESET}\n")
                 break

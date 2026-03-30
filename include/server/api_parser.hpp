@@ -91,11 +91,14 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body);
  *
  * @param subgraph_node_ids Ordered node IDs matching the subgraph indices
  * @param circuit_result The result returned by find_hamiltonian_circuits
- * @return JSON string with status, has_circuit, node_count, and circuits
+ * @param timestamp ISO 8601 UTC timestamp string for the stored result
+ * @param use_openmp Whether the computation used the OpenMP-enabled build
+ * @return JSON string with status, has_circuit, node_count, timing metadata, and circuits
  */
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
                                         const CircuitResult& circuit_result,
-                                        std::int64_t timestamp_ms);
+                                        const std::string& timestamp,
+                                        bool use_openmp);
 
 } // namespace server
 

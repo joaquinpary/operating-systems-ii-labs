@@ -192,7 +192,8 @@ TEST_F(ApiRestTest, PostFulfillmentCircuitFiltersMarketsAndFindsCircuit)
     EXPECT_EQ(circuit_res->status, 200);
     EXPECT_TRUE(circuit_res->body.find(R"("has_circuit":true)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find(R"("node_count":3)") != std::string::npos);
-    EXPECT_TRUE(circuit_res->body.find("timestamp_ms") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("use_openmp":)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC1") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC2") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC3") != std::string::npos);
@@ -235,8 +236,10 @@ TEST_F(ApiRestTest, PostFulfillmentFlowReturnsTimestamp)
     ASSERT_TRUE(flow_res);
     EXPECT_EQ(flow_res->status, 200);
     EXPECT_TRUE(flow_res->body.find(R"("status":"ok")") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("node_count":2)") != std::string::npos);
     EXPECT_TRUE(flow_res->body.find(R"("max_flow":5.00)") != std::string::npos);
-    EXPECT_TRUE(flow_res->body.find("timestamp_ms") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("use_openmp":)") != std::string::npos);
 }
 
 TEST_F(ApiRestTest, PostFulfillmentCircuitSupportsStartNode)
@@ -295,7 +298,8 @@ TEST_F(ApiRestTest, PostFulfillmentCircuitSupportsStartNode)
     auto circuit_res = cli.Post("/request/fulfillment-circuit", R"({"start":"FC2"})", "application/json");
     ASSERT_TRUE(circuit_res);
     EXPECT_EQ(circuit_res->status, 200);
-    EXPECT_TRUE(circuit_res->body.find("timestamp_ms") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("use_openmp":)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find(R"(["FC2","FC3","FC1","FC2"])") != std::string::npos);
 }
 

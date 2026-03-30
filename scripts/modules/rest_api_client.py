@@ -8,6 +8,7 @@ Public API:
     flow_capacity(base_url, source, sink)   — POST /request/fulfillment-flow
     circuit_solver(base_url, start)         — POST /request/fulfillment-circuit
     get_results(base_url)                   — GET /results
+    build_generated_map(...)                — build a random in-memory map payload
     generate_map(base_url, *, nodes, density, active_prob, secure_prob,
                  output, upload)            — generate & optionally upload map
 """
@@ -52,60 +53,28 @@ def request_json(method: str, url: str, payload: Any = None) -> dict[str, Any]:
             parsed = {"status": "error", "message": body}
         parsed.setdefault("http_status", exc.code)
         return parsed
+    except urllib.error.URLError as exc:
+        return {"status": "error", "message": str(exc.reason)}
+    except Exception as exc:  # pragma: no cover - defensive fallback for CLI usage
+        return {"status": "error", "message": str(exc)}
 
 
-def _print_response(resp: dict) -> None:
+def _print_response(resp: dict[str, Any]) -> None:
     print(json.dumps(resp, indent=2, ensure_ascii=False))
 
 
-# ── Commands ────────────────────────────────────────────────────────────────
-
-def upload_map(base_url: str, file_path: str) -> int:
-    """Upload a map JSON file to /map."""
-    try:
-        payload = load_json_file(file_path)
-    except Exception as exc:
-        print(f"  Error reading {file_path}: {exc}", file=sys.stderr)
-        return 1
-    resp = request_json("POST", f"{base_url}/map", payload)
-    _print_response(resp)
-    return 0
+def _print_error(message: str, *, silent: bool) -> None:
+    if not silent:
+        print(f"  Error: {message}", file=sys.stderr)
 
 
-def flow_capacity(base_url: str, source: str, sink: str) -> int:
-    """Calculate max flow between source and sink."""
-    payload = {"source": source, "sink": sink}
-    resp = request_json("POST", f"{base_url}/request/fulfillment-flow", payload)
-    _print_response(resp)
-    return 0
-
-
-def circuit_solver(base_url: str, start: str) -> int:
-    """Calculate a circuit starting at a node."""
-    payload = {"start": start}
-    resp = request_json("POST", f"{base_url}/request/fulfillment-circuit", payload)
-    _print_response(resp)
-    return 0
-
-
-def get_results(base_url: str) -> int:
-    """Fetch all results from the server."""
-    resp = request_json("GET", f"{base_url}/results")
-    _print_response(resp)
-    return 0
-
-
-def generate_map(
-    base_url: str,
+def build_generated_map(
     *,
     nodes: int = 10,
     density: float = 0.3,
     active_prob: float = 0.9,
     secure_prob: float = 0.9,
-    output: str | None = None,
-    upload: bool = False,
-) -> int:
-    """Generate a random map JSON and optionally upload it."""
+) -> list[dict[str, Any]]:
     tags_pool = ["food", "ammo", "medical", "fuel", "tools"]
     conn_types = [
         "road", "rail", "trail", "tunnel", "bridge",
@@ -116,7 +85,7 @@ def generate_map(
         "cleared", "reinforced",
     ]
 
-    node_list = []
+    node_list: list[dict[str, Any]] = []
     for i in range(nodes):
         node_id = f"N{i:03d}"
         node_tags = random.sample(tags_pool, k=random.randint(0, len(tags_pool)))
@@ -152,17 +121,85 @@ def generate_map(
                 }
                 node["connections"].append(edge)
 
+    return node_list
+
+
+# ── Commands ────────────────────────────────────────────────────────────────
+
+def upload_map(base_url: str, file_path: str, *, silent: bool = False) -> dict[str, Any]:
+    """Upload a map JSON file to /map."""
+    try:
+        payload = load_json_file(file_path)
+    except Exception as exc:
+        message = f"Error reading {file_path}: {exc}"
+        _print_error(message, silent=silent)
+        return {"status": "error", "message": message}
+    resp = request_json("POST", f"{base_url}/map", payload)
+    if not silent:
+        _print_response(resp)
+    return resp
+
+
+def flow_capacity(base_url: str, source: str, sink: str, *, silent: bool = False) -> dict[str, Any]:
+    """Calculate max flow between source and sink."""
+    payload = {"source": source, "sink": sink}
+    resp = request_json("POST", f"{base_url}/request/fulfillment-flow", payload)
+    if not silent:
+        _print_response(resp)
+    return resp
+
+
+def circuit_solver(base_url: str, start: str = "", *, silent: bool = False) -> dict[str, Any]:
+    """Calculate a circuit starting at a node."""
+    payload = {"start": start} if start else {}
+    resp = request_json("POST", f"{base_url}/request/fulfillment-circuit", payload)
+    if not silent:
+        _print_response(resp)
+    return resp
+
+
+def get_results(base_url: str, *, silent: bool = False) -> dict[str, Any]:
+    """Fetch all results from the server."""
+    resp = request_json("GET", f"{base_url}/results")
+    if not silent:
+        _print_response(resp)
+    return resp
+
+
+def generate_map(
+    base_url: str,
+    *,
+    nodes: int = 10,
+    density: float = 0.3,
+    active_prob: float = 0.9,
+    secure_prob: float = 0.9,
+    output: str | None = None,
+    upload: bool = False,
+    silent: bool = False,
+) -> dict[str, Any]:
+    """Generate a random map JSON and optionally upload it."""
+    node_list = build_generated_map(
+        nodes=nodes,
+        density=density,
+        active_prob=active_prob,
+        secure_prob=secure_prob,
+    )
+
     output_json = json.dumps(node_list, indent=4, ensure_ascii=False)
 
     if output:
         Path(output).write_text(output_json, encoding="utf-8")
-        print(f"  Map with {nodes} nodes saved to {output}")
-    else:
+        if not silent:
+            print(f"  Map with {nodes} nodes saved to {output}")
+    elif not silent:
         print(output_json)
 
     if upload:
-        print(f"\n  Uploading to {base_url}/map...")
+        if not silent:
+            print(f"\n  Uploading to {base_url}/map...")
         resp = request_json("POST", f"{base_url}/map", node_list)
-        _print_response(resp)
+        if not silent:
+            _print_response(resp)
+        return resp
 
-    return 0
+    return {"status": "ok", "map": node_list}
