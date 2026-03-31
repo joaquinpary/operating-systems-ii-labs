@@ -33,22 +33,43 @@ services:
       timeout: 5s
       retries: 5
 
+  mongo:
+    image: mongo:7
+    container_name: dhl_mongo
+    restart: always
+    ports:
+      - "27017:27017"
+    networks:
+      - dhl_net
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.runCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   server:
     build:
       context: .
       dockerfile: Dockerfile
       args:
         BUILD_TARGET: server
-        ENABLE_OPENMP: "OFF"
+        ENABLE_OPENMP_CIRCUIT: "ON"
+        ENABLE_OPENMP_FLOW: "OFF"
     container_name: dhl_server
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     environment:
       POSTGRES_HOST: db
       POSTGRES_DB: dhl_db
       POSTGRES_USER: dhl_user
       POSTGRES_PASSWORD: dhl_pass
+      MONGO_URI: mongodb://mongo:27017/?serverSelectionTimeoutMS=1000&connectTimeoutMS=1000
+      MONGO_DB: dhl_results
       CONFIG_PATH: /etc/server/config.json
       LOG_DIR: /var/log/dhl
     ports:
@@ -114,3 +135,4 @@ networks:
 
 volumes:
   pgdata:
+  mongodata:

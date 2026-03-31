@@ -147,7 +147,9 @@ foreach(test_file ${SERVER_TEST})
     
     # Find PostgreSQL for server tests
     find_package(PostgreSQL REQUIRED)
-    
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
         ${PROJECT_SOURCE_DIR}/include/common
@@ -159,14 +161,20 @@ foreach(test_file ${SERVER_TEST})
         pthread
         rt
         pqxx
+        PkgConfig::MONGOC
         ${PostgreSQL_LIBRARIES}
     )
     target_compile_definitions(${exec_name} PRIVATE TESTING)
 
-    if(ENABLE_OPENMP)
+    if(ENABLE_OPENMP_FLOW OR ENABLE_OPENMP_CIRCUIT)
         find_package(OpenMP REQUIRED)
         target_link_libraries(${exec_name} PRIVATE OpenMP::OpenMP_CXX)
-        target_compile_definitions(${exec_name} PRIVATE USE_OPENMP=1)
+        if(ENABLE_OPENMP_FLOW)
+            target_compile_definitions(${exec_name} PRIVATE USE_OPENMP_FLOW=1)
+        endif()
+        if(ENABLE_OPENMP_CIRCUIT)
+            target_compile_definitions(${exec_name} PRIVATE USE_OPENMP_CIRCUIT=1)
+        endif()
     endif()
 
     add_test(NAME ${exec_name} COMMAND ${exec_name})

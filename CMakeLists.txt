@@ -14,7 +14,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(BUILD_TARGET "Build target: server or client" "server")
 option(RUN_TEST "Run tests" OFF)
-option(ENABLE_OPENMP "Enable OpenMP parallelization for heavy algorithms" OFF)
+option(ENABLE_OPENMP_FLOW "Enable OpenMP parallelization for flow algorithm" OFF)
+option(ENABLE_OPENMP_CIRCUIT "Enable OpenMP parallelization for circuit algorithm" OFF)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
@@ -56,6 +57,10 @@ if(BUILD_TARGET STREQUAL "server")
         UPDATE_COMMAND ""
     )
     FetchContent_MakeAvailable(pqxx)
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
     include_directories(${cpp_httplib_SOURCE_DIR})
@@ -90,15 +95,21 @@ if(BUILD_TARGET STREQUAL "server")
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
+    target_link_libraries(${TARGET_EXEC} PkgConfig::MONGOC)
     set_target_properties(${TARGET_EXEC} PROPERTIES
         BUILD_RPATH  "${CMAKE_BINARY_DIR}"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
     )
 
-    if(ENABLE_OPENMP)
+    if(ENABLE_OPENMP_FLOW OR ENABLE_OPENMP_CIRCUIT)
         find_package(OpenMP REQUIRED)
         target_link_libraries(${TARGET_EXEC} OpenMP::OpenMP_CXX)
-        target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP=1)
+        if(ENABLE_OPENMP_FLOW)
+            target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP_FLOW=1)
+        endif()
+        if(ENABLE_OPENMP_CIRCUIT)
+            target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP_CIRCUIT=1)
+        endif()
     endif()
 
     # Embed build-tree location of libadmin_cli.so into RPATH

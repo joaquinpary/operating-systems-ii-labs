@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     zlib1g-dev \
     libomp-dev \
+    libmongoc-dev \
+    libbson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -26,11 +28,12 @@ COPY tests/ ./tests/
 
 # Build argument to determine what to build (client or server)
 ARG BUILD_TARGET=server
-ARG ENABLE_OPENMP=OFF
+ARG ENABLE_OPENMP_FLOW=OFF
+ARG ENABLE_OPENMP_CIRCUIT=OFF
 
 # Build the project
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP=${ENABLE_OPENMP} .. && \
+    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP_FLOW=${ENABLE_OPENMP_FLOW} -DENABLE_OPENMP_CIRCUIT=${ENABLE_OPENMP_CIRCUIT} .. && \
     make
 
 # Runtime stage
@@ -44,6 +47,9 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     zlib1g \
     libomp5 \
+    libgomp1 \
+    libmongoc-1.0-0t64 \
+    libbson-1.0-0t64 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -76,16 +82,5 @@ RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
     if [ -d /tmp/build/_deps/pqxx-build/src ]; then \
         cp /tmp/build/_deps/pqxx-build/src/libpqxx*.so* /usr/local/lib/ || true; \
     fi
-
-# Copy MongoDB driver shared libraries built via CMake FetchContent (server only)
-RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
-    find /tmp/build/_deps \( \
-        -name 'libmongocxx*.so*' -o \
-        -name 'libbsoncxx*.so*' -o \
-        -name 'libmongoc2*.so*' -o \
-        -name 'libbson2*.so*' -o \
-        -name 'libmongoc-1.0*.so*' -o \
-        -name 'libbson-1.0*.so*' \
-    \) -exec cp -P {} /usr/local/lib/ \; 2>/dev/null || true
 
 RUN ldconfig

@@ -1,4 +1,6 @@
 #include "api_rest.hpp"
+
+#include <cstdlib>
 #include <chrono>
 #include <csignal>
 #include <gtest/gtest.h>
@@ -16,6 +18,8 @@ class ApiRestTest : public ::testing::Test
     {
         // Use an arbitrary port for testing to avoid conflicts
         cfg.api_rest_port = 18080;
+        setenv("MONGO_URI", "mongodb://127.0.0.1:27018/?serverSelectionTimeoutMS=50&connectTimeoutMS=50", 1);
+        setenv("MONGO_DB", "test_results", 1);
 
         // Block SIGTERM in main thread so that only the signal waiter thread inside
         // run_api_rest_process catches it.
@@ -46,6 +50,9 @@ class ApiRestTest : public ::testing::Test
         sigemptyset(&mask);
         sigaddset(&mask, SIGTERM);
         pthread_sigmask(SIG_UNBLOCK, &mask, nullptr);
+
+        unsetenv("MONGO_URI");
+        unsetenv("MONGO_DB");
     }
 };
 
@@ -185,10 +192,54 @@ TEST_F(ApiRestTest, PostFulfillmentCircuitFiltersMarketsAndFindsCircuit)
     EXPECT_EQ(circuit_res->status, 200);
     EXPECT_TRUE(circuit_res->body.find(R"("has_circuit":true)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find(R"("node_count":3)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("use_openmp":)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC1") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC2") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("FC3") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find("MK1") == std::string::npos);
+}
+
+TEST_F(ApiRestTest, PostFulfillmentFlowReturnsTimestamp)
+{
+    httplib::Client cli("localhost", 18080);
+
+    std::string map_json = R"([
+        {
+            "node_id": "FC1",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": [
+                {
+                    "to": "FC2",
+                    "connection_type": "road",
+                    "base_weight": 5.0,
+                    "connection_conditions": []
+                }
+            ]
+        },
+        {
+            "node_id": "FC2",
+            "node_type": "fulfillment_center",
+            "is_active": true,
+            "is_secure": true,
+            "connections": []
+        }
+    ])";
+
+    auto map_res = cli.Post("/map", map_json, "application/json");
+    ASSERT_TRUE(map_res);
+    ASSERT_EQ(map_res->status, 200);
+
+    auto flow_res = cli.Post("/request/fulfillment-flow", R"({"source":"FC1","sink":"FC2"})", "application/json");
+    ASSERT_TRUE(flow_res);
+    EXPECT_EQ(flow_res->status, 200);
+    EXPECT_TRUE(flow_res->body.find(R"("status":"ok")") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("node_count":2)") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("max_flow":5.00)") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("use_openmp":)") != std::string::npos);
 }
 
 TEST_F(ApiRestTest, PostFulfillmentCircuitSupportsStartNode)
@@ -247,7 +298,20 @@ TEST_F(ApiRestTest, PostFulfillmentCircuitSupportsStartNode)
     auto circuit_res = cli.Post("/request/fulfillment-circuit", R"({"start":"FC2"})", "application/json");
     ASSERT_TRUE(circuit_res);
     EXPECT_EQ(circuit_res->status, 200);
+    EXPECT_TRUE(circuit_res->body.find(R"("timestamp":)") != std::string::npos);
+    EXPECT_TRUE(circuit_res->body.find(R"("use_openmp":)") != std::string::npos);
     EXPECT_TRUE(circuit_res->body.find(R"(["FC2","FC3","FC1","FC2"])") != std::string::npos);
+}
+
+TEST_F(ApiRestTest, GetResultsReturns200WithJsonArray)
+{
+    httplib::Client cli("localhost", 18080);
+
+    auto res = cli.Get("/results");
+    ASSERT_TRUE(res);
+    EXPECT_EQ(res->status, 200);
+    EXPECT_TRUE(res->body.find(R"("status":"ok")") != std::string::npos);
+    EXPECT_TRUE(res->body.find(R"("results":[)") != std::string::npos);
 }
 
 int main(int argc, char** argv)

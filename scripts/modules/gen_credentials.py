@@ -1,15 +1,24 @@
+"""
+Credential generator module.
+
+Public API:
+    generate_configs(num_clients)  — generate client & server .conf files
+"""
+
 import os
 import random
 import hashlib
-import sys
 
 SERVER_HOST = "server"
 SERVER_PORT = "9999"
 
 ERROR_RATE = 0.1
 
-CLIENTS_DIR = "config/clients"
-SERVER_DIR = "config/server"
+# Resolve paths relative to the project root (two levels up from this file)
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_MODULE_DIR))
+CLIENTS_DIR = os.path.join(_PROJECT_ROOT, "config", "clients")
+SERVER_DIR = os.path.join(_PROJECT_ROOT, "config", "server")
 
 
 def generate_password(username):
@@ -17,28 +26,28 @@ def generate_password(username):
     return hashlib.md5(username.encode()).hexdigest()
 
 
-def ensure_dir(path):
+def _ensure_dir(path):
     """Create directory if it doesn't exist"""
     if not os.path.exists(path):
         try:
             os.makedirs(path)
-            print(f"Directory created: {path}")
+            print(f"  Directory created: {path}")
         except OSError as e:
-            print(f"Error creating directory {path}: {e}")
+            print(f"  Error creating directory {path}: {e}")
             return False
     return True
 
 
-def clean_conf_files(directory):
+def _clean_conf_files(directory):
     """Remove existing .conf files from a directory"""
     for filename in os.listdir(directory):
         if filename.endswith('.conf'):
             os.remove(os.path.join(directory, filename))
 
 
-def write_conf_file(filepath, username, password, client_type,
-                    host=SERVER_HOST, port=SERVER_PORT,
-                    protocol=None, ip_version=None):
+def _write_conf_file(filepath, username, password, client_type,
+                     host=SERVER_HOST, port=SERVER_PORT,
+                     protocol=None, ip_version=None):
     """Write a single .conf file"""
     try:
         with open(filepath, "w") as f:
@@ -52,19 +61,24 @@ def write_conf_file(filepath, username, password, client_type,
             f.write(f"username = {username}\n")
             f.write(f"password = {password}\n")
     except IOError as e:
-        print(f"Error writing file {filepath}: {e}")
+        print(f"  Error writing file {filepath}: {e}")
 
 
 def generate_configs(num_clients=2000):
-    if not ensure_dir(CLIENTS_DIR) or not ensure_dir(SERVER_DIR):
+    """Generate client and server configuration files.
+
+    Args:
+        num_clients: Number of client configs to generate.
+    """
+    if not _ensure_dir(CLIENTS_DIR) or not _ensure_dir(SERVER_DIR):
         return
 
     clients = []
 
     if num_clients < 2000:
-        print("Cleaning existing config files...")
-        clean_conf_files(CLIENTS_DIR)
-        clean_conf_files(SERVER_DIR)
+        print("  Cleaning existing config files...")
+        _clean_conf_files(CLIENTS_DIR)
+        _clean_conf_files(SERVER_DIR)
 
     for i in range(1, num_clients + 1):
         username = f"client_{i:04d}"
@@ -77,7 +91,7 @@ def generate_configs(num_clients=2000):
             "type": client_type
         })
 
-    print(f"Generating {len(clients)} configuration files...")
+    print(f"  Generating {len(clients)} configuration files...")
 
     for client in clients:
         username = client['username']
@@ -93,14 +107,14 @@ def generate_configs(num_clients=2000):
         ip_version = random.choice(['v4', 'v6'])
 
         # Client .conf (may have wrong password)
-        write_conf_file(
+        _write_conf_file(
             os.path.join(CLIENTS_DIR, f"{username}.conf"),
             username, client_password, client_type,
             protocol=protocol, ip_version=ip_version
         )
 
         # Server .conf (always correct password, for DB population)
-        write_conf_file(
+        _write_conf_file(
             os.path.join(SERVER_DIR, f"{username}.conf"),
             username, correct_password, client_type
         )
@@ -108,28 +122,17 @@ def generate_configs(num_clients=2000):
     # Always generate admin CLI credential
     cli_username = "cli_admin"
     cli_password = generate_password(cli_username)
-    write_conf_file(
+    _write_conf_file(
         os.path.join(CLIENTS_DIR, "cli_admin.conf"),
         cli_username, cli_password, "CLI",
         protocol="tcp", ip_version="v4"
     )
-    write_conf_file(
+    _write_conf_file(
         os.path.join(SERVER_DIR, "cli_admin.conf"),
         cli_username, cli_password, "CLI"
     )
 
-    print(f"Generated client configs in: {CLIENTS_DIR}")
-    print(f"Generated server configs in: {SERVER_DIR}")
-    print(f"Generated admin CLI config: cli_admin.conf")
-    print("Process completed.")
-
-
-if __name__ == "__main__":
-    num_clients = 2000  # Default
-    if len(sys.argv) > 1:
-        try:
-            num_clients = int(sys.argv[1])
-        except ValueError:
-            print(f"Invalid number of clients: {sys.argv[1]}. Using default: 2000")
-            num_clients = 2000
-    generate_configs(num_clients)
+    print(f"  Client configs → {CLIENTS_DIR}")
+    print(f"  Server configs → {SERVER_DIR}")
+    print(f"  Admin CLI config → cli_admin.conf")
+    print("  Done.")
