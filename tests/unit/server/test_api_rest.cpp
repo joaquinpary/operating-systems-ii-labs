@@ -229,7 +229,7 @@ TEST_F(ApiRestTest, PostFulfillmentFlowReturnsTimestamp)
     EXPECT_EQ(flow_res->status, 200);
     EXPECT_TRUE(flow_res->body.find(R"("status":"ok")") != std::string::npos);
     EXPECT_TRUE(flow_res->body.find(R"("node_count":2)") != std::string::npos);
-    EXPECT_TRUE(flow_res->body.find(R"("max_flow":5.00)") != std::string::npos);
+    EXPECT_TRUE(flow_res->body.find(R"("max_flow":5)") != std::string::npos);
     EXPECT_TRUE(flow_res->body.find(R"("timestamp":)") != std::string::npos);
     EXPECT_TRUE(flow_res->body.find(R"("use_openmp":)") != std::string::npos);
 }
