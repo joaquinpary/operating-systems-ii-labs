@@ -5,7 +5,7 @@
 #include <string>
 #include <unordered_set>
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_CIRCUIT
 #include <omp.h>
 #endif
 
@@ -162,7 +162,7 @@ SymMatrix symbolic_matrix_multiply(const SymMatrix& left, const SymMatrix& right
     const size_t size = left.size();
     SymMatrix result(size, std::vector<SymPaths>(size));
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_CIRCUIT
 #pragma omp parallel for schedule(dynamic)
 #endif
     for (size_t row = 0; row < size; ++row)
@@ -249,7 +249,7 @@ CircuitResult find_hamiltonian_circuits(const std::vector<std::vector<double>>& 
         throw std::invalid_argument("Start node index is out of range");
     }
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_CIRCUIT
     double t_start = omp_get_wtime();
 #else
     auto t_start = std::chrono::high_resolution_clock::now();
@@ -299,7 +299,7 @@ CircuitResult find_hamiltonian_circuits(const std::vector<std::vector<double>>& 
         }
     }
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_CIRCUIT
     double t_end = omp_get_wtime();
     LOG_INFO_MSG("[Profiling] Kaufmann-Malgrange executed in %.6f seconds (OpenMP)", t_end - t_start);
     double exec_time = (t_end - t_start) * 1000.0;

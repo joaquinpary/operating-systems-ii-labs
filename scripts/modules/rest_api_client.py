@@ -41,7 +41,7 @@ def request_json(method: str, url: str, payload: Any = None) -> dict[str, Any]:
         url=url, data=data, headers=headers, method=method
     )
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=3600) as response:
             charset = response.headers.get_content_charset("utf-8")
             body = response.read().decode(charset)
             return json.loads(body) if body else {}

@@ -57,7 +57,7 @@ std::string format_timestamp_iso(std::int64_t timestamp_ms)
     if (gmtime_r(&seconds, &utc_tm) == nullptr)
         return "1970-01-01T00:00:00.000Z";
 
-    char buffer[32];
+    char buffer[64];
     std::snprintf(buffer, sizeof(buffer),
                   "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
                   utc_tm.tm_year + 1900,

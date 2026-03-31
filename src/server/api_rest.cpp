@@ -27,10 +27,16 @@ namespace
 constexpr const char* FULFILLMENT_CENTER_NODE_TYPE = "fulfillment_center";
 constexpr size_t MAX_FULFILLMENT_CIRCUIT_NODES = 20;
 
-#ifdef USE_OPENMP
-constexpr bool kUseOpenMP = true;
+#ifdef USE_OPENMP_FLOW
+constexpr bool kUseOpenMPFlow = true;
 #else
-constexpr bool kUseOpenMP = false;
+constexpr bool kUseOpenMPFlow = false;
+#endif
+
+#ifdef USE_OPENMP_CIRCUIT
+constexpr bool kUseOpenMPCircuit = true;
+#else
+constexpr bool kUseOpenMPCircuit = false;
 #endif
 
 std::int64_t current_timestamp_ms()
@@ -170,13 +176,12 @@ void run_api_rest_process(const config::server_config& cfg)
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
 
-                char res_buf[512];
-                std::snprintf(res_buf, sizeof(res_buf),
-                              R"({"status":"ok","accepted":%d,"discarded":%d,"matrix_size":%d,"nodes":%s})",
-                              (int)parsed_map.nodes.size(), parsed_map.total_discarded, matrix_size,
-                              accepted_ids.c_str());
+                std::string res_str = R"({"status":"ok","accepted":)" + std::to_string(parsed_map.nodes.size()) + 
+                                      R"(,"discarded":)" + std::to_string(parsed_map.total_discarded) + 
+                                      R"(,"matrix_size":)" + std::to_string(matrix_size) + 
+                                      R"(,"nodes":)" + accepted_ids + "}";
 
-                response.set_content(res_buf, "application/json");
+                response.set_content(res_str, "application/json");
             }
             catch (const std::exception& e)
             {
@@ -237,7 +242,7 @@ void run_api_rest_process(const config::server_config& cfg)
                                          flow_res.max_flow,
                                          flow_res.execution_time_ms,
                                          timestamp,
-                                         kUseOpenMP);
+                                         kUseOpenMPFlow);
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
@@ -246,7 +251,7 @@ void run_api_rest_process(const config::server_config& cfg)
                 std::snprintf(res_buf, sizeof(res_buf),
                               R"({"status":"ok","source":"%s","sink":"%s","node_count":%d,"max_flow":%.2f,"execution_time_ms":%.2f,"use_openmp":%s,"timestamp":"%s"})",
                               req.source.c_str(), req.sink.c_str(), node_count, flow_res.max_flow,
-                              flow_res.execution_time_ms, kUseOpenMP ? "true" : "false", timestamp.c_str());
+                              flow_res.execution_time_ms, kUseOpenMPFlow ? "true" : "false", timestamp.c_str());
 
                 response.set_content(res_buf, "application/json");
             }
@@ -307,12 +312,12 @@ void run_api_rest_process(const config::server_config& cfg)
 
                 const std::int64_t timestamp_ms = current_timestamp_ms();
                 const std::string timestamp = server::format_timestamp_iso(timestamp_ms);
-                server::save_circuit_result(req.start, subgraph_node_ids, circuit_result, timestamp, kUseOpenMP);
+                server::save_circuit_result(req.start, subgraph_node_ids, circuit_result, timestamp, kUseOpenMPCircuit);
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
                 response.set_content(
-                    server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp, kUseOpenMP),
+                    server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp, kUseOpenMPCircuit),
                     "application/json");
             }
             catch (const std::exception& e)

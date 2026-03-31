@@ -28,11 +28,12 @@ COPY tests/ ./tests/
 
 # Build argument to determine what to build (client or server)
 ARG BUILD_TARGET=server
-ARG ENABLE_OPENMP=OFF
+ARG ENABLE_OPENMP_FLOW=OFF
+ARG ENABLE_OPENMP_CIRCUIT=OFF
 
 # Build the project
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP=${ENABLE_OPENMP} .. && \
+    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP_FLOW=${ENABLE_OPENMP_FLOW} -DENABLE_OPENMP_CIRCUIT=${ENABLE_OPENMP_CIRCUIT} .. && \
     make
 
 # Runtime stage
@@ -46,6 +47,7 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     zlib1g \
     libomp5 \
+    libgomp1 \
     libmongoc-1.0-0t64 \
     libbson-1.0-0t64 \
     && rm -rf /var/lib/apt/lists/*

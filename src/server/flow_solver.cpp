@@ -4,7 +4,7 @@
 #include <limits>
 #include <queue>
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_FLOW
 #include <omp.h>
 #endif
 
@@ -59,14 +59,14 @@ FlowResult ford_fulkerson(const std::vector<std::vector<double>>& capacity_graph
         return {0.0, 0.0};
     }
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_FLOW
     double t_start = omp_get_wtime();
 #else
     auto t_start = std::chrono::high_resolution_clock::now();
 #endif
 
     std::vector<std::vector<double>> residual_graph(V, std::vector<double>(V, 0.0));
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_FLOW
 #pragma omp parallel for schedule(static)
 #endif
     for (int i = 0; i < V; ++i)
@@ -96,7 +96,7 @@ FlowResult ford_fulkerson(const std::vector<std::vector<double>>& capacity_graph
         max_flow += path_flow;
     }
 
-#ifdef USE_OPENMP
+#ifdef USE_OPENMP_FLOW
     double t_end = omp_get_wtime();
     LOG_INFO_MSG("[Profiling] Ford-Fulkerson executed in %.6f seconds (OpenMP)", t_end - t_start);
     double exec_time = (t_end - t_start) * 1000.0;
