@@ -200,6 +200,44 @@ def _build_flow_node_counts(max_nodes: int, step: int) -> list[int]:
     return node_counts
 
 
+def _map_filename(node_count: int, iteration: int) -> str:
+    return f"N{node_count:04d}_I{iteration:02d}.json"
+
+
+def _default_maps_dir(prefix: str) -> Path:
+    _ensure_benchmark_dir()
+    return BENCHMARK_DIR / "maps" / f"{prefix}_{_compact_stamp()}"
+
+
+def _prepare_map(
+    base_url: str,
+    *,
+    node_count: int,
+    iteration: int,
+    density: float,
+    maps_dir: Path,
+) -> dict[str, Any]:
+    """Generate or load a map, save it to maps_dir, and upload it."""
+    map_file = maps_dir / _map_filename(node_count, iteration)
+
+    if map_file.exists():
+        node_list = json.loads(map_file.read_text(encoding="utf-8"))
+    else:
+        node_list = rest_api_client.build_generated_map(
+            nodes=node_count,
+            density=density,
+            active_prob=1.0,
+            secure_prob=1.0,
+        )
+        maps_dir.mkdir(parents=True, exist_ok=True)
+        map_file.write_text(
+            json.dumps(node_list, ensure_ascii=False), encoding="utf-8"
+        )
+
+    resp = rest_api_client.request_json("POST", f"{base_url}/map", node_list)
+    return resp
+
+
 def _write_benchmark_output(
     *,
     prefix: str,
@@ -220,6 +258,7 @@ def run_flow_benchmark(
     iterations: int = 5,
     density: float = 0.3,
     output_path: str | None = None,
+    maps_dir: str | None = None,
 ) -> dict[str, Any]:
     if max_nodes < 10:
         return {"status": "error", "message": "Flow benchmark requires max_nodes >= 10"}
@@ -227,6 +266,9 @@ def run_flow_benchmark(
         return {"status": "error", "message": "Flow benchmark requires step > 0"}
     if iterations <= 0:
         return {"status": "error", "message": "Flow benchmark requires iterations > 0"}
+
+    resolved_maps_dir = Path(maps_dir) if maps_dir else _default_maps_dir("flow")
+    print(f"\n  Maps directory: {resolved_maps_dir}")
 
     started_at = _format_iso(_utc_now())
     records: list[dict[str, Any]] = []
@@ -236,14 +278,12 @@ def run_flow_benchmark(
     print("\n  Flow benchmark")
     for iteration in range(1, iterations + 1):
         for node_count in _build_flow_node_counts(max_nodes, step):
-            map_response = rest_api_client.generate_map(
+            map_response = _prepare_map(
                 base_url,
-                nodes=node_count,
+                node_count=node_count,
+                iteration=iteration,
                 density=density,
-                active_prob=1.0,
-                secure_prob=1.0,
-                upload=True,
-                silent=True,
+                maps_dir=resolved_maps_dir,
             )
             if map_response.get("status") != "ok":
                 return {
@@ -304,6 +344,7 @@ def run_flow_benchmark(
         "max_nodes": max_nodes,
         "step": step,
         "density": density,
+        "maps_dir": str(resolved_maps_dir),
         "records": records,
         "result_documents": filtered_results,
         "normalized_results": normalized_results,
@@ -323,6 +364,7 @@ def run_circuit_benchmark(
     iterations: int = 5,
     density: float = 0.5,
     output_path: str | None = None,
+    maps_dir: str | None = None,
 ) -> dict[str, Any]:
     if max_nodes < 2:
         return {"status": "error", "message": "Circuit benchmark requires max_nodes >= 2"}
@@ -332,6 +374,9 @@ def run_circuit_benchmark(
     bounded_max_nodes = min(max_nodes, MAX_CIRCUIT_NODES)
     if bounded_max_nodes != max_nodes:
         print(f"\n  Circuit max nodes capped to {MAX_CIRCUIT_NODES} by server limit")
+    resolved_maps_dir = Path(maps_dir) if maps_dir else _default_maps_dir("circuit")
+    print(f"\n  Maps directory: {resolved_maps_dir}")
+
     started_at = _format_iso(_utc_now())
     records: list[dict[str, Any]] = []
     timestamps: set[str] = set()
@@ -340,14 +385,12 @@ def run_circuit_benchmark(
     print("\n  Circuit benchmark")
     for iteration in range(1, iterations + 1):
         for node_count in range(2, bounded_max_nodes + 1):
-            map_response = rest_api_client.generate_map(
+            map_response = _prepare_map(
                 base_url,
-                nodes=node_count,
+                node_count=node_count,
+                iteration=iteration,
                 density=density,
-                active_prob=1.0,
-                secure_prob=1.0,
-                upload=True,
-                silent=True,
+                maps_dir=resolved_maps_dir,
             )
             if map_response.get("status") != "ok":
                 return {
@@ -407,6 +450,7 @@ def run_circuit_benchmark(
         "iterations": iterations,
         "max_nodes": bounded_max_nodes,
         "density": density,
+        "maps_dir": str(resolved_maps_dir),
         "records": records,
         "result_documents": filtered_results,
         "normalized_results": normalized_results,

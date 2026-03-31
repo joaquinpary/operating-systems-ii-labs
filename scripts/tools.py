@@ -226,6 +226,14 @@ def menu_benchmark():
     if choice == "0":
         return
 
+    maps_dir = None
+    reuse = _prompt("Reuse maps from previous benchmark? (y/N)", "N")
+    if reuse.lower() in ("y", "yes"):
+        maps_dir = _prompt("Maps directory path")
+        if not maps_dir:
+            print(f"  {RED}No path provided, generating new maps.{RESET}")
+            maps_dir = None
+
     try:
         if choice in {"1", "3"}:
             max_nodes = _prompt_int("Flow max nodes", 1000)
@@ -238,6 +246,7 @@ def menu_benchmark():
                 step=step,
                 iterations=iterations,
                 density=density,
+                maps_dir=maps_dir,
             )
             _print_result_error(result)
 
@@ -250,6 +259,7 @@ def menu_benchmark():
                 max_nodes=max_nodes,
                 iterations=iterations,
                 density=density,
+                maps_dir=maps_dir,
             )
             _print_result_error(result)
 
