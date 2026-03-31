@@ -11,23 +11,16 @@ class DatabaseTest : public ::testing::Test
   protected:
     void SetUp() override
     {
-        // Tests will run with or without database available
-        // We check availability in individual tests
     }
 
     void TearDown() override
     {
-        // Cleanup if needed
     }
 };
 
-// Test that connect_to_database returns nullptr when connection is not available
 TEST_F(DatabaseTest, ConnectToDatabaseReturnsNullWhenNotAvailable)
 {
-    // This test expects nullptr when DB is not running
-    // If DB is available, the connection will succeed
     auto conn = connect_to_database();
-    // We accept both outcomes: nullptr if DB unavailable, or valid connection if available
     if (conn)
     {
         EXPECT_NE(conn, nullptr);
@@ -35,12 +28,10 @@ TEST_F(DatabaseTest, ConnectToDatabaseReturnsNullWhenNotAvailable)
     }
     else
     {
-        // DB not available, which is acceptable for this test
         EXPECT_EQ(conn, nullptr);
     }
 }
 
-// Test initialize_database function
 TEST_F(DatabaseTest, InitializeDatabase)
 {
     auto conn = connect_to_database();
@@ -48,7 +39,6 @@ TEST_F(DatabaseTest, InitializeDatabase)
     {
         EXPECT_EQ(initialize_database(*conn, "config/clients"), 0);
 
-        // Verify that credentials table exists
         pqxx::work txn(*conn);
         try
         {
@@ -58,18 +48,15 @@ TEST_F(DatabaseTest, InitializeDatabase)
         }
         catch (const std::exception& ex)
         {
-            // Table might not exist if initialization failed
             FAIL() << "Failed to check credentials table: " << ex.what();
         }
     }
     else
     {
-        // DB not available, skip this test
         GTEST_SKIP() << "Database not available, skipping initialization test";
     }
 }
 
-// Test create_credentials_table
 TEST_F(DatabaseTest, CreateCredentialsTable)
 {
     auto conn = connect_to_database();
@@ -81,14 +68,12 @@ TEST_F(DatabaseTest, CreateCredentialsTable)
     int result = create_credentials_table(*conn);
     EXPECT_EQ(result, 0);
 
-    // Verify table exists (need new transaction since create_credentials_table commits)
     pqxx::work verify_txn(*conn);
     auto table_check =
         verify_txn.exec("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'credentials')");
     EXPECT_TRUE(table_check[0][0].as<bool>());
 }
 
-// Test query_credentials_by_username with non-existent user
 TEST_F(DatabaseTest, QueryCredentialsByUsernameNonExistent)
 {
     auto conn = connect_to_database();
@@ -97,15 +82,12 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameNonExistent)
         GTEST_SKIP() << "Database not available, skipping query test";
     }
 
-    // Ensure table exists
     create_credentials_table(*conn);
 
-    // Query for non-existent user
     auto cred = query_credentials_by_username(*conn, "nonexistent_user");
     EXPECT_EQ(cred, nullptr);
 }
 
-// Test query_credentials_by_username with existing user
 TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
 {
     auto conn = connect_to_database();
@@ -114,10 +96,8 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
         GTEST_SKIP() << "Database not available, skipping query test";
     }
 
-    // Ensure table exists
     create_credentials_table(*conn);
 
-    // Insert a test credential
     {
         pqxx::work insert_txn(*conn);
         try
@@ -135,7 +115,6 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
         }
     }
 
-    // Query for existing user
     {
         auto cred = query_credentials_by_username(*conn, "test_user");
         ASSERT_NE(cred, nullptr);
@@ -145,7 +124,6 @@ TEST_F(DatabaseTest, QueryCredentialsByUsernameExisting)
         EXPECT_TRUE(cred->is_active);
     }
 
-    // Cleanup
     {
         pqxx::work cleanup_txn(*conn);
         cleanup_txn.exec("DELETE FROM credentials WHERE username = 'test_user'");
@@ -162,17 +140,14 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         GTEST_SKIP() << "Database not available, skipping populate test";
     }
 
-    // Ensure table exists
     create_credentials_table(*conn);
 
-    // Clear table first
     {
         pqxx::work clear_txn(*conn);
         clear_txn.exec("DELETE FROM credentials");
         clear_txn.commit();
     }
 
-    // Create a temporary credentials directory with .conf files for testing
     const std::string test_dir = "/tmp/test_credentials_dir";
     std::filesystem::create_directories(test_dir);
     {
@@ -197,11 +172,9 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         file2.close();
     }
 
-    // Test with valid credentials directory
     int result = populate_credentials_table(*conn, test_dir);
     EXPECT_EQ(result, 0);
 
-    // Verify credentials were inserted (populate_credentials_table commits internally)
     {
         pqxx::work verify_txn(*conn);
         auto count_result = verify_txn.exec("SELECT COUNT(*) FROM credentials");
@@ -209,7 +182,6 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         EXPECT_EQ(count, 2);
     }
 
-    // Verify specific credentials
     {
         auto cred1 = query_credentials_by_username(*conn, "test_user1");
         ASSERT_NE(cred1, nullptr);
@@ -226,7 +198,6 @@ TEST_F(DatabaseTest, PopulateCredentialsTableValidFile)
         EXPECT_EQ(cred2->client_type, "WAREHOUSE");
     }
 
-    // Cleanup
     {
         pqxx::work cleanup_txn(*conn);
         cleanup_txn.exec("DELETE FROM credentials WHERE username IN ('test_user1', 'test_user2')");

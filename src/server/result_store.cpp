@@ -18,8 +18,6 @@ std::once_flag    g_init_flag;
 mongoc_client_pool_t* g_pool    = nullptr;
 std::string       g_db_name;
 std::mutex        g_state_mutex;
-
-// Helper: insert one BSON document into the results collection (no lock held).
 static bool insert_document(mongoc_client_pool_t* pool, const std::string& db, bson_t* doc)
 {
     mongoc_client_t* client = mongoc_client_pool_pop(pool);

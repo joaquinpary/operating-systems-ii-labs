@@ -103,8 +103,6 @@ MapParseResult parse_map_json(const std::string& json_body)
 
         bool is_secure = false;
         extract_bool(node_json, "is_secure", is_secure, false);
-
-        // Filter rules
         if ((node_type != "fulfillment_center" && node_type != "market") || !is_active || !is_secure)
         {
             result.total_discarded++;
@@ -224,6 +222,31 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body)
 
     cJSON_Delete(root);
     return req;
+}
+
+std::string build_flow_response_json(const FlowRequest& request,
+                                     int node_count,
+                                     const FlowResult& flow_result,
+                                     const std::string& timestamp,
+                                     bool use_openmp)
+{
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "ok");
+    cJSON_AddStringToObject(root, "source", request.source.c_str());
+    cJSON_AddStringToObject(root, "sink", request.sink.c_str());
+    cJSON_AddNumberToObject(root, "node_count", node_count);
+    cJSON_AddNumberToObject(root, "max_flow", flow_result.max_flow);
+    cJSON_AddNumberToObject(root, "execution_time_ms", flow_result.execution_time_ms);
+    cJSON_AddBoolToObject(root, "use_openmp", use_openmp ? 1 : 0);
+    cJSON_AddStringToObject(root, "timestamp", timestamp.c_str());
+
+    char* raw_json = cJSON_PrintUnformatted(root);
+    std::string response =
+        raw_json != nullptr ? raw_json : R"({"status":"error","message":"Failed to build response"})";
+
+    std::free(raw_json);
+    cJSON_Delete(root);
+    return response;
 }
 
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,

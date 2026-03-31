@@ -16,28 +16,21 @@ class ApiRestTest : public ::testing::Test
 
     void SetUp() override
     {
-        // Use an arbitrary port for testing to avoid conflicts
         cfg.api_rest_port = 18080;
         setenv("MONGO_URI", "mongodb://127.0.0.1:27018/?serverSelectionTimeoutMS=50&connectTimeoutMS=50", 1);
         setenv("MONGO_DB", "test_results", 1);
 
-        // Block SIGTERM in main thread so that only the signal waiter thread inside
-        // run_api_rest_process catches it.
         sigset_t mask;
         sigemptyset(&mask);
         sigaddset(&mask, SIGTERM);
         pthread_sigmask(SIG_BLOCK, &mask, nullptr);
 
-        // Start REST server in background
         server_thread = std::thread([this]() { run_api_rest_process(cfg); });
-
-        // Give the server a moment to start and bind
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
     }
 
     void TearDown() override
     {
-        // Send SIGTERM to the process so that the `sigwait` thread inside the server stops it.
         kill(getpid(), SIGTERM);
 
         if (server_thread.joinable())
@@ -45,7 +38,6 @@ class ApiRestTest : public ::testing::Test
             server_thread.join();
         }
 
-        // Unblock SIGTERM
         sigset_t mask;
         sigemptyset(&mask);
         sigaddset(&mask, SIGTERM);

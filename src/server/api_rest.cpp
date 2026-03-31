@@ -246,14 +246,9 @@ void run_api_rest_process(const config::server_config& cfg)
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
-
-                char res_buf[512];
-                std::snprintf(res_buf, sizeof(res_buf),
-                              R"({"status":"ok","source":"%s","sink":"%s","node_count":%d,"max_flow":%.2f,"execution_time_ms":%.2f,"use_openmp":%s,"timestamp":"%s"})",
-                              req.source.c_str(), req.sink.c_str(), node_count, flow_res.max_flow,
-                              flow_res.execution_time_ms, kUseOpenMPFlow ? "true" : "false", timestamp.c_str());
-
-                response.set_content(res_buf, "application/json");
+                response.set_content(
+                    server::build_flow_response_json(req, node_count, flow_res, timestamp, kUseOpenMPFlow),
+                    "application/json");
             }
             catch (const std::exception& e)
             {
