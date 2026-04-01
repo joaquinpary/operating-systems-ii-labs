@@ -8,7 +8,6 @@ extern "C"
 
 #include "cJSON.h"
 #include <time.h>
-    // #include <zlib.h>
 
 #define HUB_TO_SERVER__AUTH_REQUEST "HUB_TO_SERVER__AUTH_REQUEST"
 #define HUB_TO_SERVER__KEEPALIVE "HUB_TO_SERVER__KEEPALIVE"
@@ -43,8 +42,6 @@ extern "C"
 #define HUB "HUB"
 #define SERVER "SERVER"
 #define CLI "CLI"
-
-// Message type prefixes for parsing (used in create_items_message)
 #define MSG_PREFIX_HUB_TO_SERVER "HUB_TO_SERVER"
 #define MSG_PREFIX_WAREHOUSE_TO_SERVER "WAREHOUSE_TO_SERVER"
 #define MSG_PREFIX_SERVER_TO_HUB "SERVER_TO_HUB"

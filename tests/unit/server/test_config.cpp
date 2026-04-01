@@ -12,19 +12,15 @@ class ConfigTest : public ::testing::Test
 
     void SetUp() override
     {
-        // Clean up any existing test files
         if (std::filesystem::exists(test_config_path))
         {
             std::filesystem::remove(test_config_path);
         }
-
-        // Clear environment variable
         unsetenv("CONFIG_PATH");
     }
 
     void TearDown() override
     {
-        // Clean up test files
         if (std::filesystem::exists(test_config_path))
         {
             std::filesystem::remove(test_config_path);
@@ -51,15 +47,11 @@ class ConfigTest : public ::testing::Test
         file.close();
     }
 };
-
-// Test get_env_var with no environment variable set
 TEST_F(ConfigTest, GetEnvVarReturnsDefault)
 {
     std::string result = config::get_env_var("NONEXISTENT_VAR", "default_value");
     EXPECT_EQ(result, "default_value");
 }
-
-// Test get_env_var with environment variable set
 TEST_F(ConfigTest, GetEnvVarReturnsEnvValue)
 {
     setenv("TEST_ENV_VAR", "env_value", 1);
@@ -67,8 +59,6 @@ TEST_F(ConfigTest, GetEnvVarReturnsEnvValue)
     EXPECT_EQ(result, "env_value");
     unsetenv("TEST_ENV_VAR");
 }
-
-// Test load_config_from_file with valid config
 TEST_F(ConfigTest, LoadValidConfig)
 {
     create_valid_config_file(test_config_path);
@@ -87,15 +77,11 @@ TEST_F(ConfigTest, LoadValidConfig)
     EXPECT_EQ(cfg.pool_size, 8);
     EXPECT_EQ(cfg.credentials_path, "config/clients");
 }
-
-// Test load_config_from_file with non-existent file
 TEST_F(ConfigTest, LoadConfigNonExistentFile)
 {
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file("nonexistent_config.json", cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with invalid JSON
 TEST_F(ConfigTest, LoadConfigInvalidJSON)
 {
     std::ofstream file(test_config_path);
@@ -105,8 +91,6 @@ TEST_F(ConfigTest, LoadConfigInvalidJSON)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing ip_v4
 TEST_F(ConfigTest, LoadConfigMissingIpV4)
 {
     std::ofstream file(test_config_path);
@@ -125,8 +109,6 @@ TEST_F(ConfigTest, LoadConfigMissingIpV4)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing ip_v6
 TEST_F(ConfigTest, LoadConfigMissingIpV6)
 {
     std::ofstream file(test_config_path);
@@ -145,8 +127,6 @@ TEST_F(ConfigTest, LoadConfigMissingIpV6)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing network_port
 TEST_F(ConfigTest, LoadConfigMissingPort)
 {
     std::ofstream file(test_config_path);
@@ -165,8 +145,6 @@ TEST_F(ConfigTest, LoadConfigMissingPort)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing api_rest_port
 TEST_F(ConfigTest, LoadConfigMissingApiRestPort)
 {
     std::ofstream file(test_config_path);
@@ -185,8 +163,6 @@ TEST_F(ConfigTest, LoadConfigMissingApiRestPort)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing ack_timeout
 TEST_F(ConfigTest, LoadConfigMissingAckTimeout)
 {
     std::ofstream file(test_config_path);
@@ -205,8 +181,6 @@ TEST_F(ConfigTest, LoadConfigMissingAckTimeout)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with missing max_auth_attempts
 TEST_F(ConfigTest, LoadConfigMissingMaxAuthAttempts)
 {
     std::ofstream file(test_config_path);
@@ -225,8 +199,6 @@ TEST_F(ConfigTest, LoadConfigMissingMaxAuthAttempts)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with invalid ip_v4 type
 TEST_F(ConfigTest, LoadConfigInvalidIpV4Type)
 {
     std::ofstream file(test_config_path);
@@ -246,8 +218,6 @@ TEST_F(ConfigTest, LoadConfigInvalidIpV4Type)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with invalid port type
 TEST_F(ConfigTest, LoadConfigInvalidPortType)
 {
     std::ofstream file(test_config_path);
@@ -267,8 +237,6 @@ TEST_F(ConfigTest, LoadConfigInvalidPortType)
     config::server_config cfg;
     EXPECT_THROW(config::load_config_from_file(test_config_path, cfg), std::runtime_error);
 }
-
-// Test load_config_from_file with CONFIG_PATH environment variable
 TEST_F(ConfigTest, LoadConfigFromEnvVariable)
 {
     const std::string env_config_path = "/tmp/env_config.json";
@@ -277,7 +245,6 @@ TEST_F(ConfigTest, LoadConfigFromEnvVariable)
     setenv("CONFIG_PATH", env_config_path.c_str(), 1);
 
     config::server_config cfg;
-    // Even though we pass test_config_path, it should use env variable path
     ASSERT_NO_THROW(config::load_config_from_file("ignored_path.json", cfg));
 
     EXPECT_EQ(cfg.ip_v4, "127.0.0.1");

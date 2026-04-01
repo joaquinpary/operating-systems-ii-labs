@@ -2,6 +2,7 @@
 #define API_PARSER_HPP
 
 #include "circuit_solver.hpp"
+#include "flow_solver.hpp"
 
 #include <cstdint>
 #include <string>
@@ -69,6 +70,22 @@ struct FlowRequest
  * @throws std::runtime_error If the payload is not valid JSON or missing fields
  */
 FlowRequest parse_flow_request_json(const std::string& json_body);
+
+/**
+ * Serializes a flow result into a JSON response string.
+ *
+ * @param request Parsed request containing source and sink node IDs
+ * @param node_count Total node count in the graph used for the calculation
+ * @param flow_result The result returned by ford_fulkerson
+ * @param timestamp ISO 8601 UTC timestamp string for the stored result
+ * @param use_openmp Whether the computation used the OpenMP-enabled build
+ * @return JSON string with status, endpoints, node_count, timing metadata, and max flow
+ */
+std::string build_flow_response_json(const FlowRequest& request,
+                                     int node_count,
+                                     const FlowResult& flow_result,
+                                     const std::string& timestamp,
+                                     bool use_openmp);
 
 struct CircuitRequest
 {
