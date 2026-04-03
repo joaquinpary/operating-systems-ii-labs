@@ -1,26 +1,18 @@
 package shipments
 
-import "time"
+type ShipmentRequest struct {
+	OriginID      string         `json:"origin_id"`
+	DestinationID string         `json:"destination_id"`
+	Items         []ShipmentItem `json:"items"`
+}
 
-type Status string
-
-const (
-	StatusPending    Status = "pending"
-	StatusAssigned   Status = "assigned"
-	StatusDispatched Status = "dispatched"
-	StatusCompleted  Status = "completed"
-)
-
-type Item struct {
-	Name     string `json:"name"`
+type ShipmentItem struct {
+	ItemID   int    `json:"item_id"`
+	ItemName string `json:"item_name"`
 	Quantity int    `json:"quantity"`
 }
 
-type Shipment struct {
-	ID          string    `json:"id"`
-	Source      string    `json:"source"`
-	Destination string    `json:"destination"`
-	Items       []Item    `json:"items"`
-	Status      Status    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+type ShipmentResponse struct {
+	ShipmentID string `json:"shipment_id"`
+	Status     string `json:"status"`
 }

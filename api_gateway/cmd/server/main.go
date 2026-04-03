@@ -1,32 +1,67 @@
 package main
 
 import (
-	"context"
 	"log"
-	"os/signal"
-	"syscall"
 
-	"lora-chads/api-gateway/internal/chat"
-	"lora-chads/api-gateway/internal/platform/config"
-	platformserver "lora-chads/api-gateway/internal/platform/server"
-	"lora-chads/api-gateway/internal/predictor"
-	"lora-chads/api-gateway/internal/shipments"
+	"lora-chads/api_gateway/internal/chat"
+	"lora-chads/api_gateway/internal/config"
+	"lora-chads/api_gateway/internal/core_bridge"
+	"lora-chads/api_gateway/internal/dispatcher"
+	"lora-chads/api_gateway/internal/predictor"
+	"lora-chads/api_gateway/internal/shipments"
+	"lora-chads/api_gateway/pkg/middleware"
+	"lora-chads/api_gateway/pkg/rabbitmq"
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
 
-	srv := platformserver.New(
-		cfg,
-		shipments.NewHandler(nil),
-		chat.NewHandler(nil),
-		predictor.NewHandler(nil),
+	corePool := core_bridge.NewPool(cfg.CoreHost, cfg.CorePort)
+	shipmentHandler := shipments.NewHandler(corePool)
+	dispatcherWorker := dispatcher.New(corePool)
+	chatHub := chat.NewHub()
+	predictorClient := predictor.NewClient(cfg.PredictorURL)
+	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("connect rabbitmq: %v", err)
+	}
+
+	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
+	tracingMiddleware := middleware.NewTracingMiddleware()
+
+	components := []any{
+		shipmentHandler,
+		dispatcherWorker,
+		chatHub,
+		predictorClient,
+		rabbitConnection,
+		jwtMiddleware,
+		tracingMiddleware,
+	}
+
+	log.Printf(
+		"api gateway skeleton initialized: core=%s http_port=%d rabbitmq=%s predictor=%s components=%d jwt=%t tracing=%s",
+		corePool.Address(),
+		cfg.HTTPPort,
+		rabbitConnection.URL(),
+		predictorClient.BaseURL(),
+		len(components),
+		jwtMiddleware.Enabled(),
+		tracingMiddleware.Name(),
 	)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	// TODO: start the HTTP server and register shipment routes.
+	// TODO: start the dispatcher worker and core bridge listener.
+	// TODO: add graceful shutdown for all long-lived components.
 
-	if err := srv.Run(ctx); err != nil {
-		log.Fatal(err)
+	if err := rabbitConnection.Close(); err != nil {
+		log.Printf("close rabbitmq connection: %v", err)
+	}
+
+	if err := corePool.Close(); err != nil {
+		log.Printf("close core bridge pool: %v", err)
 	}
 }
