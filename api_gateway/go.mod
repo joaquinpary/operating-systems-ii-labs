@@ -1,3 +1,3 @@
-module lora-chads/api-gateway
+module lora-chads/api_gateway
 
-go 1.22.0
+go 1.23
