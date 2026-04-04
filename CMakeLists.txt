@@ -83,6 +83,24 @@ if(BUILD_TARGET STREQUAL "server")
         SOVERSION 1
         VERSION 1.0.0
     )
+
+    # Shared library: libapi_gateway.so (API gateway plugin, loaded via dlopen)
+    add_library(api_gateway SHARED
+        src/server/api_gateway/api_gateway.c
+        src/common/json_manager.c
+    )
+    target_include_directories(api_gateway PRIVATE
+        include
+        include/server
+        ${cjson_SOURCE_DIR}
+        ${PostgreSQL_INCLUDE_DIRS}
+    )
+    target_link_libraries(api_gateway PRIVATE cjson ${PostgreSQL_LIBRARIES})
+    set_target_properties(api_gateway PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        SOVERSION 1
+        VERSION 1.0.0
+    )
     
     file(GLOB SOURCES
         src/server/*.cpp
