@@ -1,6 +1,10 @@
 package core_bridge
 
-import "fmt"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
 
 type Pool struct {
 	host string
@@ -20,6 +24,22 @@ func (pool *Pool) Address() string {
 
 func (pool *Pool) Send(_ Message) error {
 	return nil
+}
+
+func (pool *Pool) Query(_ context.Context, shipmentID string) (Message, error) {
+	payload, err := json.Marshal(map[string]string{
+		"shipment_id": shipmentID,
+		"status":      "pending",
+	})
+	if err != nil {
+		return Message{}, fmt.Errorf("marshal shipment status: %w", err)
+	}
+
+	return Message{
+		SourceRole: RoleServer,
+		TargetID:   shipmentID,
+		Payload:    payload,
+	}, nil
 }
 
 func (pool *Pool) Close() error {

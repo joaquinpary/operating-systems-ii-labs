@@ -1,5 +1,7 @@
 package rabbitmq
 
+import "context"
+
 type Connection struct {
 	url string
 }
@@ -10,6 +12,10 @@ func Connect(url string) (*Connection, error) {
 
 func (connection *Connection) URL() string {
 	return connection.url
+}
+
+func (connection *Connection) Publish(_ context.Context, _ string, _ []byte) error {
+	return nil
 }
 
 func (connection *Connection) Close() error {
