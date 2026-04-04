@@ -51,6 +51,12 @@ func (tc *TCPClient) Connect(ctx context.Context) error {
 	}
 	tc.conn = conn
 
+	// Propagate the context deadline so readFrame/writeFrame don't block
+	// forever if the server never responds to the AUTH handshake.
+	if deadline, ok := ctx.Deadline(); ok {
+		tc.conn.SetDeadline(deadline)
+	}
+
 	authEnv := Envelope{
 		MsgType:    MsgAuthRequest,
 		SourceRole: RoleGateway,
@@ -82,6 +88,7 @@ func (tc *TCPClient) Connect(ctx context.Context) error {
 	}
 
 	tc.healthy = true
+	tc.conn.SetDeadline(time.Time{}) // clear auth deadline
 	tc.logger.Printf("core_bridge: authenticated to %s as %s", tc.addr, tc.sourceID)
 	return nil
 }

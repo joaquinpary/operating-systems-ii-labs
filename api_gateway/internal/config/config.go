@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	defaultCoreHost     = "127.0.0.1"
-	defaultCorePort     = 9999
-	defaultHTTPPort     = 8080
-	defaultRabbitMQURL  = "amqp://guest:guest@localhost:5672/"
-	defaultJWTSecret    = "change-me"
+	defaultCoreHost         = "127.0.0.1"
+	defaultCorePort         = 9999
+	defaultHTTPPort         = 8080
+	defaultRabbitMQURL      = "amqp://guest:guest@localhost:5672/"
+	defaultJWTSecret        = "change-me"
 	defaultPredictorURL     = "http://127.0.0.1:9000"
 	defaultCorePoolSize     = 5
 	defaultCoreConnTimeout  = 10 * time.Second
@@ -22,11 +22,11 @@ const (
 )
 
 type Config struct {
-	CoreHost     string
-	CorePort     int
-	HTTPPort     int
-	RabbitMQURL  string
-	JWTSecret    string
+	CoreHost         string
+	CorePort         int
+	HTTPPort         int
+	RabbitMQURL      string
+	JWTSecret        string
 	PredictorURL     string
 	CorePoolSize     int
 	CoreConnTimeout  time.Duration
@@ -47,11 +47,11 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		CoreHost:     stringFromEnv("CORE_HOST", defaultCoreHost),
-		CorePort:     corePort,
-		HTTPPort:     httpPort,
-		RabbitMQURL:  stringFromEnv("RABBITMQ_URL", defaultRabbitMQURL),
-		JWTSecret:    stringFromEnv("JWT_SECRET", defaultJWTSecret),
+		CoreHost:         stringFromEnv("CORE_HOST", defaultCoreHost),
+		CorePort:         corePort,
+		HTTPPort:         httpPort,
+		RabbitMQURL:      stringFromEnv("RABBITMQ_URL", defaultRabbitMQURL),
+		JWTSecret:        stringFromEnv("JWT_SECRET", defaultJWTSecret),
 		PredictorURL:     stringFromEnv("PREDICTOR_URL", defaultPredictorURL),
 		CorePoolSize:     defaultCorePoolSize,
 		CoreConnTimeout:  defaultCoreConnTimeout,
