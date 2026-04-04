@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
+	"os/signal"
+	"syscall"
 
 	"lora-chads/api_gateway/internal/chat"
 	"lora-chads/api_gateway/internal/config"
-	"lora-chads/api_gateway/internal/core_bridge"
+	corebridge "lora-chads/api_gateway/internal/core_bridge"
 	"lora-chads/api_gateway/internal/dispatcher"
 	"lora-chads/api_gateway/internal/predictor"
 	"lora-chads/api_gateway/internal/shipments"
@@ -19,49 +22,73 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	corePool := core_bridge.NewPool(cfg.CoreHost, cfg.CorePort)
-	shipmentHandler := shipments.NewHandler(corePool)
-	dispatcherWorker := dispatcher.New(corePool)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// --- TCP connection pool (N authenticated connections) ---
+	pool := corebridge.NewPool(corebridge.PoolConfig{
+		Addr:         cfg.CoreAddress(),
+		SourceID:     cfg.CoreSourceID,
+		PasswordMD5:  cfg.CorePasswordMD5,
+		Size:         cfg.CorePoolSize,
+		ConnTimeout:  cfg.CoreConnTimeout,
+		KeepaliveIvl: cfg.CoreKeepaliveIvl,
+	})
+
+	if err := pool.Open(ctx); err != nil {
+		log.Fatalf("core_bridge pool: %v", err)
+	}
+	defer pool.Close()
+
+	// --- Event listener (authenticates LAST → reverse-map in C++) ---
+	listener := corebridge.NewListener(corebridge.ListenerConfig{
+		Addr:         cfg.CoreAddress(),
+		SourceID:     cfg.CoreSourceID,
+		PasswordMD5:  cfg.CorePasswordMD5,
+		ConnTimeout:  cfg.CoreConnTimeout,
+		KeepaliveIvl: cfg.CoreKeepaliveIvl,
+	})
+	listener.OnEvent(func(env corebridge.Envelope) {
+		log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
+	})
+
+	if err := listener.Start(ctx); err != nil {
+		log.Fatalf("core_bridge listener: %v", err)
+	}
+	defer listener.Close()
+
+	// --- Companion components (stubs wired by teammate in #121) ---
+	shipmentHandler := shipments.NewHandler(pool)
+	dispatcherWorker := dispatcher.New(pool)
 	chatHub := chat.NewHub()
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
 	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("connect rabbitmq: %v", err)
 	}
+	defer rabbitConnection.Close()
 
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
 
-	components := []any{
-		shipmentHandler,
-		dispatcherWorker,
-		chatHub,
-		predictorClient,
-		rabbitConnection,
-		jwtMiddleware,
-		tracingMiddleware,
-	}
-
 	log.Printf(
-		"api gateway skeleton initialized: core=%s http_port=%d rabbitmq=%s predictor=%s components=%d jwt=%t tracing=%s",
-		corePool.Address(),
+		"api gateway ready: core=%s pool_size=%d http_port=%d rabbitmq=%s predictor=%s jwt=%t tracing=%s",
+		cfg.CoreAddress(),
+		cfg.CorePoolSize,
 		cfg.HTTPPort,
 		rabbitConnection.URL(),
 		predictorClient.BaseURL(),
-		len(components),
 		jwtMiddleware.Enabled(),
 		tracingMiddleware.Name(),
 	)
 
-	// TODO: start the HTTP server and register shipment routes.
-	// TODO: start the dispatcher worker and core bridge listener.
-	// TODO: add graceful shutdown for all long-lived components.
+	_ = shipmentHandler
+	_ = dispatcherWorker
+	_ = chatHub
 
-	if err := rabbitConnection.Close(); err != nil {
-		log.Printf("close rabbitmq connection: %v", err)
-	}
+	// TODO: start the HTTP server (Fiber) and register shipment routes.
+	// TODO: start the dispatcher worker consumer loop.
 
-	if err := corePool.Close(); err != nil {
-		log.Printf("close core bridge pool: %v", err)
-	}
+	<-ctx.Done()
+	log.Println("shutdown signal received")
 }

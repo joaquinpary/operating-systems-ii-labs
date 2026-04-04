@@ -1,4 +1,4 @@
-package corebridge
+package core_bridge
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 )
-
 
 // TCPClient is the adapter that implements Bridge over a persistent TCP
 // connection to the C++ logistics core. It handles the 1024-byte fixed-frame
@@ -172,8 +171,13 @@ func (tc *TCPClient) Healthy() bool {
 	return tc.healthy
 }
 
-// writeFrame serialises env to JSON and writes it in a zero-padded 1024-byte frame.
-func (tc *TCPClient) writeFrame(env Envelope) error {
+func (tc *TCPClient) writeFrame(env Envelope) error { return writeFrameTo(tc.conn, env) }
+func (tc *TCPClient) readFrame() (Envelope, error)  { return readFrameFrom(tc.conn) }
+
+// --- package-level frame I/O (used by TCPClient and Listener) ---
+
+// writeFrameTo serialises env to JSON and writes it in a zero-padded 1024-byte frame.
+func writeFrameTo(conn net.Conn, env Envelope) error {
 	data, err := json.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
@@ -185,17 +189,17 @@ func (tc *TCPClient) writeFrame(env Envelope) error {
 	var frame [FrameSize]byte
 	copy(frame[:], data)
 
-	_, err = tc.conn.Write(frame[:])
+	_, err = conn.Write(frame[:])
 	return err
 }
 
-// readFrame reads exactly 1024 bytes from the connection and deserialises the
+// readFrameFrom reads exactly 1024 bytes from conn and deserialises the
 // JSON envelope contained within.
-func (tc *TCPClient) readFrame() (Envelope, error) {
+func readFrameFrom(conn net.Conn) (Envelope, error) {
 	var frame [FrameSize]byte
 	n := 0
 	for n < FrameSize {
-		read, err := tc.conn.Read(frame[n:])
+		read, err := conn.Read(frame[n:])
 		if err != nil {
 			return Envelope{}, fmt.Errorf("read: %w", err)
 		}
@@ -214,4 +218,3 @@ func (tc *TCPClient) readFrame() (Envelope, error) {
 	}
 	return env, nil
 }
-

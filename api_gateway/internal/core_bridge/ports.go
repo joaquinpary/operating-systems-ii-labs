@@ -1,4 +1,4 @@
-package corebridge
+package core_bridge
 
 import "context"
 

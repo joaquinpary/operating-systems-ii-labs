@@ -1,4 +1,4 @@
-package corebridge
+package core_bridge
 
 import (
 	"context"
@@ -32,13 +32,13 @@ type Pool struct {
 
 // PoolConfig groups the knobs needed by NewPool.
 type PoolConfig struct {
-	Addr            string
-	SourceID        string
-	PasswordMD5     string
-	Size            int
-	ConnTimeout     time.Duration
-	KeepaliveIvl    time.Duration
-	Logger          *log.Logger
+	Addr         string
+	SourceID     string
+	PasswordMD5  string
+	Size         int
+	ConnTimeout  time.Duration
+	KeepaliveIvl time.Duration
+	Logger       *log.Logger
 }
 
 // NewPool creates a pool but does NOT open any connections yet.
