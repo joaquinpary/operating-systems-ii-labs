@@ -18,8 +18,9 @@ const (
 	dispatchCommandType       = "dispatch_command"
 )
 
-type statusQuerier interface {
+type coreBridge interface {
 	Query(ctx context.Context, shipmentID string) (core_bridge.Message, error)
+	Command(ctx context.Context, command string, payload core_bridge.Payload) (core_bridge.Envelope, error)
 }
 
 type publisher interface {
@@ -27,13 +28,13 @@ type publisher interface {
 }
 
 type Handler struct {
-	pool      statusQuerier
+	bridge    coreBridge
 	publisher publisher
 }
 
-func NewHandler(pool statusQuerier, publisher publisher) *Handler {
+func NewHandler(bridge coreBridge, publisher publisher) *Handler {
 	return &Handler{
-		pool:      pool,
+		bridge:    bridge,
 		publisher: publisher,
 	}
 }
@@ -48,11 +49,45 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	if err := handler.publish(ctx.UserContext(), createShipmentMessageType, request); err != nil {
-		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue shipment request")
+	items := make([]core_bridge.Item, len(request.Items))
+	for i, si := range request.Items {
+		items[i] = core_bridge.Item{
+			ItemID:   si.ItemID,
+			ItemName: si.ItemName,
+			Quantity: si.Quantity,
+		}
 	}
 
-	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{Status: "accepted"})
+	resp, err := handler.bridge.Command(ctx.UserContext(), "create_shipment", core_bridge.Payload{
+		Items: items,
+	})
+	if err != nil {
+		return writeError(ctx, fiber.StatusInternalServerError, "failed to process shipment")
+	}
+
+	if resp.Payload.Status != "ok" {
+		msg := "shipment processing failed"
+		if len(resp.Payload.Data) > 0 {
+			var d struct {
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(resp.Payload.Data, &d) == nil && d.Message != "" {
+				msg = d.Message
+			}
+		}
+		return writeError(ctx, fiber.StatusUnprocessableEntity, msg)
+	}
+
+	var data CreateShipmentData
+	if len(resp.Payload.Data) > 0 {
+		_ = json.Unmarshal(resp.Payload.Data, &data)
+	}
+
+	return ctx.Status(fiber.StatusOK).JSON(CreateShipmentResponse{
+		Status:        "ok",
+		DispatchHubID: data.DispatchHubID,
+		TransactionID: data.TransactionID,
+	})
 }
 
 func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
@@ -81,7 +116,7 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
 
-	message, err := handler.pool.Query(ctx.UserContext(), shipmentID)
+	message, err := handler.bridge.Query(ctx.UserContext(), shipmentID)
 	if err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
 	}
