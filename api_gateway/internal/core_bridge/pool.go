@@ -2,6 +2,7 @@ package core_bridge
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -127,6 +128,24 @@ func (p *Pool) Close() error {
 		firstErr = p.drain()
 	})
 	return firstErr
+}
+
+// Query is a stub that returns a placeholder shipment status.
+// It will be replaced with a real TCP query to the C++ core.
+func (p *Pool) Query(_ context.Context, shipmentID string) (Message, error) {
+	payload, err := json.Marshal(map[string]string{
+		"shipment_id": shipmentID,
+		"status":      "pending",
+	})
+	if err != nil {
+		return Message{}, fmt.Errorf("marshal shipment status: %w", err)
+	}
+
+	return Message{
+		SourceRole: RoleServer,
+		TargetID:   shipmentID,
+		Payload:    payload,
+	}, nil
 }
 
 // --- internal helpers ---

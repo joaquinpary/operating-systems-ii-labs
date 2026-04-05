@@ -10,7 +10,7 @@ import (
 const (
 	defaultCoreHost         = "127.0.0.1"
 	defaultCorePort         = 9999
-	defaultHTTPPort         = 8080
+	defaultHTTPPort         = 8081
 	defaultRabbitMQURL      = "amqp://guest:guest@localhost:5672/"
 	defaultJWTSecret        = "change-me"
 	defaultPredictorURL     = "http://127.0.0.1:9000"

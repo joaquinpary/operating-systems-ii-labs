@@ -50,3 +50,7 @@ logs/
 
 
 .pytest_cache/
+# Local scripts (not for repo)
+scripts/build_test.sh
+scripts/client_msg_tester.py
+scripts/run_test.sh

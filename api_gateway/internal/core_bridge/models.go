@@ -1,6 +1,7 @@
 package core_bridge
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -105,6 +106,20 @@ type Item struct {
 	ItemID   int    `json:"item_id"`
 	ItemName string `json:"item_name"`
 	Quantity int    `json:"quantity"`
+}
+
+// Message is a simplified DTO used by the HTTP handlers layer.
+// Unlike Envelope (which carries typed Payload for the TCP protocol),
+// Message uses json.RawMessage so the HTTP layer can forward opaque payloads.
+type Message struct {
+	MsgType    MsgType         `json:"msg_type"`
+	SourceRole string          `json:"source_role"`
+	SourceID   string          `json:"source_id"`
+	TargetRole string          `json:"target_role"`
+	TargetID   string          `json:"target_id"`
+	Timestamp  string          `json:"timestamp"`
+	Payload    json.RawMessage `json:"payload"`
+	Checksum   string          `json:"checksum"`
 }
 
 // computeChecksum calculates the DJB2 hash of (msg_type + source_id),

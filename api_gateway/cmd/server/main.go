@@ -1,19 +1,22 @@
 package main
 
 import (
-	"context"
-	"log"
-	"os/signal"
-	"syscall"
+"context"
+"fmt"
+"log"
+"os/signal"
+"syscall"
 
-	"lora-chads/api_gateway/internal/chat"
-	"lora-chads/api_gateway/internal/config"
-	corebridge "lora-chads/api_gateway/internal/core_bridge"
-	"lora-chads/api_gateway/internal/dispatcher"
-	"lora-chads/api_gateway/internal/predictor"
-	"lora-chads/api_gateway/internal/shipments"
-	"lora-chads/api_gateway/pkg/middleware"
-	"lora-chads/api_gateway/pkg/rabbitmq"
+"github.com/gofiber/fiber/v2"
+
+"lora-chads/api_gateway/internal/chat"
+"lora-chads/api_gateway/internal/config"
+corebridge "lora-chads/api_gateway/internal/core_bridge"
+"lora-chads/api_gateway/internal/dispatcher"
+"lora-chads/api_gateway/internal/predictor"
+"lora-chads/api_gateway/internal/shipments"
+"lora-chads/api_gateway/pkg/middleware"
+"lora-chads/api_gateway/pkg/rabbitmq"
 )
 
 func main() {
@@ -27,7 +30,7 @@ func main() {
 
 	// --- TCP connection pool (N authenticated connections) ---
 	pool := corebridge.NewPool(corebridge.PoolConfig{
-		Addr:         cfg.CoreAddress(),
+Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
 		PasswordMD5:  cfg.CorePasswordMD5,
 		Size:         cfg.CorePoolSize,
@@ -42,38 +45,71 @@ func main() {
 
 	// --- Event listener (authenticates LAST → reverse-map in C++) ---
 	listener := corebridge.NewListener(corebridge.ListenerConfig{
-		Addr:         cfg.CoreAddress(),
+Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
 		PasswordMD5:  cfg.CorePasswordMD5,
 		ConnTimeout:  cfg.CoreConnTimeout,
 		KeepaliveIvl: cfg.CoreKeepaliveIvl,
 	})
 	listener.OnEvent(func(env corebridge.Envelope) {
-		log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
-	})
+log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
+})
 
 	if err := listener.Start(ctx); err != nil {
 		log.Fatalf("core_bridge listener: %v", err)
 	}
 	defer listener.Close()
 
-	// --- Companion components (stubs wired by teammate in #121) ---
-	shipmentHandler := shipments.NewHandler(pool)
-	dispatcherWorker := dispatcher.New(pool)
-	chatHub := chat.NewHub()
-	predictorClient := predictor.NewClient(cfg.PredictorURL)
+	// --- RabbitMQ ---
 	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("connect rabbitmq: %v", err)
 	}
 	defer rabbitConnection.Close()
 
+	// --- Application components ---
+	shipmentHandler := shipments.NewHandler(pool, rabbitConnection)
+	dispatcherWorker := dispatcher.New(pool)
+	chatHub := chat.NewHub()
+	predictorClient := predictor.NewClient(cfg.PredictorURL)
+
+	// --- JWT & tracing middleware ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
 
+	// --- Fiber HTTP server ---
+	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
+	app.Use(tracingMiddleware.Handler())
+
+	protected := app.Group("", jwtMiddleware.Handler())
+	protected.Post("/shipments", shipmentHandler.CreateShipment)
+	protected.Post("/dispatch", shipmentHandler.Dispatch)
+	protected.Get("/status/:id", shipmentHandler.GetStatus)
+
+	// --- Background workers ---
+	go func() {
+		<-ctx.Done()
+		log.Printf("shutdown signal received")
+		if err := app.Shutdown(); err != nil {
+			log.Printf("shutdown fiber app: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := dispatcherWorker.Start(ctx); err != nil {
+			log.Printf("dispatcher stopped: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := chatHub.Run(ctx); err != nil {
+			log.Printf("chat hub stopped: %v", err)
+		}
+	}()
+
 	log.Printf(
-		"api gateway ready: core=%s pool_size=%d http_port=%d rabbitmq=%s predictor=%s jwt=%t tracing=%s",
-		cfg.CoreAddress(),
+"api gateway ready: core=%s pool_size=%d http_port=%d rabbitmq=%s predictor=%s jwt=%t tracing=%s",
+cfg.CoreAddress(),
 		cfg.CorePoolSize,
 		cfg.HTTPPort,
 		rabbitConnection.URL(),
@@ -82,13 +118,11 @@ func main() {
 		tracingMiddleware.Name(),
 	)
 
-	_ = shipmentHandler
-	_ = dispatcherWorker
-	_ = chatHub
+	if err := app.Listen(fmt.Sprintf(":%d", cfg.HTTPPort)); err != nil {
+		log.Printf("fiber server stopped: %v", err)
+	}
 
-	// TODO: start the HTTP server (Fiber) and register shipment routes.
-	// TODO: start the dispatcher worker consumer loop.
-
-	<-ctx.Done()
-	log.Println("shutdown signal received")
+	if err := dispatcherWorker.Stop(); err != nil {
+		log.Printf("stop dispatcher worker: %v", err)
+	}
 }
