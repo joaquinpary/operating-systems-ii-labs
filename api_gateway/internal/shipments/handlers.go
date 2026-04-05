@@ -12,8 +12,9 @@ import (
 	"lora-chads/api_gateway/internal/core_bridge"
 )
 
-type statusQuerier interface {
+type coreBridge interface {
 	Query(ctx context.Context, shipmentID string) (core_bridge.Message, error)
+	Command(ctx context.Context, command string, payload core_bridge.Payload) (core_bridge.Envelope, error)
 }
 
 type publisher interface {
@@ -28,14 +29,14 @@ type shipmentTracker interface {
 }
 
 type Handler struct {
-	pool      statusQuerier
+	bridge    coreBridge
 	publisher publisher
 	tracker   shipmentTracker
 }
 
-func NewHandler(pool statusQuerier, publisher publisher, tracker shipmentTracker) *Handler {
+func NewHandler(bridge coreBridge, publisher publisher, tracker shipmentTracker) *Handler {
 	return &Handler{
-		pool:      pool,
+		bridge:    bridge,
 		publisher: publisher,
 		tracker:   tracker,
 	}
@@ -99,7 +100,7 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
 
-	message, err := handler.pool.Query(ctx.UserContext(), transactionID)
+	message, err := handler.bridge.Query(ctx.UserContext(), transactionID)
 	if err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
 	}

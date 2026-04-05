@@ -59,6 +59,14 @@ class inventory_manager
     int handle_receipt_confirmation(const message_t& msg);
 
     /**
+     * Process a dispatch confirmation from a hub (ORDER_DISPATCH flow).
+     * Reduces the hub's inventory in the DB and marks the transaction DISPATCHED.
+     * @param msg DISPATCH_CONFIRMATION message from a hub.
+     * @return 0 on success, negative value on error.
+     */
+    int handle_dispatch_confirmation(const message_t& msg);
+
+    /**
      * Update a transaction after a warehouse reports a shipment dispatch.
      * @param msg SHIPMENT_NOTICE message from a warehouse.
      * @return Workflow result with the destination hub to notify.

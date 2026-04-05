@@ -28,6 +28,17 @@ type ShipmentResponse struct {
 	Status     string `json:"status"`
 }
 
+type CreateShipmentData struct {
+	DispatchHubID string `json:"dispatch_hub_id"`
+	TransactionID int    `json:"transaction_id"`
+}
+
+type CreateShipmentResponse struct {
+	Status        string `json:"status"`
+	DispatchHubID string `json:"dispatch_hub_id,omitempty"`
+	TransactionID int    `json:"transaction_id,omitempty"`
+}
+
 type DispatchRequest struct {
 	ShipmentID string `json:"shipment_id"`
 }

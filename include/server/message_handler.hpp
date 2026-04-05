@@ -2,6 +2,7 @@
 #define MESSAGE_HANDLER_HPP
 
 #include "auth_module.hpp"
+#include "api_gateway_interface.h"
 #include "inventory_manager.hpp"
 #include "ipc.hpp"
 #include <common/json_manager.h>
@@ -22,8 +23,9 @@ enum class message_category
     RECEIPT_CONFIRM, ///< Receipt confirmation emitted after stock delivery.
     DISPATCH_NOTICE, ///< Shipment notice emitted by a warehouse.
     REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
-    EMERGENCY_ALERT, ///< Emergency alert from a hub or warehouse.
-    CLI_COMMAND,     ///< Admin CLI command (handled by libadmin_cli.so).
+    DISPATCH_CONFIRM, ///< Dispatch confirmation from a hub (order fulfilled).
+    EMERGENCY_ALERT,  ///< Emergency alert from a hub or warehouse.
+    CLI_COMMAND,      ///< Admin CLI command (handled by libadmin_cli.so).
     GATEWAY_COMMAND, ///< API Gateway command (handled by libapi_gateway.so).
     OTHER            ///< Any unrecognized or unsupported message type.
 };
@@ -113,7 +115,7 @@ class message_handler
 
     // API Gateway plugin (libapi_gateway.so) — loaded via dlopen.
     void* m_gateway_lib = nullptr;
-    using gateway_handle_fn = int (*)(const char*, char*, size_t);
+    using gateway_handle_fn = int (*)(const char*, char*, size_t, gateway_side_effect_t*);
     using gateway_shutdown_fn = void (*)();
     gateway_handle_fn m_gateway_handle = nullptr;
     gateway_shutdown_fn m_gateway_shutdown = nullptr;

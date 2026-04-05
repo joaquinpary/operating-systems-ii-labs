@@ -102,6 +102,9 @@ type Payload struct {
 
 	// Order reference
 	OrderTimestamp string `json:"order_timestamp,omitempty"`
+
+	// Command response data
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Item mirrors the item structure used across inventory and shipment messages.

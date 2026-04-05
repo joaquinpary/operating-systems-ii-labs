@@ -130,17 +130,25 @@ func (p *Pool) Close() error {
 	return firstErr
 }
 
-func (p *Pool) Query(ctx context.Context, shipmentID string) (Message, error) {
-	response, err := p.Send(ctx, Envelope{
+// Command sends a GATEWAY_TO_SERVER__COMMAND to the C++ core via a pooled
+// connection and returns the response envelope.
+func (p *Pool) Command(ctx context.Context, command string, payload Payload) (Envelope, error) {
+	payload.Command = command
+	env := Envelope{
 		MsgType:    MsgGatewayCommand,
 		SourceRole: RoleGateway,
 		SourceID:   p.sourceID,
 		TargetRole: RoleServer,
 		TargetID:   "SERVER",
-		Payload: Payload{
-			Command: "get_shipment_status",
-			Args:    shipmentID,
-		},
+		Timestamp:  Now(),
+		Payload:    payload,
+	}
+	return p.Send(ctx, env)
+}
+
+func (p *Pool) Query(ctx context.Context, shipmentID string) (Message, error) {
+	response, err := p.Command(ctx, "get_shipment_status", Payload{
+		Args: shipmentID,
 	})
 	if err != nil {
 		return Message{}, fmt.Errorf("query shipment status: %w", err)
