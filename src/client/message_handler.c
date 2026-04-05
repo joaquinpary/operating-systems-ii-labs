@@ -187,6 +187,44 @@ int handle_server_message(const message_t* msg)
         return 0;
     }
 
+    if (strcmp(msg->msg_type, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK) == 0)
+    {
+        LOG_INFO_MSG("Received order to dispatch stock");
+
+        if (send_ack_to_server(msg->timestamp) != 0)
+        {
+            return -1;
+        }
+        LOG_DEBUG_MSG("ACK sent for dispatch order");
+
+        random_response_delay();
+
+        const payload_order_stock* order = &msg->payload.order_stock;
+        if (modify_inventory(order->items, INVENTORY_REDUCE) != 0)
+        {
+            LOG_ERROR_MSG("Failed to reduce inventory for dispatch order");
+            return -1;
+        }
+
+        log_inventory_snapshot("ORDER_TO_DISPATCH_STOCK recv");
+
+        message_t confirm_msg;
+        if (create_items_message(&confirm_msg, HUB_TO_SERVER__DISPATCH_CONFIRMATION, shared_data->client_id,
+                                 SERVER, order->items, QUANTITY_ITEMS, msg->timestamp) != 0)
+        {
+            LOG_ERROR_MSG("Failed to create dispatch confirmation message");
+            return -1;
+        }
+
+        if (enqueue_pending_message(&confirm_msg) != 0)
+        {
+            LOG_ERROR_MSG("Failed to enqueue dispatch confirmation");
+            return -1;
+        }
+        LOG_INFO_MSG("Dispatch confirmation sent to server");
+        return 0;
+    }
+
     if (strcmp(msg->msg_type, SERVER_TO_WAREHOUSE__RESTOCK_NOTICE) == 0 ||
         strcmp(msg->msg_type, SERVER_TO_HUB__INCOMING_STOCK_NOTICE) == 0)
     {

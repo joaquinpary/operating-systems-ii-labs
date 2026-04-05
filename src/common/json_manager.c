@@ -247,6 +247,8 @@ static const payload_handler_t handlers[] = {
     {SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__RESTOCK_NOTICE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_HUB__INCOMING_STOCK_NOTICE, serialize_items_list, deserialize_items_list},
+    {SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, serialize_items_list, deserialize_items_list},
+    {HUB_TO_SERVER__DISPATCH_CONFIRMATION, serialize_items_list, deserialize_items_list},
     {SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, serialize_server_emergency, deserialize_server_emergency},
     {SERVER_TO_HUB__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_WAREHOUSE__ACK, serialize_acknowledgment, deserialize_acknowledgment},
