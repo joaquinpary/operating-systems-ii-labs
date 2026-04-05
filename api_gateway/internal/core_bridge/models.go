@@ -88,9 +88,12 @@ type Payload struct {
 	// Gateway command fields
 	Command string `json:"command,omitempty"`
 	Args    string `json:"args,omitempty"`
+	Status  string `json:"status,omitempty"`
 
 	// Inventory / shipment fields
-	Items []Item `json:"items,omitempty"`
+	ShipmentID    string `json:"shipment_id,omitempty"`
+	TransactionID string `json:"transaction_id,omitempty"`
+	Items         []Item `json:"items,omitempty"`
 
 	// Emergency fields
 	EmergencyCode int    `json:"emergency_code,omitempty"`

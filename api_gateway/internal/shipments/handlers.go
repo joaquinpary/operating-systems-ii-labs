@@ -12,12 +12,6 @@ import (
 	"lora-chads/api_gateway/internal/core_bridge"
 )
 
-const (
-	shipmentsQueue            = "shipments"
-	createShipmentMessageType = "create_shipment"
-	dispatchCommandType       = "dispatch_command"
-)
-
 type statusQuerier interface {
 	Query(ctx context.Context, shipmentID string) (core_bridge.Message, error)
 }
@@ -26,15 +20,24 @@ type publisher interface {
 	Publish(ctx context.Context, queue string, body []byte) error
 }
 
+type shipmentTracker interface {
+	RegisterShipment(request ShipmentRequest) StatusResponse
+	DeleteShipment(shipmentID string)
+	HasShipment(shipmentID string) bool
+	Snapshot() []StatusResponse
+}
+
 type Handler struct {
 	pool      statusQuerier
 	publisher publisher
+	tracker   shipmentTracker
 }
 
-func NewHandler(pool statusQuerier, publisher publisher) *Handler {
+func NewHandler(pool statusQuerier, publisher publisher, tracker shipmentTracker) *Handler {
 	return &Handler{
 		pool:      pool,
 		publisher: publisher,
+		tracker:   tracker,
 	}
 }
 
@@ -48,11 +51,18 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	if err := handler.publish(ctx.UserContext(), createShipmentMessageType, request); err != nil {
+	status := handler.tracker.RegisterShipment(request)
+	request.ShipmentID = status.ShipmentID
+
+	if err := handler.publish(ctx.UserContext(), CreateShipmentMessageType, request); err != nil {
+		handler.tracker.DeleteShipment(request.ShipmentID)
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue shipment request")
 	}
 
-	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{Status: "accepted"})
+	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
+		ShipmentID: request.ShipmentID,
+		Status:     StatusPendingConfirmation,
+	})
 }
 
 func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
@@ -65,30 +75,38 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	if err := handler.publish(ctx.UserContext(), dispatchCommandType, request); err != nil {
+	if !handler.tracker.HasShipment(request.ShipmentID) {
+		return writeError(ctx, fiber.StatusNotFound, "shipment not found")
+	}
+
+	if err := handler.publish(ctx.UserContext(), DispatchCommandType, request); err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue dispatch command")
 	}
 
 	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
 		ShipmentID: request.ShipmentID,
-		Status:     "accepted",
+		Status:     StatusPendingConfirmation,
 	})
 }
 
+func (handler *Handler) GetAllStatuses(ctx *fiber.Ctx) error {
+	return ctx.Status(fiber.StatusOK).JSON(handler.tracker.Snapshot())
+}
+
 func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
-	shipmentID := strings.TrimSpace(ctx.Params("id"))
-	if shipmentID == "" {
+	transactionID := strings.TrimSpace(ctx.Params("id"))
+	if transactionID == "" {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
 
-	message, err := handler.pool.Query(ctx.UserContext(), shipmentID)
+	message, err := handler.pool.Query(ctx.UserContext(), transactionID)
 	if err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
 	}
 
 	response := StatusResponse{
-		ShipmentID: shipmentID,
-		Status:     "unknown",
+		TransactionID: transactionID,
+		Status:        "unknown",
 	}
 
 	if len(message.Payload) > 0 {
@@ -97,8 +115,8 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		}
 	}
 
-	if response.ShipmentID == "" {
-		response.ShipmentID = shipmentID
+	if response.TransactionID == "" {
+		response.TransactionID = transactionID
 	}
 
 	if response.Status == "" {
@@ -122,7 +140,7 @@ func (handler *Handler) publish(ctx context.Context, messageType string, payload
 		return fmt.Errorf("marshal queue message: %w", err)
 	}
 
-	return handler.publisher.Publish(ctx, shipmentsQueue, envelopeBytes)
+	return handler.publisher.Publish(ctx, ShipmentsQueue, envelopeBytes)
 }
 
 func validateShipmentRequest(request ShipmentRequest) error {

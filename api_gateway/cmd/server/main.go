@@ -1,22 +1,22 @@
 package main
 
 import (
-"context"
-"fmt"
-"log"
-"os/signal"
-"syscall"
+	"context"
+	"fmt"
+	"log"
+	"os/signal"
+	"syscall"
 
-"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2"
 
-"lora-chads/api_gateway/internal/chat"
-"lora-chads/api_gateway/internal/config"
-corebridge "lora-chads/api_gateway/internal/core_bridge"
-"lora-chads/api_gateway/internal/dispatcher"
-"lora-chads/api_gateway/internal/predictor"
-"lora-chads/api_gateway/internal/shipments"
-"lora-chads/api_gateway/pkg/middleware"
-"lora-chads/api_gateway/pkg/rabbitmq"
+	"lora-chads/api_gateway/internal/chat"
+	"lora-chads/api_gateway/internal/config"
+	corebridge "lora-chads/api_gateway/internal/core_bridge"
+	"lora-chads/api_gateway/internal/dispatcher"
+	"lora-chads/api_gateway/internal/predictor"
+	"lora-chads/api_gateway/internal/shipments"
+	"lora-chads/api_gateway/pkg/middleware"
+	"lora-chads/api_gateway/pkg/rabbitmq"
 )
 
 func main() {
@@ -30,7 +30,7 @@ func main() {
 
 	// --- TCP connection pool (N authenticated connections) ---
 	pool := corebridge.NewPool(corebridge.PoolConfig{
-Addr:         cfg.CoreAddress(),
+		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
 		PasswordMD5:  cfg.CorePasswordMD5,
 		Size:         cfg.CorePoolSize,
@@ -45,15 +45,15 @@ Addr:         cfg.CoreAddress(),
 
 	// --- Event listener (authenticates LAST → reverse-map in C++) ---
 	listener := corebridge.NewListener(corebridge.ListenerConfig{
-Addr:         cfg.CoreAddress(),
+		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
 		PasswordMD5:  cfg.CorePasswordMD5,
 		ConnTimeout:  cfg.CoreConnTimeout,
 		KeepaliveIvl: cfg.CoreKeepaliveIvl,
 	})
 	listener.OnEvent(func(env corebridge.Envelope) {
-log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
-})
+		log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
+	})
 
 	if err := listener.Start(ctx); err != nil {
 		log.Fatalf("core_bridge listener: %v", err)
@@ -68,8 +68,8 @@ log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
 	defer rabbitConnection.Close()
 
 	// --- Application components ---
-	shipmentHandler := shipments.NewHandler(pool, rabbitConnection)
-	dispatcherWorker := dispatcher.New(pool)
+	dispatcherWorker := dispatcher.New(pool, rabbitConnection, cfg.CorePoolSize)
+	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub()
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
 
@@ -84,6 +84,7 @@ log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
+	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
 
 	// --- Background workers ---
@@ -108,8 +109,8 @@ log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
 	}()
 
 	log.Printf(
-"api gateway ready: core=%s pool_size=%d http_port=%d rabbitmq=%s predictor=%s jwt=%t tracing=%s",
-cfg.CoreAddress(),
+		"api gateway ready: core=%s pool_size=%d http_port=%d rabbitmq=%s predictor=%s jwt=%t tracing=%s",
+		cfg.CoreAddress(),
 		cfg.CorePoolSize,
 		cfg.HTTPPort,
 		rabbitConnection.URL(),
@@ -121,6 +122,8 @@ cfg.CoreAddress(),
 	if err := app.Listen(fmt.Sprintf(":%d", cfg.HTTPPort)); err != nil {
 		log.Printf("fiber server stopped: %v", err)
 	}
+
+	stop()
 
 	if err := dispatcherWorker.Stop(); err != nil {
 		log.Printf("stop dispatcher worker: %v", err)
