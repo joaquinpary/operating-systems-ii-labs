@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     libpq-dev \
     pkg-config \
+    python3 \
     zlib1g-dev \
     libomp-dev \
     libmongoc-dev \
