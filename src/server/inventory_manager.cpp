@@ -193,6 +193,45 @@ int inventory_manager::handle_receipt_confirmation(const message_t& msg)
     }
 }
 
+int inventory_manager::handle_dispatch_confirmation(const message_t& msg)
+{
+    try
+    {
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+
+        int transaction_id = ::find_transaction_id(txn, std::string(msg.source_id), "", "PENDING");
+
+        if (transaction_id < 0)
+        {
+            int dup_id = ::find_transaction_id(txn, std::string(msg.source_id), "", "DISPATCHED");
+            if (dup_id >= 0)
+                return 0;
+            std::cerr << "[INVENTORY_MANAGER] No PENDING txn for hub=" << msg.source_id << std::endl;
+            return -1;
+        }
+
+        int quantities[QUANTITY_ITEMS] = {0};
+        extract_quantities_from_payload(msg.payload.order_stock, quantities);
+
+        if (adjust_client_inventory(txn, std::string(msg.source_id), quantities, false) != 0)
+        {
+            std::cerr << "[INVENTORY_MANAGER] Failed to reduce inventory for " << msg.source_id << std::endl;
+            return -1;
+        }
+
+        mark_transaction_dispatched(txn, transaction_id, msg.timestamp);
+
+        txn.commit();
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] handle_dispatch_confirmation error: " << ex.what() << std::endl;
+        return -1;
+    }
+}
+
 stock_request_result inventory_manager::handle_shipment_notice(const message_t& msg)
 {
     stock_request_result result;

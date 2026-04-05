@@ -40,7 +40,7 @@ emergency_result_t evaluate_emergency(const emergency_config_t* config)
     if (probability > 100)
         probability = 100;
 
-    int roll = rand() % 100;
+    int roll = rand() % 10000;
     if (roll >= probability)
     {
         return result;

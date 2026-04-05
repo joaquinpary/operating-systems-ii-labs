@@ -507,6 +507,10 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
     {
         m_inventory_manager.handle_receipt_confirmation(msg);
     }
+    else if (category == message_category::DISPATCH_CONFIRM)
+    {
+        m_inventory_manager.handle_dispatch_confirmation(msg);
+    }
     else if (category == message_category::DISPATCH_NOTICE)
     {
         stock_request_result shipment_result = m_inventory_manager.handle_shipment_notice(msg);
@@ -707,6 +711,11 @@ message_category message_handler::categorize_message(const char* msg_type) const
         std::strcmp(msg_type, WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
     {
         return message_category::RECEIPT_CONFIRM;
+    }
+
+    if (std::strcmp(msg_type, HUB_TO_SERVER__DISPATCH_CONFIRMATION) == 0)
+    {
+        return message_category::DISPATCH_CONFIRM;
     }
 
     if (std::strcmp(msg_type, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE) == 0)

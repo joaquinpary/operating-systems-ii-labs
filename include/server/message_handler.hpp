@@ -23,8 +23,9 @@ enum class message_category
     RECEIPT_CONFIRM, ///< Receipt confirmation emitted after stock delivery.
     DISPATCH_NOTICE, ///< Shipment notice emitted by a warehouse.
     REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
-    EMERGENCY_ALERT, ///< Emergency alert from a hub or warehouse.
-    CLI_COMMAND,     ///< Admin CLI command (handled by libadmin_cli.so).
+    DISPATCH_CONFIRM, ///< Dispatch confirmation from a hub (order fulfilled).
+    EMERGENCY_ALERT,  ///< Emergency alert from a hub or warehouse.
+    CLI_COMMAND,      ///< Admin CLI command (handled by libadmin_cli.so).
     GATEWAY_COMMAND, ///< API Gateway command (handled by libapi_gateway.so).
     OTHER            ///< Any unrecognized or unsupported message type.
 };
