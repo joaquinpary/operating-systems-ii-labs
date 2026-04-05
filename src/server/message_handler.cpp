@@ -621,7 +621,10 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
         }
 
         char resp_buf[GATEWAY_RESPONSE_MAX];
-        if (m_gateway_handle(req.raw_json, resp_buf, sizeof(resp_buf)) == 0)
+        gateway_side_effect_t side;
+        std::memset(&side, 0, sizeof(side));
+
+        if (m_gateway_handle(req.raw_json, resp_buf, sizeof(resp_buf), &side) == 0)
         {
             response_slot_t slot;
             std::memset(&slot, 0, sizeof(slot));
@@ -633,6 +636,25 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             slot.payload_len = len;
             responses.push_back(slot);
             LOG_INFO_MSG("[MSG] Gateway response -> sess=%s len=%u", req.session_id, len);
+
+            // If the plugin produced a side-effect message, forward it.
+            if (side.has_message)
+            {
+                response_slot_t fwd;
+                std::memset(&fwd, 0, sizeof(fwd));
+                fwd.command = static_cast<std::uint8_t>(response_command::SEND);
+                std::strncpy(fwd.target_username, side.target_username, CREDENTIALS_SIZE - 1);
+
+                std::uint32_t fwd_len = static_cast<std::uint32_t>(std::strlen(side.send_json));
+                std::memcpy(fwd.payload, side.send_json, fwd_len);
+                fwd.payload_len = fwd_len;
+                fwd.start_ack_timer = true;
+                fwd.timer_timeout = m_ack_timeout_seconds;
+                fwd.max_retries = m_max_retries;
+                responses.push_back(fwd);
+
+                LOG_INFO_MSG("[MSG] Gateway side-effect -> user=%s len=%u", side.target_username, fwd_len);
+            }
         }
         else
         {

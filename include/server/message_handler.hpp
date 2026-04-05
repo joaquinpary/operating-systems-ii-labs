@@ -2,6 +2,7 @@
 #define MESSAGE_HANDLER_HPP
 
 #include "auth_module.hpp"
+#include "api_gateway_interface.h"
 #include "inventory_manager.hpp"
 #include "ipc.hpp"
 #include <common/json_manager.h>
@@ -113,7 +114,7 @@ class message_handler
 
     // API Gateway plugin (libapi_gateway.so) — loaded via dlopen.
     void* m_gateway_lib = nullptr;
-    using gateway_handle_fn = int (*)(const char*, char*, size_t);
+    using gateway_handle_fn = int (*)(const char*, char*, size_t, gateway_side_effect_t*);
     using gateway_shutdown_fn = void (*)();
     gateway_handle_fn m_gateway_handle = nullptr;
     gateway_shutdown_fn m_gateway_shutdown = nullptr;

@@ -108,7 +108,123 @@ static int cmd_ping(char* out, size_t max_len, const message_t* req)
     return build_response_json(out, max_len, req, "ok", data);
 }
 
-int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len)
+static const char* s_item_names[] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+
+static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, cJSON* payload,
+                               gateway_side_effect_t* side)
+{
+    if (!s_conn)
+        return build_error(out, max_len, req, "database not connected");
+
+    /* Parse items from payload. */
+    cJSON* items_arr = cJSON_GetObjectItemCaseSensitive(payload, "items");
+    if (!cJSON_IsArray(items_arr) || cJSON_GetArraySize(items_arr) == 0)
+        return build_error(out, max_len, req, "items array required");
+
+    int quantities[QUANTITY_ITEMS] = {0};
+    cJSON* item = NULL;
+    cJSON_ArrayForEach(item, items_arr)
+    {
+        cJSON* id_json = cJSON_GetObjectItemCaseSensitive(item, "item_id");
+        cJSON* qty_json = cJSON_GetObjectItemCaseSensitive(item, "quantity");
+        if (!cJSON_IsNumber(id_json) || !cJSON_IsNumber(qty_json))
+            continue;
+        int id = id_json->valueint;
+        if (id >= 1 && id <= QUANTITY_ITEMS)
+            quantities[id - 1] = qty_json->valueint;
+    }
+
+    /* Find a hub with sufficient stock (random pick). */
+    const char* find_sql =
+        "SELECT client_id FROM client_inventory "
+        "WHERE client_type = 'HUB' "
+        "  AND food >= $1 AND water >= $2 AND medicine >= $3 "
+        "  AND tools >= $4 AND guns >= $5 AND ammo >= $6 "
+        "OFFSET floor(random() * ("
+        "  SELECT COUNT(*) FROM client_inventory "
+        "  WHERE client_type = 'HUB' "
+        "    AND food >= $1 AND water >= $2 AND medicine >= $3 "
+        "    AND tools >= $4 AND guns >= $5 AND ammo >= $6"
+        ")) LIMIT 1";
+
+    char q[QUANTITY_ITEMS][16];
+    const char* params[QUANTITY_ITEMS];
+    for (int i = 0; i < QUANTITY_ITEMS; i++)
+    {
+        snprintf(q[i], sizeof(q[i]), "%d", quantities[i]);
+        params[i] = q[i];
+    }
+
+    PGresult* res = PQexecParams(s_conn, find_sql, QUANTITY_ITEMS, NULL, params, NULL, NULL, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
+    {
+        PQclear(res);
+        return build_error(out, max_len, req, "no hub with sufficient stock");
+    }
+
+    char hub_id[ID_SIZE];
+    strncpy(hub_id, PQgetvalue(res, 0, 0), sizeof(hub_id) - 1);
+    hub_id[sizeof(hub_id) - 1] = '\0';
+    PQclear(res);
+
+    /* Create transaction: source = hub, destination = EXTERNAL_CLIENT. */
+    const char* txn_sql =
+        "INSERT INTO inventory_transactions "
+        "(transaction_type, source_id, source_type, destination_id, destination_type, "
+        " status, food, water, medicine, tools, guns, ammo) "
+        "VALUES ('ORDER_DISPATCH', $1, 'HUB', 'EXTERNAL_CLIENT', 'EXTERNAL_CLIENT', "
+        " 'PENDING', $2, $3, $4, $5, $6, $7) "
+        "RETURNING transaction_id";
+
+    const char* txn_params[7] = {hub_id, q[0], q[1], q[2], q[3], q[4], q[5]};
+    PGresult* txn_res = PQexecParams(s_conn, txn_sql, 7, NULL, txn_params, NULL, NULL, 0);
+    if (PQresultStatus(txn_res) != PGRES_TUPLES_OK || PQntuples(txn_res) == 0)
+    {
+        PQclear(txn_res);
+        return build_error(out, max_len, req, "failed to create transaction");
+    }
+
+    int transaction_id = atoi(PQgetvalue(txn_res, 0, 0));
+    PQclear(txn_res);
+
+    /* Build the dispatch message for the hub (side-effect). */
+    if (side)
+    {
+        inventory_item_t items[QUANTITY_ITEMS];
+        memset(items, 0, sizeof(items));
+        int item_count = 0;
+        for (int i = 0; i < QUANTITY_ITEMS; i++)
+        {
+            if (quantities[i] > 0)
+            {
+                items[item_count].item_id = i + 1;
+                strncpy(items[item_count].item_name, s_item_names[i], ITEM_NAME_SIZE - 1);
+                items[item_count].quantity = quantities[i];
+                item_count++;
+            }
+        }
+
+        message_t dispatch_msg;
+        create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK,
+                             SERVER, hub_id, items, item_count, NULL);
+
+        if (serialize_message_to_json(&dispatch_msg, side->send_json) == 0)
+        {
+            strncpy(side->target_username, hub_id, sizeof(side->target_username) - 1);
+            side->has_message = 1;
+        }
+    }
+
+    /* Build success response for the gateway. */
+    cJSON* data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "dispatch_hub_id", hub_id);
+    cJSON_AddNumberToObject(data, "transaction_id", transaction_id);
+
+    return build_response_json(out, max_len, req, "ok", data);
+}
+
+int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
+                       gateway_side_effect_t* side)
 {
     if (!raw_json || !resp_json || max_len == 0)
         return -1;
@@ -117,7 +233,7 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len)
     if (deserialize_message_from_json(raw_json, &req) != 0)
         return -1;
 
-    /* Extract command from payload. */
+    /* Extract command and keep payload around for command handlers. */
     cJSON* root = cJSON_Parse(raw_json);
     if (!root)
         return -1;
@@ -132,10 +248,14 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len)
         cmd[CMD_BUF_SIZE - 1] = '\0';
     }
 
-    cJSON_Delete(root);
-
+    int rc;
     if (strcmp(cmd, "ping") == 0)
-        return cmd_ping(resp_json, max_len, &req);
+        rc = cmd_ping(resp_json, max_len, &req);
+    else if (strcmp(cmd, "create_shipment") == 0)
+        rc = cmd_create_shipment(resp_json, max_len, &req, payload, side);
+    else
+        rc = build_error(resp_json, max_len, &req, "unknown command");
 
-    return build_error(resp_json, max_len, &req, "unknown command");
+    cJSON_Delete(root);
+    return rc;
 }
