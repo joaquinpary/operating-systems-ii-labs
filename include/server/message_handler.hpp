@@ -24,6 +24,7 @@ enum class message_category
     REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
     EMERGENCY_ALERT, ///< Emergency alert from a hub or warehouse.
     CLI_COMMAND,     ///< Admin CLI command (handled by libadmin_cli.so).
+    GATEWAY_COMMAND, ///< API Gateway command (handled by libapi_gateway.so).
     OTHER            ///< Any unrecognized or unsupported message type.
 };
 
@@ -109,6 +110,13 @@ class message_handler
     using admin_shutdown_fn = void (*)();
     admin_handle_fn m_admin_handle = nullptr;
     admin_shutdown_fn m_admin_shutdown = nullptr;
+
+    // API Gateway plugin (libapi_gateway.so) — loaded via dlopen.
+    void* m_gateway_lib = nullptr;
+    using gateway_handle_fn = int (*)(const char*, char*, size_t);
+    using gateway_shutdown_fn = void (*)();
+    gateway_handle_fn m_gateway_handle = nullptr;
+    gateway_shutdown_fn m_gateway_shutdown = nullptr;
 };
 
 #endif // MESSAGE_HANDLER_HPP

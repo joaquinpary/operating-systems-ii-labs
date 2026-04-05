@@ -1,5 +1,6 @@
 #include "message_handler.hpp"
 #include "admin_cli_interface.h"
+#include "api_gateway_interface.h"
 
 #include <common/logger.h>
 
@@ -54,6 +55,49 @@ message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, 
     {
         LOG_WARNING_MSG("[ADMIN] libadmin_cli.so not found — CLI disabled (%s)", dlerror());
     }
+
+    // --- Load libapi_gateway.so ---
+    m_gateway_lib = dlopen("libapi_gateway.so", RTLD_LAZY);
+    if (!m_gateway_lib)
+        m_gateway_lib = dlopen("libapi_gateway.so.1", RTLD_LAZY);
+
+    if (m_gateway_lib)
+    {
+        using version_fn = const char* (*)();
+        using init_fn = int (*)(const char*);
+
+        auto ver = reinterpret_cast<version_fn>(dlsym(m_gateway_lib, "api_gateway_version"));
+        auto init = reinterpret_cast<init_fn>(dlsym(m_gateway_lib, "api_gateway_init"));
+        m_gateway_handle = reinterpret_cast<gateway_handle_fn>(dlsym(m_gateway_lib, "api_gateway_handle"));
+        m_gateway_shutdown = reinterpret_cast<gateway_shutdown_fn>(dlsym(m_gateway_lib, "api_gateway_shutdown"));
+
+        if (init && m_gateway_handle && !db_conn_string.empty())
+        {
+            if (init(db_conn_string.c_str()) == 0)
+            {
+                LOG_INFO_MSG("[GATEWAY] libapi_gateway.so loaded (v%s)", ver ? ver() : "?");
+            }
+            else
+            {
+                LOG_ERROR_MSG("[GATEWAY] api_gateway_init failed");
+                m_gateway_handle = nullptr;
+            }
+        }
+        else if (db_conn_string.empty())
+        {
+            LOG_WARNING_MSG("[GATEWAY] libapi_gateway.so loaded but no conn_string — gateway disabled");
+            m_gateway_handle = nullptr;
+        }
+        else
+        {
+            LOG_ERROR_MSG("[GATEWAY] libapi_gateway.so missing symbols");
+            m_gateway_handle = nullptr;
+        }
+    }
+    else
+    {
+        LOG_WARNING_MSG("[GATEWAY] libapi_gateway.so not found — gateway disabled (%s)", dlerror());
+    }
 }
 
 message_handler::~message_handler()
@@ -62,6 +106,11 @@ message_handler::~message_handler()
         m_admin_shutdown();
     if (m_admin_lib)
         dlclose(m_admin_lib);
+
+    if (m_gateway_shutdown)
+        m_gateway_shutdown();
+    if (m_gateway_lib)
+        dlclose(m_gateway_lib);
 }
 
 response_slot_t message_handler::make_send_response(const char* session_id, const message_t& msg)
@@ -349,12 +398,13 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
 
         responses.push_back(make_send_response(req.session_id, response_msg));
         const bool is_cli = (auth_res.client_type == CLI);
+        const bool is_gateway = (auth_res.client_type == GATEWAY);
         if (!is_cli)
         {
             responses.push_back(make_start_timer(req.session_id, response_msg));
         }
 
-        if (!is_cli)
+        if (!is_cli && !is_gateway)
         {
             message_t inv_msg;
             if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
@@ -562,6 +612,33 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             LOG_ERROR_MSG("[MSG] admin_cli_handle failed from=%s", msg.source_id);
         }
     }
+    else if (category == message_category::GATEWAY_COMMAND)
+    {
+        if (!m_gateway_handle)
+        {
+            LOG_WARNING_MSG("[MSG] Gateway command but gateway plugin not loaded, from=%s", msg.source_id);
+            return responses;
+        }
+
+        char resp_buf[GATEWAY_RESPONSE_MAX];
+        if (m_gateway_handle(req.raw_json, resp_buf, sizeof(resp_buf)) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::SEND);
+            std::strncpy(slot.session_id, req.session_id, SESSION_ID_SIZE - 1);
+
+            std::uint32_t len = static_cast<std::uint32_t>(std::strlen(resp_buf));
+            std::memcpy(slot.payload, resp_buf, len);
+            slot.payload_len = len;
+            responses.push_back(slot);
+            LOG_INFO_MSG("[MSG] Gateway response -> sess=%s len=%u", req.session_id, len);
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] api_gateway_handle failed from=%s", msg.source_id);
+        }
+    }
     else
     {
         LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
@@ -574,18 +651,21 @@ message_category message_handler::categorize_message(const char* msg_type) const
 {
     if (std::strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 ||
         std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0 ||
-        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0)
+        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__AUTH_REQUEST) == 0)
     {
         return message_category::AUTH_REQUEST;
     }
 
-    if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__ACK) == 0)
     {
         return message_category::ACK_MESSAGE;
     }
 
     if (std::strcmp(msg_type, HUB_TO_SERVER__KEEPALIVE) == 0 ||
-        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__KEEPALIVE) == 0)
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__KEEPALIVE) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__KEEPALIVE) == 0)
     {
         return message_category::KEEPALIVE_MSG;
     }
@@ -628,6 +708,11 @@ message_category message_handler::categorize_message(const char* msg_type) const
         return message_category::CLI_COMMAND;
     }
 
+    if (std::strcmp(msg_type, GATEWAY_TO_SERVER__COMMAND) == 0)
+    {
+        return message_category::GATEWAY_COMMAND;
+    }
+
     return message_category::OTHER;
 }
 
@@ -644,6 +729,10 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
     else if (client_type == CLI)
     {
         return SERVER_TO_CLI__AUTH_RESPONSE;
+    }
+    else if (client_type == GATEWAY)
+    {
+        return SERVER_TO_GATEWAY__AUTH_RESPONSE;
     }
     return nullptr;
 }

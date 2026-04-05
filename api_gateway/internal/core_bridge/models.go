@@ -1,97 +1,135 @@
 package core_bridge
 
-import "encoding/json"
-
-const BufferSize = 1024
-
-type Role string
-
-const (
-	RoleHub       Role = "HUB"
-	RoleWarehouse Role = "WAREHOUSE"
-	RoleServer    Role = "SERVER"
-	RoleCLI       Role = "CLI"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
 )
 
-type MessageType string
+const FrameSize = 1024
 
+// Roles — must match C++ #define values in json_manager.h.
 const (
-	HubToServerAuthRequest              MessageType = "HUB_TO_SERVER__AUTH_REQUEST"
-	HubToServerKeepalive                MessageType = "HUB_TO_SERVER__KEEPALIVE"
-	HubToServerInventoryUpdate          MessageType = "HUB_TO_SERVER__INVENTORY_UPDATE"
-	HubToServerStockRequest             MessageType = "HUB_TO_SERVER__STOCK_REQUEST"
-	HubToServerStockReceiptConfirmation MessageType = "HUB_TO_SERVER__STOCK_RECEIPT_CONFIRMATION"
-	HubToServerEmergencyAlert           MessageType = "HUB_TO_SERVER__EMERGENCY_ALERT"
-	HubToServerACK                      MessageType = "HUB_TO_SERVER__ACK"
-
-	ServerToHubAuthResponse        MessageType = "SERVER_TO_HUB__AUTH_RESPONSE"
-	ServerToHubInventoryUpdate     MessageType = "SERVER_TO_HUB__INVENTORY_UPDATE"
-	ServerToHubIncomingStockNotice MessageType = "SERVER_TO_HUB__INCOMING_STOCK_NOTICE"
-	ServerToHubACK                 MessageType = "SERVER_TO_HUB__ACK"
-
-	WarehouseToServerAuthRequest              MessageType = "WAREHOUSE_TO_SERVER__AUTH_REQUEST"
-	WarehouseToServerKeepalive                MessageType = "WAREHOUSE_TO_SERVER__KEEPALIVE"
-	WarehouseToServerInventoryUpdate          MessageType = "WAREHOUSE_TO_SERVER__INVENTORY_UPDATE"
-	WarehouseToServerShipmentNotice           MessageType = "WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE"
-	WarehouseToServerReplenishRequest         MessageType = "WAREHOUSE_TO_SERVER__REPLENISH_REQUEST"
-	WarehouseToServerStockReceiptConfirmation MessageType = "WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION"
-	WarehouseToServerEmergencyAlert           MessageType = "WAREHOUSE_TO_SERVER__EMERGENCY_ALERT"
-	WarehouseToServerACK                      MessageType = "WAREHOUSE_TO_SERVER__ACK"
-
-	ServerToWarehouseAuthResponse         MessageType = "SERVER_TO_WAREHOUSE__AUTH_RESPONSE"
-	ServerToWarehouseInventoryUpdate      MessageType = "SERVER_TO_WAREHOUSE__INVENTORY_UPDATE"
-	ServerToWarehouseOrderToDispatchStock MessageType = "SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB"
-	ServerToWarehouseRestockNotice        MessageType = "SERVER_TO_WAREHOUSE__RESTOCK_NOTICE"
-	ServerToWarehouseACK                  MessageType = "SERVER_TO_WAREHOUSE__ACK"
-
-	CLIToServerAuthRequest    MessageType = "CLI_TO_SERVER__AUTH_REQUEST"
-	CLIToServerAdminCommand   MessageType = "CLI_TO_SERVER__ADMIN_COMMAND"
-	ServerToCLIAuthResponse   MessageType = "SERVER_TO_CLI__AUTH_RESPONSE"
-	ServerToAllEmergencyAlert MessageType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
+	RoleServer    = "SERVER"
+	RoleHub       = "HUB"
+	RoleWarehouse = "WAREHOUSE"
+	RoleCLI       = "CLI"
+	RoleGateway   = "GATEWAY"
 )
 
-type Message struct {
-	MsgType    MessageType     `json:"msg_type"`
-	SourceRole Role            `json:"source_role"`
-	SourceID   string          `json:"source_id"`
-	TargetRole Role            `json:"target_role"`
-	TargetID   string          `json:"target_id"`
-	Timestamp  string          `json:"timestamp"`
-	Payload    json.RawMessage `json:"payload"`
-	Checksum   string          `json:"checksum"`
+// MsgType identifies the kind of message in the C++ core protocol.
+type MsgType string
+
+// GATEWAY↔SERVER message types (parallel to CLI/HUB/WAREHOUSE families).
+const (
+	MsgAuthRequest     MsgType = "GATEWAY_TO_SERVER__AUTH_REQUEST"
+	MsgAuthResponse    MsgType = "SERVER_TO_GATEWAY__AUTH_RESPONSE"
+	MsgACK             MsgType = "GATEWAY_TO_SERVER__ACK"
+	MsgServerACK       MsgType = "SERVER_TO_GATEWAY__ACK"
+	MsgKeepAlive       MsgType = "GATEWAY_TO_SERVER__KEEPALIVE"
+	MsgGatewayCommand  MsgType = "GATEWAY_TO_SERVER__COMMAND"
+	MsgGatewayResponse MsgType = "SERVER_TO_GATEWAY__COMMAND_RESPONSE"
+)
+
+// Timestamp wraps time.Time so that JSON serialisation uses the C++ core's
+// millisecond-precision format: "2025-01-15T08:30:45.123Z".
+type Timestamp struct{ time.Time }
+
+const timestampLayout = "2006-01-02T15:04:05.000Z"
+
+func (t Timestamp) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + t.UTC().Format(timestampLayout) + `"`), nil
 }
 
-type CredentialsPayload struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+func (t *Timestamp) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `"`)
+	if s == "" || s == "null" {
+		return nil
+	}
+	parsed, err := time.Parse(timestampLayout, s)
+	if err != nil {
+		return fmt.Errorf("corebridge: parse timestamp %q: %w", s, err)
+	}
+	t.Time = parsed
+	return nil
 }
 
-type StatusPayload struct {
-	StatusCode int `json:"status_code"`
+func Now() Timestamp { return Timestamp{time.Now().UTC()} }
+
+// Envelope is the top-level JSON structure expected by the C++ core.
+type Envelope struct {
+	MsgType    MsgType   `json:"msg_type"`
+	SourceRole string    `json:"source_role"`
+	SourceID   string    `json:"source_id"`
+	TargetRole string    `json:"target_role"`
+	TargetID   string    `json:"target_id"`
+	Timestamp  Timestamp `json:"timestamp"`
+	Payload    Payload   `json:"payload"`
+	Checksum   string    `json:"checksum"`
 }
 
+// Payload carries the variable part of the message. Only fields relevant to
+// the current msg_type should be populated; empty fields are omitted.
+type Payload struct {
+	// Auth fields
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+
+	// Response fields
+	StatusCode int `json:"status_code,omitempty"`
+
+	// ACK fields
+	AckForTimestamp string `json:"ack_for_timestamp,omitempty"`
+
+	// Keepalive / general text
+	Message string `json:"message,omitempty"`
+
+	// Gateway command fields
+	Command string `json:"command,omitempty"`
+	Args    string `json:"args,omitempty"`
+
+	// Inventory / shipment fields
+	Items []Item `json:"items,omitempty"`
+
+	// Emergency fields
+	EmergencyCode int    `json:"emergency_code,omitempty"`
+	EmergencyType string `json:"emergency_type,omitempty"`
+	Instructions  string `json:"instructions,omitempty"`
+
+	// Order reference
+	OrderTimestamp string `json:"order_timestamp,omitempty"`
+}
+
+// Item mirrors the item structure used across inventory and shipment messages.
 type Item struct {
 	ItemID   int    `json:"item_id"`
 	ItemName string `json:"item_name"`
 	Quantity int    `json:"quantity"`
 }
 
-type InventoryPayload struct {
-	Items          []Item `json:"items"`
-	OrderTimestamp string `json:"order_timestamp,omitempty"`
+// Message is a simplified DTO used by the HTTP handlers layer.
+// Unlike Envelope (which carries typed Payload for the TCP protocol),
+// Message uses json.RawMessage so the HTTP layer can forward opaque payloads.
+type Message struct {
+	MsgType    MsgType         `json:"msg_type"`
+	SourceRole string          `json:"source_role"`
+	SourceID   string          `json:"source_id"`
+	TargetRole string          `json:"target_role"`
+	TargetID   string          `json:"target_id"`
+	Timestamp  string          `json:"timestamp"`
+	Payload    json.RawMessage `json:"payload"`
+	Checksum   string          `json:"checksum"`
 }
 
-type AckPayload struct {
-	StatusCode      int    `json:"status_code"`
-	AckForTimestamp string `json:"ack_for_timestamp"`
-}
-
-type KeepalivePayload struct {
-	Message string `json:"message"`
-}
-
-type EmergencyPayload struct {
-	EmergencyCode int    `json:"emergency_code"`
-	EmergencyType string `json:"emergency_type,omitempty"`
-	Instructions  string `json:"instructions,omitempty"`
+// computeChecksum calculates the DJB2 hash of (msg_type + source_id),
+// masks it to 24 bits, and returns an uppercase hex string matching the C++
+// format: snprintf("%lX", hash & 0xFFFFFF) — NO zero-padding.
+func computeChecksum(msgType MsgType, sourceID string) string {
+	input := string(msgType) + sourceID
+	var hash uint32 = 5381
+	for i := 0; i < len(input); i++ {
+		hash = (hash << 5) + hash + uint32(input[i])
+	}
+	return fmt.Sprintf("%X", hash&0xFFFFFF)
 }

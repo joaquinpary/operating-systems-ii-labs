@@ -221,7 +221,9 @@ typedef struct
 static const payload_handler_t handlers[] = {
     {HUB_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
     {CLI_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
+    {GATEWAY_TO_SERVER__AUTH_REQUEST, serialize_auth_request, deserialize_auth_request},
     {HUB_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
+    {GATEWAY_TO_SERVER__KEEPALIVE, serialize_keepalive, deserialize_keepalive},
     {HUB_TO_SERVER__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {HUB_TO_SERVER__EMERGENCY_ALERT, serialize_client_emergency, deserialize_client_emergency},
     {HUB_TO_SERVER__STOCK_REQUEST, serialize_items_list, deserialize_items_list},
@@ -235,9 +237,11 @@ static const payload_handler_t handlers[] = {
     {WAREHOUSE_TO_SERVER__REPLENISH_REQUEST, serialize_items_list, deserialize_items_list},
     {WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION, serialize_items_list, deserialize_items_list},
     {WAREHOUSE_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {GATEWAY_TO_SERVER__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_HUB__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {SERVER_TO_WAREHOUSE__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {SERVER_TO_CLI__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
+    {SERVER_TO_GATEWAY__AUTH_RESPONSE, serialize_auth_response, deserialize_auth_response},
     {SERVER_TO_HUB__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__INVENTORY_UPDATE, serialize_items_list, deserialize_items_list},
     {SERVER_TO_WAREHOUSE__ORDER_TO_DISPATCH_STOCK_TO_HUB, serialize_items_list, deserialize_items_list},
@@ -246,6 +250,7 @@ static const payload_handler_t handlers[] = {
     {SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT, serialize_server_emergency, deserialize_server_emergency},
     {SERVER_TO_HUB__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_WAREHOUSE__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {SERVER_TO_GATEWAY__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {NULL, NULL, NULL}};
 
 static const payload_handler_t* find_handler(const char* msg_type)
@@ -498,6 +503,8 @@ int create_auth_response_message(message_t* out, const char* target_role, const 
         msg_type = SERVER_TO_WAREHOUSE__AUTH_RESPONSE;
     else if (strcmp(target_role, CLI) == 0)
         msg_type = SERVER_TO_CLI__AUTH_RESPONSE;
+    else if (strcmp(target_role, GATEWAY) == 0)
+        msg_type = SERVER_TO_GATEWAY__AUTH_RESPONSE;
 
     if (!msg_type)
         return -1;
@@ -522,10 +529,14 @@ int create_acknowledgment_message(message_t* out, const char* source_role, const
         msg_type = HUB_TO_SERVER__ACK;
     else if (strcmp(source_role, WAREHOUSE) == 0 && strcmp(target_role, SERVER) == 0)
         msg_type = WAREHOUSE_TO_SERVER__ACK;
+    else if (strcmp(source_role, GATEWAY) == 0 && strcmp(target_role, SERVER) == 0)
+        msg_type = GATEWAY_TO_SERVER__ACK;
     else if (strcmp(source_role, SERVER) == 0 && strcmp(target_role, HUB) == 0)
         msg_type = SERVER_TO_HUB__ACK;
     else if (strcmp(source_role, SERVER) == 0 && strcmp(target_role, WAREHOUSE) == 0)
         msg_type = SERVER_TO_WAREHOUSE__ACK;
+    else if (strcmp(source_role, SERVER) == 0 && strcmp(target_role, GATEWAY) == 0)
+        msg_type = SERVER_TO_GATEWAY__ACK;
 
     if (!msg_type)
         return -1;
