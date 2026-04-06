@@ -644,6 +644,12 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             // If the plugin produced a side-effect message, forward it.
             if (side.has_message)
             {
+                // Extract the timestamp from the serialised side-effect so the
+                // ACK timer can be matched when the target client acknowledges.
+                message_t side_msg;
+                std::memset(&side_msg, 0, sizeof(side_msg));
+                deserialize_message_from_json(side.send_json, &side_msg);
+
                 response_slot_t fwd;
                 std::memset(&fwd, 0, sizeof(fwd));
                 fwd.command = static_cast<std::uint8_t>(response_command::SEND);
@@ -655,6 +661,7 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                 fwd.start_ack_timer = true;
                 fwd.timer_timeout = m_ack_timeout_seconds;
                 fwd.max_retries = m_max_retries;
+                std::strncpy(fwd.timer_key, side_msg.timestamp, TIMESTAMP_SIZE - 1);
                 responses.push_back(fwd);
 
                 LOG_INFO_MSG("[MSG] Gateway side-effect -> user=%s len=%u", side.target_username, fwd_len);

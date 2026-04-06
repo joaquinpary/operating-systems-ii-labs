@@ -1,13 +1,13 @@
 package core_bridge
 
 import (
-"context"
-"encoding/json"
-"fmt"
-"log"
-"net"
-"sync"
-"time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net"
+	"sync"
+	"time"
 )
 
 // TCPClient is the adapter that implements Bridge over a persistent TCP
@@ -86,6 +86,25 @@ tc.conn.Close()
 return fmt.Errorf("core_bridge: auth rejected (status %d)", resp.Payload.StatusCode)
 }
 
+// ACK the auth response so the server doesn't time us out.
+ack := Envelope{
+MsgType:    MsgACK,
+SourceRole: RoleGateway,
+SourceID:   tc.sourceID,
+TargetRole: RoleServer,
+TargetID:   "SERVER",
+Timestamp:  Now(),
+Payload: Payload{
+StatusCode:      200,
+AckForTimestamp: resp.Timestamp.UTC().Format(timestampLayout),
+},
+}
+ack.Checksum = computeChecksum(ack.MsgType, ack.SourceID)
+if err := tc.writeFrame(ack); err != nil {
+tc.conn.Close()
+return fmt.Errorf("core_bridge: send auth ack: %w", err)
+}
+
 tc.healthy = true
 tc.conn.SetDeadline(time.Time{}) // clear auth deadline
 tc.logger.Printf("core_bridge: authenticated to %s as %s", tc.addr, tc.sourceID)
@@ -152,6 +171,38 @@ return resp, nil
 }
 }
 
+// SendKeepalive writes a keepalive frame and reads the single ACK back.
+// Unlike Send(), it does not loop waiting for a non-ACK response.
+func (tc *TCPClient) SendKeepalive(ctx context.Context, msg Envelope) error {
+tc.mu.Lock()
+defer tc.mu.Unlock()
+
+if tc.conn == nil {
+return fmt.Errorf("core_bridge: not connected")
+}
+
+if deadline, ok := ctx.Deadline(); ok {
+tc.conn.SetDeadline(deadline)
+defer tc.conn.SetDeadline(time.Time{})
+}
+
+msg.Timestamp = Now()
+msg.Checksum = computeChecksum(msg.MsgType, msg.SourceID)
+
+if err := tc.writeFrame(msg); err != nil {
+tc.healthy = false
+return fmt.Errorf("core_bridge: write: %w", err)
+}
+
+_, err := tc.readFrame()
+if err != nil {
+tc.healthy = false
+return fmt.Errorf("core_bridge: read: %w", err)
+}
+
+return nil
+}
+
 // Close shuts down the TCP connection.
 func (tc *TCPClient) Close() error {
 tc.mu.Lock()
@@ -171,8 +222,20 @@ defer tc.mu.Unlock()
 return tc.healthy
 }
 
-func (tc *TCPClient) writeFrame(env Envelope) error { return writeFrameTo(tc.conn, env) }
-func (tc *TCPClient) readFrame() (Envelope, error)  { return readFrameFrom(tc.conn) }
+func (tc *TCPClient) writeFrame(env Envelope) error {
+	data, _ := json.Marshal(env)
+	tc.logger.Printf("TCP >>> %s", string(data))
+	return writeFrameTo(tc.conn, env)
+}
+
+func (tc *TCPClient) readFrame() (Envelope, error) {
+	env, err := readFrameFrom(tc.conn)
+	if err == nil {
+		data, _ := json.Marshal(env)
+		tc.logger.Printf("TCP <<< %s", string(data))
+	}
+	return env, err
+}
 
 // --- package-level frame I/O (used by TCPClient and Listener) ---
 

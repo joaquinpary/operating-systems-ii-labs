@@ -5,17 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
 	"lora-chads/api_gateway/internal/core_bridge"
-)
-
-const (
-	shipmentsQueue            = "shipments"
-	createShipmentMessageType = "create_shipment"
-	dispatchCommandType       = "dispatch_command"
 )
 
 type coreBridge interface {
@@ -27,15 +22,24 @@ type publisher interface {
 	Publish(ctx context.Context, queue string, body []byte) error
 }
 
+type shipmentTracker interface {
+	RegisterShipment(request ShipmentRequest) StatusResponse
+	DeleteShipment(shipmentID string)
+	HasShipment(shipmentID string) bool
+	Snapshot() []StatusResponse
+}
+
 type Handler struct {
 	bridge    coreBridge
 	publisher publisher
+	tracker   shipmentTracker
 }
 
-func NewHandler(bridge coreBridge, publisher publisher) *Handler {
+func NewHandler(bridge coreBridge, publisher publisher, tracker shipmentTracker) *Handler {
 	return &Handler{
 		bridge:    bridge,
 		publisher: publisher,
+		tracker:   tracker,
 	}
 }
 
@@ -45,48 +49,24 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid shipment request body")
 	}
 
+	log.Printf("HTTP POST /shipments items=%d", len(request.Items))
+
 	if err := validateShipmentRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	items := make([]core_bridge.Item, len(request.Items))
-	for i, si := range request.Items {
-		items[i] = core_bridge.Item{
-			ItemID:   si.ItemID,
-			ItemName: si.ItemName,
-			Quantity: si.Quantity,
-		}
+	status := handler.tracker.RegisterShipment(request)
+	request.ShipmentID = status.ShipmentID
+
+	if err := handler.publish(ctx.UserContext(), CreateShipmentMessageType, request); err != nil {
+		handler.tracker.DeleteShipment(request.ShipmentID)
+		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue shipment request")
 	}
 
-	resp, err := handler.bridge.Command(ctx.UserContext(), "create_shipment", core_bridge.Payload{
-		Items: items,
-	})
-	if err != nil {
-		return writeError(ctx, fiber.StatusInternalServerError, "failed to process shipment")
-	}
-
-	if resp.Payload.Status != "ok" {
-		msg := "shipment processing failed"
-		if len(resp.Payload.Data) > 0 {
-			var d struct {
-				Message string `json:"message"`
-			}
-			if json.Unmarshal(resp.Payload.Data, &d) == nil && d.Message != "" {
-				msg = d.Message
-			}
-		}
-		return writeError(ctx, fiber.StatusUnprocessableEntity, msg)
-	}
-
-	var data CreateShipmentData
-	if len(resp.Payload.Data) > 0 {
-		_ = json.Unmarshal(resp.Payload.Data, &data)
-	}
-
-	return ctx.Status(fiber.StatusOK).JSON(CreateShipmentResponse{
-		Status:        "ok",
-		DispatchHubID: data.DispatchHubID,
-		TransactionID: data.TransactionID,
+	log.Printf("HTTP POST /shipments => 202 shipment_id=%s", request.ShipmentID)
+	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
+		ShipmentID: request.ShipmentID,
+		Status:     StatusPendingConfirmation,
 	})
 }
 
@@ -96,34 +76,46 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid dispatch request body")
 	}
 
+	log.Printf("HTTP POST /dispatch shipment_id=%s", request.ShipmentID)
+
 	if err := validateDispatchRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	if err := handler.publish(ctx.UserContext(), dispatchCommandType, request); err != nil {
+	if !handler.tracker.HasShipment(request.ShipmentID) {
+		return writeError(ctx, fiber.StatusNotFound, "shipment not found")
+	}
+
+	if err := handler.publish(ctx.UserContext(), DispatchCommandType, request); err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue dispatch command")
 	}
 
 	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
 		ShipmentID: request.ShipmentID,
-		Status:     "accepted",
+		Status:     StatusPendingConfirmation,
 	})
 }
 
+func (handler *Handler) GetAllStatuses(ctx *fiber.Ctx) error {
+	return ctx.Status(fiber.StatusOK).JSON(handler.tracker.Snapshot())
+}
+
 func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
-	shipmentID := strings.TrimSpace(ctx.Params("id"))
-	if shipmentID == "" {
+	transactionID := strings.TrimSpace(ctx.Params("id"))
+	if transactionID == "" {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
 
-	message, err := handler.bridge.Query(ctx.UserContext(), shipmentID)
+	log.Printf("HTTP GET /status/%s", transactionID)
+
+	message, err := handler.bridge.Query(ctx.UserContext(), transactionID)
 	if err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
 	}
 
 	response := StatusResponse{
-		ShipmentID: shipmentID,
-		Status:     "unknown",
+		TransactionID: transactionID,
+		Status:        "unknown",
 	}
 
 	if len(message.Payload) > 0 {
@@ -132,8 +124,8 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		}
 	}
 
-	if response.ShipmentID == "" {
-		response.ShipmentID = shipmentID
+	if response.TransactionID == "" {
+		response.TransactionID = transactionID
 	}
 
 	if response.Status == "" {
@@ -157,14 +149,10 @@ func (handler *Handler) publish(ctx context.Context, messageType string, payload
 		return fmt.Errorf("marshal queue message: %w", err)
 	}
 
-	return handler.publisher.Publish(ctx, shipmentsQueue, envelopeBytes)
+	return handler.publisher.Publish(ctx, ShipmentsQueue, envelopeBytes)
 }
 
 func validateShipmentRequest(request ShipmentRequest) error {
-	if strings.TrimSpace(request.OriginID) == "" {
-		return errors.New("origin_id is required")
-	}
-
 	if len(request.Items) == 0 {
 		return errors.New("items are required")
 	}

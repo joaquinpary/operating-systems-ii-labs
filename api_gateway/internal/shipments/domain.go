@@ -2,9 +2,18 @@ package shipments
 
 import "encoding/json"
 
+const (
+	ShipmentsQueue            = "shipments"
+	CreateShipmentMessageType = "create_shipment"
+	DispatchCommandType       = "dispatch_command"
+
+	StatusPendingConfirmation = "pending_confirmation"
+	StatusConfirmed           = "confirm"
+)
+
 type ShipmentRequest struct {
-	OriginID string         `json:"origin_id"`
-	Items    []ShipmentItem `json:"items"`
+	ShipmentID string         `json:"shipment_id,omitempty"`
+	Items      []ShipmentItem `json:"items"`
 }
 
 type ShipmentItem struct {
@@ -39,7 +48,9 @@ type QueueMessage struct {
 }
 
 type StatusResponse struct {
-	ShipmentID string         `json:"shipment_id"`
-	Status     string         `json:"status"`
-	Items      []ShipmentItem `json:"items,omitempty"`
+	ShipmentID    string         `json:"shipment_id,omitempty"`
+	TransactionID string         `json:"transaction_id,omitempty"`
+	Status        string         `json:"status"`
+	CreatedAt     string         `json:"created_at,omitempty"`
+	Items         []ShipmentItem `json:"items,omitempty"`
 }

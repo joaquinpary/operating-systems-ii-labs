@@ -17,6 +17,7 @@ from modules import admin_cli
 from modules import rest_api_client
 from modules import benchmark
 from modules import profiling_graph
+from modules import api_gateway_tester
 
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ def _header():
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}3){RESET} REST API Client                   {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}4){RESET} Benchmark                         {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}5){RESET} Profiling Graph                   {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}6){RESET} API Gateway Tester                {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {RED}0){RESET} Exit                              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}╚═══════════════════════════════════════╝{RESET}")
     print()
@@ -302,6 +304,98 @@ def menu_profiling_graph():
     _pause()
 
 
+# ── Option 6: API Gateway Tester ────────────────────────────────────────────
+
+def _gw_header(base_url, has_token):
+    status = f"{GREEN}yes{RESET}" if has_token else f"{RED}no{RESET}"
+    print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}")
+    print(f"  {DIM}Base URL : {base_url}{RESET}")
+    print(f"  {DIM}JWT token: {status}{RESET}\n")
+    print(f"    {GREEN}1){RESET} Generate JWT Token")
+    print(f"    {GREEN}2){RESET} Create Shipment       POST /shipments")
+    print(f"    {GREEN}3){RESET} Dispatch Shipment     POST /dispatch")
+    print(f"    {GREEN}4){RESET} Get All Statuses      GET  /status")
+    print(f"    {GREEN}5){RESET} Get Shipment Status   GET  /status/:id")
+    print(f"    {RED}0){RESET} ← Back to main menu")
+    print()
+
+
+def _gw_prompt_quantities():
+    """Ask the user for quantities of each item type (food..ammo)."""
+    print(f"  {DIM}Enter quantity for each item (0 to skip):{RESET}")
+    quantities: dict[int, int] = {}
+    for item_id, item_name in api_gateway_tester.ITEM_CATALOGUE:
+        qty = _prompt_int(f"    {item_id}) {item_name}", 0)
+        if qty > 0:
+            quantities[item_id] = qty
+    return quantities
+
+
+def menu_api_gateway():
+    print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
+    base_url = _prompt("Base URL", api_gateway_tester.DEFAULT_GW_URL)
+    jwt_secret = _prompt("JWT secret (empty to skip auth)",
+                         api_gateway_tester.DEFAULT_JWT_SECRET)
+
+    token = None
+    if jwt_secret:
+        token = api_gateway_tester.generate_jwt(jwt_secret)
+        print(f"  {GREEN}JWT generated.{RESET}")
+
+    while True:
+        _gw_header(base_url, token is not None)
+        choice = _prompt("Select", "0")
+
+        try:
+            if choice == "1":
+                jwt_secret = _prompt("JWT secret",
+                                     api_gateway_tester.DEFAULT_JWT_SECRET)
+                sub = _prompt("Subject claim", "tools-tester")
+                hours = _prompt_float("Expiration hours", 24)
+                token = api_gateway_tester.generate_jwt(
+                    jwt_secret, claims={"sub": sub}, exp_hours=hours
+                )
+                print(f"\n  {GREEN}Token:{RESET} {token[:40]}...")
+                _pause()
+
+            elif choice == "2":
+                quantities = _gw_prompt_quantities()
+                if not any(q > 0 for q in quantities.values()):
+                    print(f"  {RED}All quantities are 0 — nothing to ship.{RESET}")
+                else:
+                    print()
+                    api_gateway_tester.create_shipment(
+                        base_url, token, quantities
+                    )
+                _pause()
+
+            elif choice == "3":
+                sid = _prompt("Shipment ID")
+                print()
+                api_gateway_tester.dispatch_shipment(base_url, token, sid)
+                _pause()
+
+            elif choice == "4":
+                print()
+                api_gateway_tester.get_all_statuses(base_url, token)
+                _pause()
+
+            elif choice == "5":
+                sid = _prompt("Shipment / Transaction ID")
+                print()
+                api_gateway_tester.get_status(base_url, token, sid)
+                _pause()
+
+            elif choice == "0":
+                return
+            else:
+                print(f"  {RED}Invalid option.{RESET}")
+
+        except KeyboardInterrupt:
+            print()
+            return
+
+
 # ── Main loop ───────────────────────────────────────────────────────────────
 
 def main():
@@ -320,6 +414,8 @@ def main():
                 menu_benchmark()
             elif choice == "5":
                 menu_profiling_graph()
+            elif choice == "6":
+                menu_api_gateway()
             elif choice == "0":
                 print(f"\n  {DIM}Bye!{RESET}\n")
                 break

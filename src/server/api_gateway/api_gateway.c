@@ -251,7 +251,7 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
     int rc;
     if (strcmp(cmd, "ping") == 0)
         rc = cmd_ping(resp_json, max_len, &req);
-    else if (strcmp(cmd, "create_shipment") == 0)
+    else if (strcmp(cmd, "create_new_order") == 0)
         rc = cmd_create_shipment(resp_json, max_len, &req, payload, side);
     else
         rc = build_error(resp_json, max_len, &req, "unknown command");

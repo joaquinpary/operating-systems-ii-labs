@@ -75,6 +75,12 @@ RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
         cp /tmp/build/libadmin_cli*.so* /usr/local/lib/; \
     fi
 
+# Copy API gateway shared library (server only — harmless if absent on client)
+RUN --mount=type=bind,from=builder,source=/app/build,target=/tmp/build \
+    if ls /tmp/build/libapi_gateway*.so* 2>/dev/null | grep -q .; then \
+        cp /tmp/build/libapi_gateway*.so* /usr/local/lib/; \
+    fi
+
 # Create log directory following FHS
 RUN mkdir -p /var/log/dhl
 

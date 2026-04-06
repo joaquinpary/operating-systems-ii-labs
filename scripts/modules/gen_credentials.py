@@ -132,7 +132,16 @@ def generate_configs(num_clients=2000):
         cli_username, cli_password, "CLI"
     )
 
+    # Always generate API gateway credential
+    gw_username = "api_gateway"
+    gw_password = generate_password(gw_username)
+    _write_conf_file(
+        os.path.join(SERVER_DIR, "api_gateway.conf"),
+        gw_username, gw_password, "GATEWAY"
+    )
+
     print(f"  Client configs → {CLIENTS_DIR}")
     print(f"  Server configs → {SERVER_DIR}")
     print(f"  Admin CLI config → cli_admin.conf")
+    print(f"  API Gateway config → api_gateway.conf")
     print("  Done.")

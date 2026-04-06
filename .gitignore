@@ -37,7 +37,7 @@ build/
 external/
 .github/prompts/
 .vscode/
-*/__pycache__/
+**/__pycache__/
 
 # Configuration files
 config/clients/

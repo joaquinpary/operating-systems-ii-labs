@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/gofiber/fiber/v2"
@@ -20,6 +23,19 @@ import (
 )
 
 func main() {
+	// --- Log to both stdout and file ---
+	logPath := filepath.Join("logs", "server", "server_go_gateway.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		log.Fatalf("create log dir: %v", err)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		log.Fatalf("open log file: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -68,8 +84,8 @@ func main() {
 	defer rabbitConnection.Close()
 
 	// --- Application components ---
-	shipmentHandler := shipments.NewHandler(pool, rabbitConnection)
-	dispatcherWorker := dispatcher.New(pool)
+	dispatcherWorker := dispatcher.New(pool, rabbitConnection, cfg.CorePoolSize)
+	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub()
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
 
@@ -84,6 +100,7 @@ func main() {
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
+	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
 
 	// --- Background workers ---
@@ -121,6 +138,8 @@ func main() {
 	if err := app.Listen(fmt.Sprintf(":%d", cfg.HTTPPort)); err != nil {
 		log.Printf("fiber server stopped: %v", err)
 	}
+
+	stop()
 
 	if err := dispatcherWorker.Stop(); err != nil {
 		log.Printf("stop dispatcher worker: %v", err)

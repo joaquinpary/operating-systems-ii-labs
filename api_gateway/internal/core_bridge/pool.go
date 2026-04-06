@@ -139,29 +139,40 @@ func (p *Pool) Command(ctx context.Context, command string, payload Payload) (En
 		SourceRole: RoleGateway,
 		SourceID:   p.sourceID,
 		TargetRole: RoleServer,
-		TargetID:   "server",
+		TargetID:   "SERVER",
 		Timestamp:  Now(),
 		Payload:    payload,
 	}
 	return p.Send(ctx, env)
 }
 
-// Query is a stub that returns a placeholder shipment status.
-// It will be replaced with a real TCP query to the C++ core.
-func (p *Pool) Query(_ context.Context, shipmentID string) (Message, error) {
-	payload, err := json.Marshal(map[string]string{
-		"shipment_id": shipmentID,
-		"status":      "pending",
+func (p *Pool) Query(ctx context.Context, shipmentID string) (Message, error) {
+	response, err := p.Command(ctx, "get_shipment_status", Payload{
+		Args: shipmentID,
 	})
 	if err != nil {
-		return Message{}, fmt.Errorf("marshal shipment status: %w", err)
+		return Message{}, fmt.Errorf("query shipment status: %w", err)
+	}
+
+	payload, err := json.Marshal(response.Payload)
+	if err != nil {
+		return Message{}, fmt.Errorf("marshal shipment status response: %w", err)
 	}
 
 	return Message{
-		SourceRole: RoleServer,
-		TargetID:   shipmentID,
+		MsgType:    response.MsgType,
+		SourceRole: response.SourceRole,
+		SourceID:   response.SourceID,
+		TargetRole: response.TargetRole,
+		TargetID:   response.TargetID,
+		Timestamp:  response.Timestamp.UTC().Format(timestampLayout),
 		Payload:    payload,
+		Checksum:   response.Checksum,
 	}, nil
+}
+
+func (p *Pool) SourceID() string {
+	return p.sourceID
 }
 
 // --- internal helpers ---
@@ -273,6 +284,8 @@ func (p *Pool) sendKeepalives() {
 }
 
 // sendOneKeepalive sends a single KEEPALIVE frame and reads the ACK.
+// Unlike Send(), it does not wait for a non-ACK response because the server
+// only replies with an ACK to keepalives.
 func (p *Pool) sendOneKeepalive(c *TCPClient) error {
 	ctx, cancel := context.WithTimeout(context.Background(), p.connTimeout)
 	defer cancel()
@@ -286,7 +299,5 @@ func (p *Pool) sendOneKeepalive(c *TCPClient) error {
 		Payload:    Payload{Message: "ALIVE"},
 	}
 
-	// Send uses the mutex internally, so this is safe.
-	_, err := c.Send(ctx, msg)
-	return err
+	return c.SendKeepalive(ctx, msg)
 }
