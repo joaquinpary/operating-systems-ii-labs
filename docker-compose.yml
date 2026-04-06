@@ -143,6 +143,22 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
 
+  predictor:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: dhl_predictor
+    restart: always
+    ports:
+      - "9000:9000"
+    networks:
+      - dhl_net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
 networks:
   dhl_net:
     enable_ipv6: true
