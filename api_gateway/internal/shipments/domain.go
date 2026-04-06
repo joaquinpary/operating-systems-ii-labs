@@ -13,7 +13,6 @@ const (
 
 type ShipmentRequest struct {
 	ShipmentID string         `json:"shipment_id,omitempty"`
-	OriginID   string         `json:"origin_id"`
 	Items      []ShipmentItem `json:"items"`
 }
 
@@ -51,7 +50,6 @@ type QueueMessage struct {
 type StatusResponse struct {
 	ShipmentID    string         `json:"shipment_id,omitempty"`
 	TransactionID string         `json:"transaction_id,omitempty"`
-	OriginID      string         `json:"origin_id,omitempty"`
 	Status        string         `json:"status"`
 	CreatedAt     string         `json:"created_at,omitempty"`
 	Items         []ShipmentItem `json:"items,omitempty"`

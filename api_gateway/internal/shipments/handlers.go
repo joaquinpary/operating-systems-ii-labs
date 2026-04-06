@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -48,6 +49,8 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid shipment request body")
 	}
 
+	log.Printf("HTTP POST /shipments items=%d", len(request.Items))
+
 	if err := validateShipmentRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
@@ -60,6 +63,7 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue shipment request")
 	}
 
+	log.Printf("HTTP POST /shipments => 202 shipment_id=%s", request.ShipmentID)
 	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
 		ShipmentID: request.ShipmentID,
 		Status:     StatusPendingConfirmation,
@@ -71,6 +75,8 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid dispatch request body")
 	}
+
+	log.Printf("HTTP POST /dispatch shipment_id=%s", request.ShipmentID)
 
 	if err := validateDispatchRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
@@ -99,6 +105,8 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 	if transactionID == "" {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
+
+	log.Printf("HTTP GET /status/%s", transactionID)
 
 	message, err := handler.bridge.Query(ctx.UserContext(), transactionID)
 	if err != nil {
@@ -145,10 +153,6 @@ func (handler *Handler) publish(ctx context.Context, messageType string, payload
 }
 
 func validateShipmentRequest(request ShipmentRequest) error {
-	if strings.TrimSpace(request.OriginID) == "" {
-		return errors.New("origin_id is required")
-	}
-
 	if len(request.Items) == 0 {
 		return errors.New("items are required")
 	}

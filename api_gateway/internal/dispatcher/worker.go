@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -88,7 +89,6 @@ func (dispatcher *Dispatcher) Stop() error {
 
 func (dispatcher *Dispatcher) RegisterShipment(request shipments.ShipmentRequest) shipments.StatusResponse {
 	prepared := request
-	prepared.OriginID = strings.TrimSpace(prepared.OriginID)
 	if strings.TrimSpace(prepared.ShipmentID) == "" {
 		prepared.ShipmentID = uuid.NewString()
 	}
@@ -175,6 +175,7 @@ func (dispatcher *Dispatcher) consumeLoop(ctx context.Context, deliveries <-chan
 
 			requeue, err := dispatcher.handleDelivery(ctx, delivery)
 			if err != nil {
+				log.Printf("dispatcher: handleDelivery error (requeue=%t): %v", requeue, err)
 				_ = delivery.Nack(false, requeue)
 				continue
 			}
@@ -189,6 +190,8 @@ func (dispatcher *Dispatcher) handleDelivery(ctx context.Context, delivery amqp.
 	if err := json.Unmarshal(delivery.Body, &message); err != nil {
 		return false, fmt.Errorf("decode queue message: %w", err)
 	}
+
+	log.Printf("dispatcher: received queue message type=%s payload=%s", message.Type, string(message.Payload))
 
 	switch message.Type {
 	case shipments.CreateShipmentMessageType:
@@ -233,28 +236,47 @@ func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID s
 		return nil
 	}
 
-	args, err := json.Marshal(record.Request)
-	if err != nil {
-		return fmt.Errorf("marshal dispatch request payload: %w", err)
+	items := make([]core_bridge.Item, len(record.Request.Items))
+	for i, si := range record.Request.Items {
+		items[i] = core_bridge.Item{
+			ItemID:   si.ItemID,
+			ItemName: si.ItemName,
+			Quantity: si.Quantity,
+		}
 	}
 
-	response, err := dispatcher.pool.Send(ctx, core_bridge.Envelope{
-		MsgType:    core_bridge.MsgGatewayCommand,
-		SourceRole: core_bridge.RoleGateway,
-		SourceID:   dispatcher.pool.SourceID(),
-		TargetRole: core_bridge.RoleServer,
-		TargetID:   "SERVER",
-		Payload: core_bridge.Payload{
-			Command: "create_new_order",
-			Args:    string(args),
-		},
+	response, err := dispatcher.pool.Command(ctx, "create_new_order", core_bridge.Payload{
+		Items: items,
 	})
 	if err != nil {
 		return fmt.Errorf("send dispatch command to core: %w", err)
 	}
 
-	transactionID := strings.TrimSpace(response.Payload.TransactionID)
-	if transactionID == "" {
+	log.Printf("dispatcher: dispatch response status=%s data=%s", response.Payload.Status, string(response.Payload.Data))
+
+	if response.Payload.Status != "ok" {
+		msg := "dispatch failed"
+		if len(response.Payload.Data) > 0 {
+			var d struct{ Message string `json:"message"` }
+			if json.Unmarshal(response.Payload.Data, &d) == nil && d.Message != "" {
+				msg = d.Message
+			}
+		}
+		return fmt.Errorf("core rejected dispatch: %s", msg)
+	}
+
+	var data struct {
+		DispatchHubID string `json:"dispatch_hub_id"`
+		TransactionID int    `json:"transaction_id"`
+	}
+	if len(response.Payload.Data) > 0 {
+		if err := json.Unmarshal(response.Payload.Data, &data); err != nil {
+			return fmt.Errorf("decode dispatch response data: %w", err)
+		}
+	}
+
+	transactionID := fmt.Sprintf("%d", data.TransactionID)
+	if data.TransactionID == 0 {
 		return fmt.Errorf("core response missing transaction_id")
 	}
 
@@ -264,6 +286,9 @@ func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID s
 	dispatcher.shipments[record.Request.ShipmentID] = record
 	dispatcher.transactions[transactionID] = record.Request.ShipmentID
 	dispatcher.mu.Unlock()
+
+	log.Printf("dispatcher: shipment %s confirmed, transaction_id=%s hub=%s",
+		record.Request.ShipmentID, transactionID, data.DispatchHubID)
 
 	return nil
 }
@@ -285,7 +310,6 @@ func toStatusResponse(record trackedShipment) shipments.StatusResponse {
 	response := shipments.StatusResponse{
 		ShipmentID:    record.Request.ShipmentID,
 		TransactionID: record.TransactionID,
-		OriginID:      record.Request.OriginID,
 		Status:        record.Status,
 		CreatedAt:     record.CreatedAt.Format(time.RFC3339),
 		Items:         append([]shipments.ShipmentItem(nil), record.Request.Items...),

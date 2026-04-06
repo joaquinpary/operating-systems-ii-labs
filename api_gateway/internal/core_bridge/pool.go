@@ -284,6 +284,8 @@ func (p *Pool) sendKeepalives() {
 }
 
 // sendOneKeepalive sends a single KEEPALIVE frame and reads the ACK.
+// Unlike Send(), it does not wait for a non-ACK response because the server
+// only replies with an ACK to keepalives.
 func (p *Pool) sendOneKeepalive(c *TCPClient) error {
 	ctx, cancel := context.WithTimeout(context.Background(), p.connTimeout)
 	defer cancel()
@@ -297,7 +299,5 @@ func (p *Pool) sendOneKeepalive(c *TCPClient) error {
 		Payload:    Payload{Message: "ALIVE"},
 	}
 
-	// Send uses the mutex internally, so this is safe.
-	_, err := c.Send(ctx, msg)
-	return err
+	return c.SendKeepalive(ctx, msg)
 }
