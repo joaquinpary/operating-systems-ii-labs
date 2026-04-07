@@ -9,10 +9,12 @@ const (
 
 	StatusPendingConfirmation = "pending_confirmation"
 	StatusConfirmed           = "confirm"
+	StatusCancelled           = "cancelled"
 )
 
 type ShipmentRequest struct {
 	ShipmentID string         `json:"shipment_id,omitempty"`
+	Owner      string         `json:"owner,omitempty"`
 	Items      []ShipmentItem `json:"items"`
 }
 
@@ -50,6 +52,7 @@ type QueueMessage struct {
 type StatusResponse struct {
 	ShipmentID    string         `json:"shipment_id,omitempty"`
 	TransactionID string         `json:"transaction_id,omitempty"`
+	Owner         string         `json:"owner,omitempty"`
 	Status        string         `json:"status"`
 	CreatedAt     string         `json:"created_at,omitempty"`
 	Items         []ShipmentItem `json:"items,omitempty"`

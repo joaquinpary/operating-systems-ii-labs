@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 
 	"lora-chads/api_gateway/internal/chat"
@@ -21,6 +23,8 @@ import (
 	"lora-chads/api_gateway/pkg/middleware"
 	"lora-chads/api_gateway/pkg/rabbitmq"
 )
+
+const emergencyAlertMsgType corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
 
 func main() {
 	// --- Log to both stdout and file ---
@@ -59,23 +63,6 @@ func main() {
 	}
 	defer pool.Close()
 
-	// --- Event listener (authenticates LAST → reverse-map in C++) ---
-	listener := corebridge.NewListener(corebridge.ListenerConfig{
-		Addr:         cfg.CoreAddress(),
-		SourceID:     cfg.CoreSourceID,
-		PasswordMD5:  cfg.CorePasswordMD5,
-		ConnTimeout:  cfg.CoreConnTimeout,
-		KeepaliveIvl: cfg.CoreKeepaliveIvl,
-	})
-	listener.OnEvent(func(env corebridge.Envelope) {
-		log.Printf("listener: event %s from %s", env.MsgType, env.SourceID)
-	})
-
-	if err := listener.Start(ctx); err != nil {
-		log.Fatalf("core_bridge listener: %v", err)
-	}
-	defer listener.Close()
-
 	// --- RabbitMQ ---
 	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
 	if err != nil {
@@ -86,8 +73,33 @@ func main() {
 	// --- Application components ---
 	dispatcherWorker := dispatcher.New(pool, rabbitConnection, cfg.CorePoolSize)
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
-	chatHub := chat.NewHub()
+	chatHub := chat.NewHub(cfg.JWTSecret, log.Default(), dispatcherWorker)
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
+
+	// --- Event listener (authenticates LAST → reverse-map in C++) ---
+	listener := corebridge.NewListener(corebridge.ListenerConfig{
+		Addr:         cfg.CoreAddress(),
+		SourceID:     cfg.CoreSourceID,
+		PasswordMD5:  cfg.CorePasswordMD5,
+		ConnTimeout:  cfg.CoreConnTimeout,
+		KeepaliveIvl: cfg.CoreKeepaliveIvl,
+	})
+	listener.OnEvent(func(env corebridge.Envelope) {
+		payload, err := json.Marshal(env.Payload)
+		if err != nil {
+			log.Printf("listener: marshal event payload %s: %v", env.MsgType, err)
+		} else {
+			log.Printf("listener: event %s from %s payload=%s", env.MsgType, env.SourceID, string(payload))
+		}
+		if env.MsgType == emergencyAlertMsgType {
+			chatHub.BroadcastCoreEvent(env)
+		}
+	})
+
+	if err := listener.Start(ctx); err != nil {
+		log.Fatalf("core_bridge listener: %v", err)
+	}
+	defer listener.Close()
 
 	// --- JWT & tracing middleware ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
@@ -96,6 +108,7 @@ func main() {
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(tracingMiddleware.Handler())
+	app.Get("/ws/chat", chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
 
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
