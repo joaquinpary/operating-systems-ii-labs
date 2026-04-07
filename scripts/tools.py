@@ -6,8 +6,8 @@ Usage:
     python3 scripts/tools.py
 """
 
-import sys
 import os
+import sys
 
 # Ensure the scripts/ directory is in the path so 'modules' is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,7 +17,7 @@ from modules import admin_cli
 from modules import rest_api_client
 from modules import benchmark
 from modules import profiling_graph
-from modules import api_gateway_tester
+from modules import api_gateway_client
 
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -29,7 +29,6 @@ GREEN = "\033[32m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
 RESET = "\033[0m"
-
 
 def _header():
     print()
@@ -316,6 +315,7 @@ def _gw_header(base_url, has_token):
     print(f"    {GREEN}3){RESET} Dispatch Shipment     POST /dispatch")
     print(f"    {GREEN}4){RESET} Get All Statuses      GET  /status")
     print(f"    {GREEN}5){RESET} Get Shipment Status   GET  /status/:id")
+    print(f"    {GREEN}6){RESET} Open WS Session       WS   /ws/chat")
     print(f"    {RED}0){RESET} ← Back to main menu")
     print()
 
@@ -324,7 +324,7 @@ def _gw_prompt_quantities():
     """Ask the user for quantities of each item type (food..ammo)."""
     print(f"  {DIM}Enter quantity for each item (0 to skip):{RESET}")
     quantities: dict[int, int] = {}
-    for item_id, item_name in api_gateway_tester.ITEM_CATALOGUE:
+    for item_id, item_name in api_gateway_client.ITEM_CATALOGUE:
         qty = _prompt_int(f"    {item_id}) {item_name}", 0)
         if qty > 0:
             quantities[item_id] = qty
@@ -333,13 +333,16 @@ def _gw_prompt_quantities():
 
 def menu_api_gateway():
     print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
-    base_url = _prompt("Base URL", api_gateway_tester.DEFAULT_GW_URL)
+    base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
     jwt_secret = _prompt("JWT secret (empty to skip auth)",
-                         api_gateway_tester.DEFAULT_JWT_SECRET)
+                         api_gateway_client.DEFAULT_JWT_SECRET)
 
     token = None
     if jwt_secret:
-        token = api_gateway_tester.generate_jwt(jwt_secret)
+        token = api_gateway_client.generate_jwt(
+            jwt_secret,
+            claims={"sub": "tools-tester", "role": "CLI"},
+        )
         print(f"  {GREEN}JWT generated.{RESET}")
 
     while True:
@@ -349,11 +352,15 @@ def menu_api_gateway():
         try:
             if choice == "1":
                 jwt_secret = _prompt("JWT secret",
-                                     api_gateway_tester.DEFAULT_JWT_SECRET)
+                                     api_gateway_client.DEFAULT_JWT_SECRET)
                 sub = _prompt("Subject claim", "tools-tester")
+                role = _prompt("Role claim", "CLI").upper()
                 hours = _prompt_float("Expiration hours", 24)
-                token = api_gateway_tester.generate_jwt(
-                    jwt_secret, claims={"sub": sub}, exp_hours=hours
+                claims = {"sub": sub}
+                if role:
+                    claims["role"] = role
+                token = api_gateway_client.generate_jwt(
+                    jwt_secret, claims=claims, exp_hours=hours
                 )
                 print(f"\n  {GREEN}Token:{RESET} {token[:40]}...")
                 _pause()
@@ -364,7 +371,7 @@ def menu_api_gateway():
                     print(f"  {RED}All quantities are 0 — nothing to ship.{RESET}")
                 else:
                     print()
-                    api_gateway_tester.create_shipment(
+                    api_gateway_client.create_shipment(
                         base_url, token, quantities
                     )
                 _pause()
@@ -372,18 +379,23 @@ def menu_api_gateway():
             elif choice == "3":
                 sid = _prompt("Shipment ID")
                 print()
-                api_gateway_tester.dispatch_shipment(base_url, token, sid)
+                api_gateway_client.dispatch_shipment(base_url, token, sid)
                 _pause()
 
             elif choice == "4":
                 print()
-                api_gateway_tester.get_all_statuses(base_url, token)
+                api_gateway_client.get_all_statuses(base_url, token)
                 _pause()
 
             elif choice == "5":
                 sid = _prompt("Shipment / Transaction ID")
                 print()
-                api_gateway_tester.get_status(base_url, token, sid)
+                api_gateway_client.get_status(base_url, token, sid)
+                _pause()
+
+            elif choice == "6":
+                print()
+                api_gateway_client.chat_session(base_url, token)
                 _pause()
 
             elif choice == "0":
