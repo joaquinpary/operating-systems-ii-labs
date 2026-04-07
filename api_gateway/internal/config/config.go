@@ -14,6 +14,7 @@ const (
 	defaultRabbitMQURL      = "amqp://guest:guest@localhost:5672/"
 	defaultJWTSecret        = "change-me"
 	defaultPredictorURL     = "http://127.0.0.1:9000"
+	defaultCredentialsDir   = "config/gateway"
 	defaultCorePoolSize     = 5
 	defaultCoreConnTimeout  = 10 * time.Second
 	defaultCoreKeepaliveIvl = 60 * time.Second
@@ -28,6 +29,7 @@ type Config struct {
 	RabbitMQURL      string
 	JWTSecret        string
 	PredictorURL     string
+	CredentialsDir   string
 	CorePoolSize     int
 	CoreConnTimeout  time.Duration
 	CoreKeepaliveIvl time.Duration
@@ -53,6 +55,7 @@ func Load() (Config, error) {
 		RabbitMQURL:      stringFromEnv("RABBITMQ_URL", defaultRabbitMQURL),
 		JWTSecret:        stringFromEnv("JWT_SECRET", defaultJWTSecret),
 		PredictorURL:     stringFromEnv("PREDICTOR_URL", defaultPredictorURL),
+		CredentialsDir:   stringFromEnv("CREDENTIALS_DIR", defaultCredentialsDir),
 		CorePoolSize:     defaultCorePoolSize,
 		CoreConnTimeout:  defaultCoreConnTimeout,
 		CoreKeepaliveIvl: defaultCoreKeepaliveIvl,

@@ -9,9 +9,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	"lora-chads/api_gateway/internal/auth"
 	"lora-chads/api_gateway/internal/chat"
 	"lora-chads/api_gateway/internal/config"
 	corebridge "lora-chads/api_gateway/internal/core_bridge"
@@ -88,20 +90,32 @@ func main() {
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub()
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
+	predictorHandler := predictor.NewHandler(predictorClient)
 
-	// --- JWT & tracing middleware ---
+	authHandler, err := auth.NewHandler(cfg.CredentialsDir, cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("auth handler: %v", err)
+	}
+
+	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
+	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
+	defer rateLimiter.Close()
 
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(tracingMiddleware.Handler())
+	app.Use(rateLimiter.Handler())
+
+	app.Post("/login", authHandler.Login)
 
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
 	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
+	protected.Post("/predict", predictorHandler.HandlePredict)
 
 	// --- Background workers ---
 	go func() {

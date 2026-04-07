@@ -42,6 +42,7 @@ external/
 # Configuration files
 config/clients/
 config/server/
+config/gateway/
 config/credentials.json
 .env
 
