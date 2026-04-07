@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -90,13 +91,16 @@ func main() {
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
 	predictorHandler := predictor.NewHandler(predictorClient)
 
-	// --- JWT & tracing middleware ---
+	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
+	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
+	defer rateLimiter.Close()
 
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(tracingMiddleware.Handler())
+	app.Use(rateLimiter.Handler())
 
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
