@@ -310,12 +310,12 @@ def _gw_header(base_url, has_token):
     print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}")
     print(f"  {DIM}Base URL : {base_url}{RESET}")
     print(f"  {DIM}JWT token: {status}{RESET}\n")
-    print(f"    {GREEN}1){RESET} Generate JWT Token")
-    print(f"    {GREEN}2){RESET} Create Shipment       POST /shipments")
-    print(f"    {GREEN}3){RESET} Dispatch Shipment     POST /dispatch")
-    print(f"    {GREEN}4){RESET} Get All Statuses      GET  /status")
-    print(f"    {GREEN}5){RESET} Get Shipment Status   GET  /status/:id")
-    print(f"    {GREEN}6){RESET} Open WS Session       WS   /ws/chat")
+    print(f"    {GREEN}1){RESET} Login with credentials  POST /login")
+    print(f"    {GREEN}2){RESET} Create Shipment         POST /shipments")
+    print(f"    {GREEN}3){RESET} Dispatch Shipment       POST /dispatch")
+    print(f"    {GREEN}4){RESET} Get All Statuses        GET  /status")
+    print(f"    {GREEN}5){RESET} Get Shipment Status     GET  /status/:id")
+    print(f"    {GREEN}6){RESET} Open WS Session         WS   /ws/chat")
     print(f"    {RED}0){RESET} ← Back to main menu")
     print()
 
@@ -334,16 +334,8 @@ def _gw_prompt_quantities():
 def menu_api_gateway():
     print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
     base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
-    jwt_secret = _prompt("JWT secret (empty to skip auth)",
-                         api_gateway_client.DEFAULT_JWT_SECRET)
 
     token = None
-    if jwt_secret:
-        token = api_gateway_client.generate_jwt(
-            jwt_secret,
-            claims={"sub": "tools-tester", "role": "CLI"},
-        )
-        print(f"  {GREEN}JWT generated.{RESET}")
 
     while True:
         _gw_header(base_url, token is not None)
@@ -351,18 +343,34 @@ def menu_api_gateway():
 
         try:
             if choice == "1":
-                jwt_secret = _prompt("JWT secret",
-                                     api_gateway_client.DEFAULT_JWT_SECRET)
-                sub = _prompt("Subject claim", "tools-tester")
-                role = _prompt("Role claim", "CLI").upper()
-                hours = _prompt_float("Expiration hours", 24)
-                claims = {"sub": sub}
-                if role:
-                    claims["role"] = role
-                token = api_gateway_client.generate_jwt(
-                    jwt_secret, claims=claims, exp_hours=hours
+                creds = api_gateway_client.list_credentials()
+                if not creds:
+                    print(f"  {RED}No credentials found. Run 'Generate Credentials' first.{RESET}")
+                    _pause()
+                    continue
+                print(f"  {DIM}Found {len(creds)} credential files.{RESET}")
+                client_num = _prompt("Client number (e.g. 1 for go_client_0001)", "1")
+                try:
+                    conf_name = f"go_client_{int(client_num):04d}.conf"
+                except ValueError:
+                    print(f"  {RED}Invalid number.{RESET}")
+                    _pause()
+                    continue
+                conf_path = os.path.join(api_gateway_client.GATEWAY_CREDS_DIR, conf_name)
+                if not os.path.isfile(conf_path):
+                    print(f"  {RED}File not found: {conf_name}{RESET}")
+                    _pause()
+                    continue
+                cred = api_gateway_client.read_credential(conf_path)
+                print(f"  {DIM}Logging in as {cred.get('username', '?')}...{RESET}")
+                resp = api_gateway_client.login(
+                    base_url, cred["username"], cred["password"]
                 )
-                print(f"\n  {GREEN}Token:{RESET} {token[:40]}...")
+                if "token" in resp:
+                    token = resp["token"]
+                    print(f"  {GREEN}Login OK — token: {token[:40]}...{RESET}")
+                else:
+                    print(f"  {RED}Login failed: {resp}{RESET}")
                 _pause()
 
             elif choice == "2":

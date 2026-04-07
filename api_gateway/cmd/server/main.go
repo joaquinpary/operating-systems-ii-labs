@@ -10,10 +10,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 
+	"lora-chads/api_gateway/internal/auth"
 	"lora-chads/api_gateway/internal/chat"
 	"lora-chads/api_gateway/internal/config"
 	corebridge "lora-chads/api_gateway/internal/core_bridge"
@@ -75,6 +77,12 @@ func main() {
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub(cfg.JWTSecret, log.Default(), dispatcherWorker)
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
+	predictorHandler := predictor.NewHandler(predictorClient)
+
+	authHandler, err := auth.NewHandler(cfg.CredentialsDir, cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("auth handler: %v", err)
+	}
 
 	// --- Event listener (authenticates LAST → reverse-map in C++) ---
 	listener := corebridge.NewListener(corebridge.ListenerConfig{
@@ -101,13 +109,17 @@ func main() {
 	}
 	defer listener.Close()
 
-	// --- JWT & tracing middleware ---
+	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
+	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
+	defer rateLimiter.Close()
 
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(tracingMiddleware.Handler())
+	app.Use(rateLimiter.Handler())
+	app.Post("/login", authHandler.Login)
 	app.Get("/ws/chat", chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
 
 	protected := app.Group("", jwtMiddleware.Handler())
@@ -115,6 +127,7 @@ func main() {
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
 	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
+	protected.Post("/predict", predictorHandler.HandlePredict)
 
 	// --- Background workers ---
 	go func() {

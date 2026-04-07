@@ -36,6 +36,11 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8081"
 DEFAULT_JWT_SECRET = "change-me"
 DEFAULT_CHAT_PATH = "/ws/chat"
 
+# Resolve paths relative to project root
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_MODULE_DIR))
+GATEWAY_CREDS_DIR = os.path.join(_PROJECT_ROOT, "config", "gateway")
+
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 _WS_OPCODE_TEXT = 0x1
 _WS_OPCODE_CLOSE = 0x8
@@ -118,6 +123,37 @@ def _request(
 
 def _print_response(resp: Any) -> None:
     print(json.dumps(resp, indent=2, ensure_ascii=False))
+
+
+# ── Credential & login helpers ──────────────────────────────────────────────
+
+def read_credential(conf_path: str) -> dict[str, str]:
+    """Read username and password from a gateway .conf file."""
+    cred: dict[str, str] = {}
+    with open(conf_path) as f:
+        for line in f:
+            line = line.strip()
+            if "=" in line:
+                key, _, value = line.partition("=")
+                cred[key.strip()] = value.strip()
+    return cred
+
+
+def list_credentials() -> list[str]:
+    """Return sorted list of .conf file paths in the gateway credentials dir."""
+    if not os.path.isdir(GATEWAY_CREDS_DIR):
+        return []
+    return sorted(
+        os.path.join(GATEWAY_CREDS_DIR, f)
+        for f in os.listdir(GATEWAY_CREDS_DIR)
+        if f.endswith(".conf")
+    )
+
+
+def login(base_url: str, username: str, password: str) -> dict[str, Any]:
+    """POST /login — authenticate and return a JWT token."""
+    payload = {"username": username, "password": password}
+    return _request("POST", f"{base_url}/login", payload=payload)
 
 
 def _print_ws_message(message: Any) -> None:
