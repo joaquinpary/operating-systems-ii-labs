@@ -128,34 +128,19 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		return ctx.Status(fiber.StatusOK).JSON(tracked)
 	}
 
+	response := tracked
+
 	message, err := handler.bridge.Query(ctx.UserContext(), tracked.TransactionID)
 	if err != nil {
-		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
-	}
-
-	response := tracked
-	response.Status = "unknown"
-
-	if len(message.Payload) > 0 {
-		if err := json.Unmarshal(message.Payload, &response); err != nil {
-			return writeError(ctx, fiber.StatusInternalServerError, "failed to decode status response")
+		log.Printf("HTTP GET /status/%s: core query failed, using cached status %q: %v", identifier, tracked.Status, err)
+	} else if len(message.Payload) > 0 {
+		var corePayload struct {
+			Status string `json:"status"`
 		}
-	}
-
-	if response.TransactionID == "" {
-		response.TransactionID = tracked.TransactionID
-	}
-
-	if response.ShipmentID == "" {
-		response.ShipmentID = tracked.ShipmentID
-	}
-
-	if response.Owner == "" {
-		response.Owner = tracked.Owner
-	}
-
-	if response.Status == "" {
-		response.Status = "unknown"
+		if json.Unmarshal(message.Payload, &corePayload) == nil &&
+			corePayload.Status != "" && corePayload.Status != "error" {
+			response.Status = corePayload.Status
+		}
 	}
 
 	return ctx.Status(fiber.StatusOK).JSON(response)

@@ -100,6 +100,12 @@ services:
     networks:
       - dhl_net
     shm_size: '256m'
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9999' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     command: ["/app/dhl_server"]
 
   client:
@@ -110,7 +116,8 @@ services:
         BUILD_TARGET: client
     container_name: dhl_clients
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     environment:
       - NUM_CLIENTS=${NUM_CLIENTS:-10}
       - CONFIG_BASE_PATH=/etc/client/client_%s.conf

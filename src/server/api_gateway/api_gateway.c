@@ -11,6 +11,7 @@
 #include "cJSON.h"
 
 #include <libpq-fe.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -223,6 +224,39 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
     return build_response_json(out, max_len, req, "ok", data);
 }
 
+static int cmd_get_shipment_status(char* out, size_t max_len, const message_t* req, cJSON* payload)
+{
+    if (!s_conn)
+        return build_error(out, max_len, req, "database not connected");
+
+    cJSON* args_json = cJSON_GetObjectItemCaseSensitive(payload, "args");
+    if (!cJSON_IsString(args_json) || !args_json->valuestring || args_json->valuestring[0] == '\0')
+        return build_error(out, max_len, req, "args (transaction_id) required");
+
+    const char* transaction_id_str = args_json->valuestring;
+
+    const char* sql =
+        "SELECT status FROM inventory_transactions WHERE transaction_id = $1";
+    const char* params[] = {transaction_id_str};
+
+    PGresult* res = PQexecParams(s_conn, sql, 1, NULL, params, NULL, NULL, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
+    {
+        PQclear(res);
+        return build_error(out, max_len, req, "transaction not found");
+    }
+
+    char db_status[64] = {0};
+    strncpy(db_status, PQgetvalue(res, 0, 0), sizeof(db_status) - 1);
+    PQclear(res);
+
+    /* Convert DB status to lowercase for consistency with the Go layer. */
+    for (int i = 0; db_status[i]; i++)
+        db_status[i] = (char)tolower((unsigned char)db_status[i]);
+
+    return build_response_json(out, max_len, req, db_status, NULL);
+}
+
 int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
                        gateway_side_effect_t* side)
 {
@@ -253,6 +287,8 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
         rc = cmd_ping(resp_json, max_len, &req);
     else if (strcmp(cmd, "create_new_order") == 0)
         rc = cmd_create_shipment(resp_json, max_len, &req, payload, side);
+    else if (strcmp(cmd, "get_shipment_status") == 0)
+        rc = cmd_get_shipment_status(resp_json, max_len, &req, payload);
     else
         rc = build_error(resp_json, max_len, &req, "unknown command");
 
