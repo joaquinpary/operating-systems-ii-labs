@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -23,6 +24,11 @@ from typing import Any
 
 DEFAULT_GW_URL = "http://127.0.0.1:8081"
 DEFAULT_JWT_SECRET = "change-me"
+
+# Resolve paths relative to project root
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_MODULE_DIR))
+GATEWAY_CREDS_DIR = os.path.join(_PROJECT_ROOT, "config", "gateway")
 
 # Fixed item catalogue — mirrors the C++ server (api_gateway.c / json_manager.h)
 ITEM_CATALOGUE = [
@@ -65,6 +71,38 @@ def generate_jwt(
         secret.encode(), signing_input.encode(), hashlib.sha256
     ).digest()
     return f"{signing_input}.{_b64url(signature)}"
+
+
+# ── Credential helpers ──────────────────────────────────────────────────────
+
+def read_credential(conf_path: str) -> dict[str, str]:
+    """Read username and password from a gateway .conf file."""
+    cred: dict[str, str] = {}
+    with open(conf_path) as f:
+        for line in f:
+            line = line.strip()
+            if "=" in line:
+                key, _, value = line.partition("=")
+                cred[key.strip()] = value.strip()
+    return cred
+
+
+def list_credentials() -> list[str]:
+    """Return sorted list of .conf file paths in the gateway credentials dir."""
+    if not os.path.isdir(GATEWAY_CREDS_DIR):
+        return []
+    return sorted(
+        os.path.join(GATEWAY_CREDS_DIR, f)
+        for f in os.listdir(GATEWAY_CREDS_DIR)
+        if f.endswith(".conf")
+    )
+
+
+def login(base_url: str, username: str, password: str) -> dict[str, Any]:
+    """POST /login — authenticate and return a JWT token."""
+    payload = {"username": username, "password": password}
+    resp = _request("POST", f"{base_url}/login", payload=payload)
+    return resp
 
 
 # ── HTTP helpers ────────────────────────────────────────────────────────────

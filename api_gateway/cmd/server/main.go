@@ -13,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	"lora-chads/api_gateway/internal/auth"
 	"lora-chads/api_gateway/internal/chat"
 	"lora-chads/api_gateway/internal/config"
 	corebridge "lora-chads/api_gateway/internal/core_bridge"
@@ -91,6 +92,11 @@ func main() {
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
 	predictorHandler := predictor.NewHandler(predictorClient)
 
+	authHandler, err := auth.NewHandler(cfg.CredentialsDir, cfg.JWTSecret)
+	if err != nil {
+		log.Fatalf("auth handler: %v", err)
+	}
+
 	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	tracingMiddleware := middleware.NewTracingMiddleware()
@@ -101,6 +107,8 @@ func main() {
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(tracingMiddleware.Handler())
 	app.Use(rateLimiter.Handler())
+
+	app.Post("/login", authHandler.Login)
 
 	protected := app.Group("", jwtMiddleware.Handler())
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
