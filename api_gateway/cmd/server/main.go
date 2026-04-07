@@ -88,6 +88,7 @@ func main() {
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub()
 	predictorClient := predictor.NewClient(cfg.PredictorURL)
+	predictorHandler := predictor.NewHandler(predictorClient)
 
 	// --- JWT & tracing middleware ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
@@ -102,6 +103,7 @@ func main() {
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
 	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
+	protected.Post("/predict", predictorHandler.HandlePredict)
 
 	// --- Background workers ---
 	go func() {
