@@ -458,6 +458,12 @@ def get_status(base_url: str, token: str | None, shipment_id: str) -> dict[str, 
     return resp
 
 
+def predict_shipment(base_url: str, token: str | None, quantities: dict[int, int]) -> dict[str, Any]:
+    resp = _request("POST", f"{base_url}/predict", token, {"items": build_items(quantities)})
+    _print_response(resp)
+    return resp
+
+
 def cancel_shipment_ws(
     base_url: str,
     token: str | None,
