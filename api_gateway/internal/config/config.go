@@ -14,7 +14,7 @@ const (
 	defaultRabbitMQURL      = "amqp://guest:guest@localhost:5672/"
 	defaultJWTSecret        = "change-me"
 	defaultPredictorURL     = "http://127.0.0.1:9000"
-	defaultCredentialsDir   = "config/gateway"
+	defaultCredentialsDir   = "../config/gateway"
 	defaultCorePoolSize     = 5
 	defaultCoreConnTimeout  = 10 * time.Second
 	defaultCoreKeepaliveIvl = 60 * time.Second

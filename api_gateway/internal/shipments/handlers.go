@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 
 	"lora-chads/api_gateway/internal/core_bridge"
 )
@@ -24,9 +25,10 @@ type publisher interface {
 
 type shipmentTracker interface {
 	RegisterShipment(request ShipmentRequest) StatusResponse
+	GetShipment(identifier string) (StatusResponse, bool)
 	DeleteShipment(shipmentID string)
-	HasShipment(shipmentID string) bool
-	Snapshot() []StatusResponse
+	CancelShipment(shipmentID string, callerUsername string) (StatusResponse, error)
+	SnapshotForOwner(owner string) []StatusResponse
 }
 
 type Handler struct {
@@ -48,8 +50,9 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid shipment request body")
 	}
+	request.Owner = callerUsername(ctx)
 
-	log.Printf("HTTP POST /shipments items=%d", len(request.Items))
+	log.Printf("HTTP POST /shipments owner=%s items=%d", request.Owner, len(request.Items))
 
 	if err := validateShipmentRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
@@ -75,15 +78,20 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid dispatch request body")
 	}
+	owner := callerUsername(ctx)
 
-	log.Printf("HTTP POST /dispatch shipment_id=%s", request.ShipmentID)
+	log.Printf("HTTP POST /dispatch owner=%s shipment_id=%s", owner, request.ShipmentID)
 
 	if err := validateDispatchRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
 	}
 
-	if !handler.tracker.HasShipment(request.ShipmentID) {
+	status, exists := handler.tracker.GetShipment(request.ShipmentID)
+	if !exists {
 		return writeError(ctx, fiber.StatusNotFound, "shipment not found")
+	}
+	if status.Owner != owner {
+		return writeError(ctx, fiber.StatusForbidden, "shipment does not belong to current user")
 	}
 
 	if err := handler.publish(ctx.UserContext(), DispatchCommandType, request); err != nil {
@@ -97,26 +105,36 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 }
 
 func (handler *Handler) GetAllStatuses(ctx *fiber.Ctx) error {
-	return ctx.Status(fiber.StatusOK).JSON(handler.tracker.Snapshot())
+	return ctx.Status(fiber.StatusOK).JSON(handler.tracker.SnapshotForOwner(callerUsername(ctx)))
 }
 
 func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
-	transactionID := strings.TrimSpace(ctx.Params("id"))
-	if transactionID == "" {
+	identifier := strings.TrimSpace(ctx.Params("id"))
+	if identifier == "" {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
+	owner := callerUsername(ctx)
 
-	log.Printf("HTTP GET /status/%s", transactionID)
+	log.Printf("HTTP GET /status/%s owner=%s", identifier, owner)
 
-	message, err := handler.bridge.Query(ctx.UserContext(), transactionID)
+	tracked, exists := handler.tracker.GetShipment(identifier)
+	if !exists {
+		return writeError(ctx, fiber.StatusNotFound, "shipment not found")
+	}
+	if tracked.Owner != owner {
+		return writeError(ctx, fiber.StatusForbidden, "shipment does not belong to current user")
+	}
+	if tracked.TransactionID == "" {
+		return ctx.Status(fiber.StatusOK).JSON(tracked)
+	}
+
+	message, err := handler.bridge.Query(ctx.UserContext(), tracked.TransactionID)
 	if err != nil {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to query shipment status")
 	}
 
-	response := StatusResponse{
-		TransactionID: transactionID,
-		Status:        "unknown",
-	}
+	response := tracked
+	response.Status = "unknown"
 
 	if len(message.Payload) > 0 {
 		if err := json.Unmarshal(message.Payload, &response); err != nil {
@@ -125,7 +143,15 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 	}
 
 	if response.TransactionID == "" {
-		response.TransactionID = transactionID
+		response.TransactionID = tracked.TransactionID
+	}
+
+	if response.ShipmentID == "" {
+		response.ShipmentID = tracked.ShipmentID
+	}
+
+	if response.Owner == "" {
+		response.Owner = tracked.Owner
 	}
 
 	if response.Status == "" {
@@ -180,4 +206,25 @@ func validateDispatchRequest(request DispatchRequest) error {
 
 func writeError(ctx *fiber.Ctx, status int, message string) error {
 	return ctx.Status(status).JSON(fiber.Map{"error": message})
+}
+
+func callerUsername(ctx *fiber.Ctx) string {
+	claims, ok := ctx.Locals("user").(jwt.MapClaims)
+	if !ok {
+		return "gateway-internal"
+	}
+
+	for _, key := range []string{"sub", "username", "user_id"} {
+		value, ok := claims[key]
+		if !ok {
+			continue
+		}
+
+		owner := strings.TrimSpace(fmt.Sprint(value))
+		if owner != "" {
+			return owner
+		}
+	}
+
+	return "gateway-internal"
 }

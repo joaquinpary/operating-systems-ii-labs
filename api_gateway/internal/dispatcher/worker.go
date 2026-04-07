@@ -113,6 +113,22 @@ func (dispatcher *Dispatcher) RegisterShipment(request shipments.ShipmentRequest
 	return toStatusResponse(record)
 }
 
+func (dispatcher *Dispatcher) GetShipment(identifier string) (shipments.StatusResponse, bool) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return shipments.StatusResponse{}, false
+	}
+
+	dispatcher.mu.RLock()
+	record, exists := dispatcher.lookupShipmentLocked(identifier)
+	dispatcher.mu.RUnlock()
+	if !exists {
+		return shipments.StatusResponse{}, false
+	}
+
+	return toStatusResponse(record), true
+}
+
 func (dispatcher *Dispatcher) HasShipment(shipmentID string) bool {
 	shipmentID = strings.TrimSpace(shipmentID)
 	if shipmentID == "" {
@@ -142,10 +158,54 @@ func (dispatcher *Dispatcher) DeleteShipment(shipmentID string) {
 	dispatcher.mu.Unlock()
 }
 
+func (dispatcher *Dispatcher) CancelShipment(shipmentID string, callerUsername string) (shipments.StatusResponse, error) {
+	shipmentID = strings.TrimSpace(shipmentID)
+	callerUsername = strings.TrimSpace(callerUsername)
+
+	dispatcher.mu.Lock()
+	record, exists := dispatcher.shipments[shipmentID]
+	if !exists {
+		dispatcher.mu.Unlock()
+		return shipments.StatusResponse{}, fmt.Errorf("%w: %s", errShipmentNotFound, shipmentID)
+	}
+	if record.Request.Owner != callerUsername {
+		dispatcher.mu.Unlock()
+		return shipments.StatusResponse{}, fmt.Errorf("%w: %s", errNotOwner, shipmentID)
+	}
+	if record.Status != shipments.StatusPendingConfirmation {
+		dispatcher.mu.Unlock()
+		return shipments.StatusResponse{}, fmt.Errorf("%w: %s", errShipmentAlreadyDispatched, shipmentID)
+	}
+
+	delete(dispatcher.shipments, shipmentID)
+	if strings.TrimSpace(record.TransactionID) != "" {
+		delete(dispatcher.transactions, record.TransactionID)
+	}
+	dispatcher.mu.Unlock()
+
+	response := toStatusResponse(record)
+	response.Status = shipments.StatusCancelled
+	return response, nil
+}
+
 func (dispatcher *Dispatcher) Snapshot() []shipments.StatusResponse {
+	return dispatcher.snapshot(func(trackedShipment) bool { return true })
+}
+
+func (dispatcher *Dispatcher) SnapshotForOwner(owner string) []shipments.StatusResponse {
+	owner = strings.TrimSpace(owner)
+	return dispatcher.snapshot(func(record trackedShipment) bool {
+		return record.Request.Owner == owner
+	})
+}
+
+func (dispatcher *Dispatcher) snapshot(include func(trackedShipment) bool) []shipments.StatusResponse {
 	dispatcher.mu.RLock()
 	responses := make([]shipments.StatusResponse, 0, len(dispatcher.shipments))
 	for _, record := range dispatcher.shipments {
+		if !include(record) {
+			continue
+		}
 		responses = append(responses, toStatusResponse(record))
 	}
 	dispatcher.mu.RUnlock()
@@ -225,6 +285,8 @@ func (dispatcher *Dispatcher) handleDelivery(ctx context.Context, delivery amqp.
 }
 
 var errShipmentNotFound = errors.New("shipment not found")
+var errShipmentAlreadyDispatched = errors.New("shipment already dispatched")
+var errNotOwner = errors.New("shipment does not belong to current user")
 
 func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID string) error {
 	record, err := dispatcher.getShipment(shipmentID)
@@ -257,7 +319,9 @@ func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID s
 	if response.Payload.Status != "ok" {
 		msg := "dispatch failed"
 		if len(response.Payload.Data) > 0 {
-			var d struct{ Message string `json:"message"` }
+			var d struct {
+				Message string `json:"message"`
+			}
 			if json.Unmarshal(response.Payload.Data, &d) == nil && d.Message != "" {
 				msg = d.Message
 			}
@@ -297,7 +361,7 @@ func (dispatcher *Dispatcher) getShipment(shipmentID string) (trackedShipment, e
 	shipmentID = strings.TrimSpace(shipmentID)
 
 	dispatcher.mu.RLock()
-	record, exists := dispatcher.shipments[shipmentID]
+	record, exists := dispatcher.lookupShipmentLocked(shipmentID)
 	dispatcher.mu.RUnlock()
 	if !exists {
 		return trackedShipment{}, fmt.Errorf("%w: %s", errShipmentNotFound, shipmentID)
@@ -306,10 +370,25 @@ func (dispatcher *Dispatcher) getShipment(shipmentID string) (trackedShipment, e
 	return record, nil
 }
 
+func (dispatcher *Dispatcher) lookupShipmentLocked(identifier string) (trackedShipment, bool) {
+	if record, exists := dispatcher.shipments[identifier]; exists {
+		return record, true
+	}
+
+	shipmentID, exists := dispatcher.transactions[identifier]
+	if !exists {
+		return trackedShipment{}, false
+	}
+
+	record, exists := dispatcher.shipments[shipmentID]
+	return record, exists
+}
+
 func toStatusResponse(record trackedShipment) shipments.StatusResponse {
 	response := shipments.StatusResponse{
 		ShipmentID:    record.Request.ShipmentID,
 		TransactionID: record.TransactionID,
+		Owner:         record.Request.Owner,
 		Status:        record.Status,
 		CreatedAt:     record.CreatedAt.Format(time.RFC3339),
 		Items:         append([]shipments.ShipmentItem(nil), record.Request.Items...),
