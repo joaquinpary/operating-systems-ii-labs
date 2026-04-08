@@ -317,6 +317,8 @@ def _gw_header(base_url, has_token):
     print(f"    {GREEN}5){RESET} Get Shipment Status     GET  /status/:id")
     print(f"    {GREEN}6){RESET} Open WS Session         WS   /ws/chat")
     print(f"    {GREEN}7){RESET} Predict Shipment        POST /predict")
+    print(f"    {GREEN}8){RESET} Check /metrics          GET  /metrics")
+    print(f"    {GREEN}9){RESET} Verify X-Request-ID     GET  /metrics + header")
     print(f"    {RED}0){RESET} ← Back to main menu")
     print()
 
@@ -416,6 +418,17 @@ def menu_api_gateway():
                     api_gateway_client.predict_shipment(
                         base_url, token, quantities
                     )
+                _pause()
+
+            elif choice == "8":
+                print()
+                api_gateway_client.fetch_metrics(base_url)
+                _pause()
+
+            elif choice == "9":
+                custom = _prompt("Custom X-Request-ID (leave blank for random)", "")
+                print()
+                api_gateway_client.check_request_id(base_url, custom or None)
                 _pause()
 
             elif choice == "0":

@@ -30,6 +30,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8081"
@@ -462,6 +463,49 @@ def predict_shipment(base_url: str, token: str | None, quantities: dict[int, int
     resp = _request("POST", f"{base_url}/predict", token, {"items": build_items(quantities)})
     _print_response(resp)
     return resp
+
+
+def fetch_metrics(base_url: str) -> None:
+    """GET /metrics — display Prometheus metrics exposed by the gateway."""
+    url = f"{base_url}/metrics"
+    req = urllib.request.Request(url=url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8")
+        lines = [line for line in body.splitlines() if line.startswith("api_gateway_")]
+        if lines:
+            print("  [metrics] api_gateway_* metrics:")
+            for line in lines:
+                print(f"    {line}")
+        else:
+            print("  [metrics] Endpoint reachable but no api_gateway_* samples yet.")
+        print(f"\n  Total response: {len(body)} bytes")
+    except urllib.error.URLError as exc:
+        print(f"  [metrics] Connection error: {exc.reason}")
+    except Exception as exc:
+        print(f"  [metrics] Error: {exc}")
+
+
+def check_request_id(base_url: str, custom_id: str | None = None) -> None:
+    """GET /metrics with X-Request-ID header — verify the header is echoed back."""
+    sent_id = custom_id or str(uuid.uuid4())
+    url = f"{base_url}/metrics"
+    req = urllib.request.Request(
+        url=url, headers={"X-Request-ID": sent_id}, method="GET"
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            echoed_id = resp.headers.get("X-Request-ID", "")
+        print(f"  Sent   X-Request-ID: {sent_id}")
+        print(f"  Echoed X-Request-ID: {echoed_id or '(none)'}")
+        if echoed_id == sent_id:
+            print("  [PASS] Header echoed back correctly.")
+        else:
+            print("  [FAIL] Header was NOT echoed back.")
+    except urllib.error.URLError as exc:
+        print(f"  [request-id] Connection error: {exc.reason}")
+    except Exception as exc:
+        print(f"  [request-id] Error: {exc}")
 
 
 def cancel_shipment_ws(
