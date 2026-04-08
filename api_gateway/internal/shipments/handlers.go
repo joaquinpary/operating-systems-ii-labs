@@ -12,6 +12,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"lora-chads/api_gateway/internal/core_bridge"
+	"lora-chads/api_gateway/pkg/middleware"
 )
 
 type coreBridge interface {
@@ -51,8 +52,9 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid shipment request body")
 	}
 	request.Owner = callerUsername(ctx)
+	requestID := middleware.RequestID(ctx)
 
-	log.Printf("HTTP POST /shipments owner=%s items=%d", request.Owner, len(request.Items))
+	log.Printf("HTTP POST /shipments owner=%s items=%d request_id=%s", request.Owner, len(request.Items), requestID)
 
 	if err := validateShipmentRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
@@ -66,7 +68,7 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusInternalServerError, "failed to queue shipment request")
 	}
 
-	log.Printf("HTTP POST /shipments => 202 shipment_id=%s", request.ShipmentID)
+	log.Printf("HTTP POST /shipments => 202 shipment_id=%s request_id=%s", request.ShipmentID, requestID)
 	return ctx.Status(fiber.StatusAccepted).JSON(ShipmentResponse{
 		ShipmentID: request.ShipmentID,
 		Status:     StatusPendingConfirmation,
@@ -79,8 +81,9 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "invalid dispatch request body")
 	}
 	owner := callerUsername(ctx)
+	requestID := middleware.RequestID(ctx)
 
-	log.Printf("HTTP POST /dispatch owner=%s shipment_id=%s", owner, request.ShipmentID)
+	log.Printf("HTTP POST /dispatch owner=%s shipment_id=%s request_id=%s", owner, request.ShipmentID, requestID)
 
 	if err := validateDispatchRequest(request); err != nil {
 		return writeError(ctx, fiber.StatusBadRequest, err.Error())
@@ -114,8 +117,9 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 		return writeError(ctx, fiber.StatusBadRequest, "shipment id is required")
 	}
 	owner := callerUsername(ctx)
+	requestID := middleware.RequestID(ctx)
 
-	log.Printf("HTTP GET /status/%s owner=%s", identifier, owner)
+	log.Printf("HTTP GET /status/%s owner=%s request_id=%s", identifier, owner, requestID)
 
 	tracked, exists := handler.tracker.GetShipment(identifier)
 	if !exists {

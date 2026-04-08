@@ -9,11 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/gofiber/adaptor/v2"
 	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"lora-chads/api_gateway/internal/auth"
 	"lora-chads/api_gateway/internal/chat"
@@ -30,7 +33,11 @@ const emergencyAlertMsgType corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGEN
 
 func main() {
 	// --- Log to both stdout and file ---
-	logPath := filepath.Join("logs", "server", "server_go_gateway.log")
+	logDir := strings.TrimSpace(os.Getenv("LOG_DIR"))
+	if logDir == "" {
+		logDir = filepath.Join("logs", "server")
+	}
+	logPath := filepath.Join(logDir, "server_go_gateway.log")
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		log.Fatalf("create log dir: %v", err)
 	}
@@ -111,14 +118,17 @@ func main() {
 
 	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
+	metricsMiddleware := middleware.NewMetricsMiddleware()
 	tracingMiddleware := middleware.NewTracingMiddleware()
 	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
 	defer rateLimiter.Close()
 
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
+	app.Use(metricsMiddleware.Handler())
 	app.Use(tracingMiddleware.Handler())
 	app.Use(rateLimiter.Handler())
+	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
 	app.Post("/login", authHandler.Login)
 	app.Get("/ws/chat", chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
 

@@ -1,0 +1,5 @@
+.git
+.gitignore
+logs/
+**/*_test.go
+coverage.out
