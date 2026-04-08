@@ -13,6 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules import gen_credentials
+from modules import gen_certs
 from modules import admin_cli
 from modules import rest_api_client
 from modules import benchmark
@@ -41,6 +42,7 @@ def _header():
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}4){RESET} Benchmark                         {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}5){RESET} Profiling Graph                   {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}6){RESET} API Gateway Tester                {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}7){RESET} Generate TLS Certs                {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {RED}0){RESET} Exit                              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}╚═══════════════════════════════════════╝{RESET}")
     print()
@@ -334,6 +336,18 @@ def _gw_prompt_quantities():
     return quantities
 
 
+def menu_gen_certs():
+    print(f"\n  {BOLD}── Generate TLS Certificates ──────────────{RESET}\n")
+    domain = _prompt("Domain", gen_certs.DEFAULT_DOMAIN)
+    days = _prompt_int("Validity (days)", gen_certs.DEFAULT_DAYS)
+    overwrite = _prompt("Overwrite existing certs? (y/N)", "N")
+    force = overwrite.lower() in ("y", "yes")
+    print()
+    result = gen_certs.generate_certs(domain=domain, days=days, force=force)
+    _print_result_error(result)
+    _pause()
+
+
 def menu_api_gateway():
     print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
     base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
@@ -461,6 +475,8 @@ def main():
                 menu_profiling_graph()
             elif choice == "6":
                 menu_api_gateway()
+            elif choice == "7":
+                menu_gen_certs()
             elif choice == "0":
                 print(f"\n  {DIM}Bye!{RESET}\n")
                 break
