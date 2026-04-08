@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -48,6 +49,8 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	credentialsDir := resolveDirPath(stringFromEnv("CREDENTIALS_DIR", defaultCredentialsDir))
+
 	return Config{
 		CoreHost:         stringFromEnv("CORE_HOST", defaultCoreHost),
 		CorePort:         corePort,
@@ -55,7 +58,7 @@ func Load() (Config, error) {
 		RabbitMQURL:      stringFromEnv("RABBITMQ_URL", defaultRabbitMQURL),
 		JWTSecret:        stringFromEnv("JWT_SECRET", defaultJWTSecret),
 		PredictorURL:     stringFromEnv("PREDICTOR_URL", defaultPredictorURL),
-		CredentialsDir:   stringFromEnv("CREDENTIALS_DIR", defaultCredentialsDir),
+		CredentialsDir:   credentialsDir,
 		CorePoolSize:     defaultCorePoolSize,
 		CoreConnTimeout:  defaultCoreConnTimeout,
 		CoreKeepaliveIvl: defaultCoreKeepaliveIvl,
@@ -89,4 +92,31 @@ func intFromEnv(key string, fallback int) (int, error) {
 	}
 
 	return parsed, nil
+}
+
+func resolveDirPath(value string) string {
+	if value == "" || filepath.IsAbs(value) {
+		return value
+	}
+
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return value
+	}
+
+	dir := workingDir
+	for {
+		candidate := filepath.Join(dir, value)
+		info, err := os.Stat(candidate)
+		if err == nil && info.IsDir() {
+			return candidate
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return value
+		}
+
+		dir = parent
+	}
 }

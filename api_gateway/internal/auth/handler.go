@@ -11,6 +11,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
+
+	"lora-chads/api_gateway/pkg/middleware"
 )
 
 // credentials maps username → MD5 password hash.
@@ -42,6 +44,7 @@ func (handler *Handler) Login(ctx *fiber.Ctx) error {
 	if err := ctx.BodyParser(&body); err != nil {
 		return ctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
+	requestID := middleware.RequestID(ctx)
 
 	body.Username = strings.TrimSpace(body.Username)
 	body.Password = strings.TrimSpace(body.Password)
@@ -64,7 +67,7 @@ func (handler *Handler) Login(ctx *fiber.Ctx) error {
 
 	signed, err := token.SignedString([]byte(handler.jwtSecret))
 	if err != nil {
-		log.Printf("auth: sign token for %s: %v", body.Username, err)
+		log.Printf("auth: sign token for %s request_id=%s: %v", body.Username, requestID, err)
 		return ctx.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "could not generate token"})
 	}
 

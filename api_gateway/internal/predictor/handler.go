@@ -4,6 +4,8 @@ import (
 	"log"
 
 	"github.com/gofiber/fiber/v2"
+
+	"lora-chads/api_gateway/pkg/middleware"
 )
 
 type Handler struct {
@@ -22,6 +24,7 @@ func (handler *Handler) HandlePredict(ctx *fiber.Ctx) error {
 	if len(body) == 0 {
 		return ctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "empty request body"})
 	}
+	requestID := middleware.RequestID(ctx)
 
 	var request PredictRequest
 	if err := ctx.BodyParser(&request); err != nil {
@@ -32,11 +35,11 @@ func (handler *Handler) HandlePredict(ctx *fiber.Ctx) error {
 		return ctx.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "items array required"})
 	}
 
-	log.Printf("HTTP POST /predict items=%d", len(request.Items))
+	log.Printf("HTTP POST /predict items=%d request_id=%s", len(request.Items), requestID)
 
 	result, err := handler.client.Predict(ctx.UserContext(), body)
 	if err != nil {
-		log.Printf("predictor: error: %v", err)
+		log.Printf("predictor: error request_id=%s: %v", requestID, err)
 		return ctx.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "prediction service unavailable"})
 	}
 
