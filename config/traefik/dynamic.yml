@@ -1,0 +1,6 @@
+# Traefik v3 — dynamic configuration (TLS certificates)
+
+tls:
+  certificates:
+    - certFile: /etc/traefik/certs/cert.pem
+      keyFile: /etc/traefik/certs/key.pem

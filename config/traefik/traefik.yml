@@ -1,0 +1,32 @@
+# Traefik v3 — static configuration
+# Docs: https://doc.traefik.io/traefik/
+
+api:
+  dashboard: true
+  insecure: true          # dashboard on :8080 without auth (dev only)
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+
+  websecure:
+    address: ":443"
+    http:
+      tls: {}
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: lora-chads_dhl_net
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+log:
+  level: INFO
