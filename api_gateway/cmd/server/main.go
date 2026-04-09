@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/gofiber/adaptor/v2"
 	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/hudl/fargo"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"lora-chads/api_gateway/internal/auth"
@@ -123,6 +125,11 @@ func main() {
 	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
 	defer rateLimiter.Close()
 
+	// --- Eureka service registration ---
+	if cfg.EurekaEnabled {
+		go registerEureka(ctx, cfg)
+	}
+
 	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(metricsMiddleware.Handler())
@@ -180,4 +187,85 @@ func main() {
 	if err := dispatcherWorker.Stop(); err != nil {
 		log.Printf("stop dispatcher worker: %v", err)
 	}
+}
+
+// registerEureka registers this instance with Eureka and sends heartbeats
+// until ctx is cancelled (graceful shutdown). It retries registration with
+// exponential backoff so the gateway tolerates Eureka starting after us.
+func registerEureka(ctx context.Context, cfg config.Config) {
+	hostname, _ := os.Hostname()
+	ipAddr := resolveContainerIP()
+	if ipAddr == "" {
+		ipAddr = hostname
+	}
+
+	baseURL := fmt.Sprintf("http://%s:%d", ipAddr, cfg.HTTPPort)
+
+	instance := &fargo.Instance{
+		App:            cfg.EurekaAppName,
+		HostName:       hostname,
+		IPAddr:         ipAddr,
+		Port:           cfg.HTTPPort,
+		PortEnabled:    true,
+		Status:         fargo.UP,
+		DataCenterInfo: fargo.DataCenterInfo{Name: fargo.MyOwn},
+		HomePageUrl:    baseURL + "/",
+		StatusPageUrl:  baseURL + "/metrics",
+		HealthCheckUrl: baseURL + "/metrics",
+	}
+
+	conn := fargo.NewConn(cfg.EurekaURL)
+
+	// Retry registration with backoff (Eureka may not be ready yet).
+	backoff := time.Second
+	for {
+		if err := conn.RegisterInstance(instance); err != nil {
+			log.Printf("eureka: register failed (retry in %s): %v", backoff, err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+				if backoff < 30*time.Second {
+					backoff *= 2
+				}
+				continue
+			}
+		}
+		log.Printf("eureka: registered %s at %s:%d", cfg.EurekaAppName, ipAddr, cfg.HTTPPort)
+		break
+	}
+
+	// Heartbeat loop — Eureka expects a beat every 30s (default lease).
+	ticker := time.NewTicker(25 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("eureka: deregistering %s", cfg.EurekaAppName)
+			if err := conn.DeregisterInstance(instance); err != nil {
+				log.Printf("eureka: deregister failed: %v", err)
+			}
+			return
+		case <-ticker.C:
+			if err := conn.HeartBeatInstance(instance); err != nil {
+				log.Printf("eureka: heartbeat failed: %v", err)
+			}
+		}
+	}
+}
+
+// resolveContainerIP returns the first non-loopback IPv4 address of this
+// container, which is what other services on the Docker network can reach.
+func resolveContainerIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	return ""
 }

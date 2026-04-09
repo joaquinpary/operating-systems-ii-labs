@@ -49,6 +49,11 @@ _WS_OPCODE_PING = 0x9
 _WS_OPCODE_PONG = 0xA
 _WS_CLOSE_NORMAL = 1000
 
+# SSL context that accepts self-signed certificates (local dev with Traefik).
+_SSL_CTX = ssl.create_default_context()
+_SSL_CTX.check_hostname = False
+_SSL_CTX.verify_mode = ssl.CERT_NONE
+
 ITEM_CATALOGUE = [
     (1, "food"),
     (2, "water"),
@@ -104,7 +109,7 @@ def _request(
 
     req = urllib.request.Request(url=url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as resp:
             charset = resp.headers.get_content_charset("utf-8")
             body = resp.read().decode(charset)
             return json.loads(body) if body else {}
@@ -208,8 +213,7 @@ class GatewayWebSocketClient:
 
         raw_sock = socket.create_connection((host, port), timeout=self.timeout)
         if parsed.scheme == "wss":
-            context = ssl.create_default_context()
-            sock = context.wrap_socket(raw_sock, server_hostname=host)
+            sock = _SSL_CTX.wrap_socket(raw_sock, server_hostname=host)
         else:
             sock = raw_sock
 
@@ -470,7 +474,7 @@ def fetch_metrics(base_url: str) -> None:
     url = f"{base_url}/metrics"
     req = urllib.request.Request(url=url, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
             body = resp.read().decode("utf-8")
         lines = [line for line in body.splitlines() if line.startswith("api_gateway_")]
         if lines:
@@ -494,7 +498,7 @@ def check_request_id(base_url: str, custom_id: str | None = None) -> None:
         url=url, headers={"X-Request-ID": sent_id}, method="GET"
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CTX) as resp:
             echoed_id = resp.headers.get("X-Request-ID", "")
         print(f"  Sent   X-Request-ID: {sent_id}")
         print(f"  Echoed X-Request-ID: {echoed_id or '(none)'}")

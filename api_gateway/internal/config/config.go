@@ -21,6 +21,8 @@ const (
 	defaultCoreKeepaliveIvl = 60 * time.Second
 	defaultCoreSourceID     = "api_gateway"
 	defaultCorePasswordMD5  = "667b71dd38a514eecb68eaf05afb9402"
+	defaultEurekaURL        = "http://localhost:8761/eureka"
+	defaultEurekaAppName    = "API-GATEWAY"
 )
 
 type Config struct {
@@ -36,6 +38,9 @@ type Config struct {
 	CoreKeepaliveIvl time.Duration
 	CoreSourceID     string
 	CorePasswordMD5  string
+	EurekaURL        string
+	EurekaAppName    string
+	EurekaEnabled    bool
 }
 
 func Load() (Config, error) {
@@ -51,6 +56,8 @@ func Load() (Config, error) {
 
 	credentialsDir := resolveDirPath(stringFromEnv("CREDENTIALS_DIR", defaultCredentialsDir))
 
+	eurekaEnabled := stringFromEnv("EUREKA_ENABLED", "true")
+
 	return Config{
 		CoreHost:         stringFromEnv("CORE_HOST", defaultCoreHost),
 		CorePort:         corePort,
@@ -64,6 +71,9 @@ func Load() (Config, error) {
 		CoreKeepaliveIvl: defaultCoreKeepaliveIvl,
 		CoreSourceID:     defaultCoreSourceID,
 		CorePasswordMD5:  defaultCorePasswordMD5,
+		EurekaURL:        stringFromEnv("EUREKA_URL", defaultEurekaURL),
+		EurekaAppName:    stringFromEnv("EUREKA_APP_NAME", defaultEurekaAppName),
+		EurekaEnabled:    eurekaEnabled == "true" || eurekaEnabled == "1",
 	}, nil
 }
 
