@@ -39,6 +39,7 @@ type Client struct {
 	breaker    *CircuitBreaker
 }
 
+// NewClient builds the ML prediction service HTTP client.
 func NewClient(baseURL string) *Client {
 	return &Client{
 		baseURL: baseURL,
@@ -49,6 +50,7 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+// BaseURL returns the configured ML service base URL.
 func (client *Client) BaseURL() string {
 	return client.baseURL
 }
@@ -75,6 +77,7 @@ func (client *Client) Predict(ctx context.Context, body []byte) ([]byte, error) 
 	return result, err
 }
 
+// doPost sends one prediction request to the configured ML service.
 func (client *Client) doPost(ctx context.Context, body []byte) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+"/predict", bytes.NewReader(body))
 	if err != nil {

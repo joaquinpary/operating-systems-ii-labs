@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-// Pool manages a fixed-size set of authenticated TCP connections to the C++
-// core. It implements the Bridge interface so callers can use it as a
-// drop-in replacement for a single TCPClient.
-//
-// Connections are kept alive by a background goroutine that periodically sends
-// GATEWAY_TO_SERVER__KEEPALIVE messages on each idle connection.
 type Pool struct {
 	addr     string
 	sourceID string
@@ -24,14 +18,13 @@ type Pool struct {
 	connTimeout  time.Duration
 	keepaliveIvl time.Duration
 
-	conns  chan *TCPClient // buffered channel acts as a thread-safe queue
+	conns  chan *TCPClient
 	logger *log.Logger
 
 	closeOnce sync.Once
-	done      chan struct{} // closed by Close() to stop the keepalive loop
+	done      chan struct{}
 }
 
-// PoolConfig groups the knobs needed by NewPool.
 type PoolConfig struct {
 	Addr         string
 	SourceID     string
@@ -70,7 +63,6 @@ func (p *Pool) Open(ctx context.Context) error {
 	for i := 0; i < p.size; i++ {
 		c, err := p.dial(ctx)
 		if err != nil {
-			// Close already-opened connections on failure.
 			p.drain()
 			return fmt.Errorf("pool: open conn %d/%d: %w", i+1, p.size, err)
 		}
@@ -91,8 +83,6 @@ func (p *Pool) Send(ctx context.Context, msg Envelope) (Envelope, error) {
 
 	resp, err := c.Send(ctx, msg)
 	if err != nil {
-		// Connection is broken — attempt reconnect in background, don't
-		// return the dead conn to the pool.
 		go p.replaceConn(c)
 		return Envelope{}, err
 	}
@@ -103,7 +93,6 @@ func (p *Pool) Send(ctx context.Context, msg Envelope) (Envelope, error) {
 
 // Healthy returns true if at least one pooled connection is healthy.
 func (p *Pool) Healthy() bool {
-	// Peek at the channel non-destructively via a snapshot.
 	n := len(p.conns)
 	for i := 0; i < n; i++ {
 		select {
@@ -146,6 +135,7 @@ func (p *Pool) Command(ctx context.Context, command string, payload Payload) (En
 	return p.Send(ctx, env)
 }
 
+// Query fetches the shipment status response from the C++ core.
 func (p *Pool) Query(ctx context.Context, shipmentID string) (Message, error) {
 	response, err := p.Command(ctx, "get_shipment_status", Payload{
 		Args: shipmentID,
@@ -171,11 +161,10 @@ func (p *Pool) Query(ctx context.Context, shipmentID string) (Message, error) {
 	}, nil
 }
 
+// SourceID returns the gateway identifier used by this connection pool.
 func (p *Pool) SourceID() string {
 	return p.sourceID
 }
-
-// --- internal helpers ---
 
 // dial creates and authenticates one TCPClient.
 func (p *Pool) dial(ctx context.Context) (*TCPClient, error) {
@@ -206,7 +195,6 @@ func (p *Pool) put(c *TCPClient) {
 	select {
 	case p.conns <- c:
 	default:
-		// Pool is full (shouldn't happen), discard.
 		c.Close()
 	}
 }
@@ -217,7 +205,7 @@ func (p *Pool) replaceConn(dead *TCPClient) {
 
 	select {
 	case <-p.done:
-		return // shutting down, don't reconnect
+		return
 	default:
 	}
 

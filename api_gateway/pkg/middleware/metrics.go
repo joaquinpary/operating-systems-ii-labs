@@ -41,6 +41,7 @@ var (
 
 type MetricsMiddleware struct{}
 
+// NewMetricsMiddleware registers and returns the Prometheus HTTP middleware.
 func NewMetricsMiddleware() MetricsMiddleware {
 	registerMetricsOnce.Do(func() {
 		prometheus.MustRegister(httpRequestsTotal, httpRequestDuration, httpRequestsInFlight)
@@ -49,6 +50,7 @@ func NewMetricsMiddleware() MetricsMiddleware {
 	return MetricsMiddleware{}
 }
 
+// Handler records request metrics for non-metrics endpoints.
 func (middleware MetricsMiddleware) Handler() fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		if ctx.Path() == "/metrics" {
@@ -75,6 +77,7 @@ func (middleware MetricsMiddleware) Handler() fiber.Handler {
 	}
 }
 
+// routePattern returns the matched Fiber route path for metrics labels.
 func routePattern(ctx *fiber.Ctx) string {
 	if ctx == nil {
 		return "unmatched"

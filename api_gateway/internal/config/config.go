@@ -43,6 +43,7 @@ type Config struct {
 	EurekaEnabled    bool
 }
 
+// Load reads API gateway configuration from environment variables.
 func Load() (Config, error) {
 	corePort, err := intFromEnv("CORE_PORT", defaultCorePort)
 	if err != nil {
@@ -77,10 +78,12 @@ func Load() (Config, error) {
 	}, nil
 }
 
+// CoreAddress returns the TCP address of the C++ core service.
 func (cfg Config) CoreAddress() string {
 	return fmt.Sprintf("%s:%d", cfg.CoreHost, cfg.CorePort)
 }
 
+// stringFromEnv returns the environment value or the provided fallback.
 func stringFromEnv(key, fallback string) string {
 	value := os.Getenv(key)
 	if value == "" {
@@ -90,6 +93,7 @@ func stringFromEnv(key, fallback string) string {
 	return value
 }
 
+// intFromEnv parses an integer environment variable or returns the fallback.
 func intFromEnv(key string, fallback int) (int, error) {
 	value := os.Getenv(key)
 	if value == "" {
@@ -104,6 +108,7 @@ func intFromEnv(key string, fallback int) (int, error) {
 	return parsed, nil
 }
 
+// resolveDirPath resolves a relative directory by walking parent directories.
 func resolveDirPath(value string) string {
 	if value == "" || filepath.IsAbs(value) {
 		return value

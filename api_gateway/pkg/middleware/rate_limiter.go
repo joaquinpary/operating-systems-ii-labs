@@ -13,7 +13,6 @@ type tokenBucket struct {
 	lastRefill time.Time
 }
 
-// RateLimiter implements a per-IP token-bucket rate limiter.
 type RateLimiter struct {
 	maxTokens      float64
 	refillInterval time.Duration
@@ -55,6 +54,7 @@ func (limiter *RateLimiter) Handler() fiber.Handler {
 	}
 }
 
+// allow reports whether the client can spend one token from its bucket.
 func (limiter *RateLimiter) allow(clientIP string) bool {
 	limiter.lock.Lock()
 	defer limiter.lock.Unlock()
@@ -70,7 +70,6 @@ func (limiter *RateLimiter) allow(clientIP string) bool {
 		return true
 	}
 
-	// Refill tokens proportional to elapsed time.
 	elapsed := now.Sub(bucket.lastRefill)
 	refillAmount := (elapsed.Seconds() / limiter.refillInterval.Seconds()) * limiter.maxTokens
 	bucket.tokens += refillAmount
@@ -104,6 +103,7 @@ func (limiter *RateLimiter) cleanupLoop() {
 	}
 }
 
+// pruneStaleEntries removes buckets that have been idle for too long.
 func (limiter *RateLimiter) pruneStaleEntries() {
 	limiter.lock.Lock()
 	defer limiter.lock.Unlock()

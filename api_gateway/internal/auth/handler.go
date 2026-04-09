@@ -15,10 +15,8 @@ import (
 	"lora-chads/api_gateway/pkg/middleware"
 )
 
-// credentials maps username → MD5 password hash.
 type credentials map[string]string
 
-// Handler handles the POST /login endpoint.
 type Handler struct {
 	creds     credentials
 	jwtSecret string

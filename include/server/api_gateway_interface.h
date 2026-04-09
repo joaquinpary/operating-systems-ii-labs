@@ -11,26 +11,19 @@ extern "C"
 #define GATEWAY_RESPONSE_MAX 4096
 #define GATEWAY_SIDE_MSG_MAX 1024
 
-    /**
-     * Optional side-effect produced by the plugin.
-     * When a command needs to forward a message to a client (e.g. dispatch
-     * an order to a hub), the plugin fills this struct instead of forcing
-     * message_handler to re-parse the response JSON.
-     */
     typedef struct gateway_side_effect
     {
-        int  has_message;                           /**< Non-zero when send_json is populated. */
-        char target_username[64];                   /**< Username to route the message to.     */
-        char send_json[GATEWAY_SIDE_MSG_MAX];       /**< Serialised message_t JSON.            */
+        int  has_message;
+        char target_username[64];
+        char send_json[GATEWAY_SIDE_MSG_MAX];
     } gateway_side_effect_t;
-
-    /* ===== Symbols the .so must export ===== */
 
     /** Return a version string (e.g. "1.0.0"). */
     const char* api_gateway_version(void);
 
     /** Initialise the plugin with a PostgreSQL connection string.
      *  The plugin creates its own DB connection internally.
+     *  @param conn_string PostgreSQL connection string used by the plugin.
      *  @return 0 on success, negative on error.  */
     int api_gateway_init(const char* conn_string);
 
@@ -51,4 +44,4 @@ extern "C"
 }
 #endif
 
-#endif /* API_GATEWAY_INTERFACE_H */
+#endif

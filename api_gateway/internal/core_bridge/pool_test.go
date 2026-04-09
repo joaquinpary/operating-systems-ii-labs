@@ -46,7 +46,7 @@ func fakeMultiServer(t *testing.T, maxConns int) net.Listener {
 					writeFrameToConn(conn, resp)
 
 				case MsgKeepAlive:
-					// Keepalive: just send ACK back, no second frame.
+
 					ack := Envelope{
 						MsgType:    MsgServerACK,
 						SourceRole: RoleServer,
@@ -62,7 +62,6 @@ func fakeMultiServer(t *testing.T, maxConns int) net.Listener {
 					ack.Checksum = computeChecksum(ack.MsgType, ack.SourceID)
 					writeFrameToConn(conn, ack)
 
-					// Then an actual keepalive response so Send() returns.
 					resp := Envelope{
 						MsgType:    MsgGatewayResponse,
 						SourceRole: RoleServer,
@@ -75,11 +74,10 @@ func fakeMultiServer(t *testing.T, maxConns int) net.Listener {
 					resp.Checksum = computeChecksum(resp.MsgType, resp.SourceID)
 					writeFrameToConn(conn, resp)
 
-					// Read the ACK the client sends back.
 					readFrameFromConn(conn)
 
 				default:
-					// ACK first
+
 					ack := Envelope{
 						MsgType:    MsgServerACK,
 						SourceRole: RoleServer,
@@ -105,7 +103,6 @@ func fakeMultiServer(t *testing.T, maxConns int) net.Listener {
 					echo.Checksum = computeChecksum(echo.MsgType, echo.SourceID)
 					writeFrameToConn(conn, echo)
 
-					// Read the ACK the client sends back.
 					readFrameFromConn(conn)
 				}
 			}
@@ -123,7 +120,7 @@ func newTestPool(t *testing.T, addr string, size int) *Pool {
 		PasswordMD5:  "d41d8cd98f00b204e9800998ecf8427e",
 		Size:         size,
 		ConnTimeout:  5 * time.Second,
-		KeepaliveIvl: 24 * time.Hour, // effectively disabled for tests
+		KeepaliveIvl: 24 * time.Hour,
 	})
 }
 
@@ -146,7 +143,6 @@ func TestPool_OpenAndSend(t *testing.T) {
 		t.Fatal("expected pool to be healthy after Open")
 	}
 
-	// Send a command through the pool.
 	req := Envelope{
 		MsgType:    MsgGatewayCommand,
 		SourceRole: RoleGateway,
@@ -227,7 +223,7 @@ func TestPool_Keepalive(t *testing.T) {
 		PasswordMD5:  "d41d8cd98f00b204e9800998ecf8427e",
 		Size:         poolSize,
 		ConnTimeout:  5 * time.Second,
-		KeepaliveIvl: 100 * time.Millisecond, // very short for testing
+		KeepaliveIvl: 100 * time.Millisecond,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -238,10 +234,8 @@ func TestPool_Keepalive(t *testing.T) {
 	}
 	defer pool.Close()
 
-	// Wait enough time for at least 2 keepalive rounds.
 	time.Sleep(350 * time.Millisecond)
 
-	// Pool should still be healthy after keepalives.
 	if !pool.Healthy() {
 		t.Fatal("expected pool to be healthy after keepalive rounds")
 	}
@@ -265,7 +259,6 @@ func TestPool_Close(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Sending after close should fail.
 	_, err := pool.Send(ctx, Envelope{
 		MsgType:    MsgGatewayCommand,
 		SourceRole: RoleGateway,
@@ -280,8 +273,6 @@ func TestPool_Close(t *testing.T) {
 }
 
 func TestPool_OpenPartialFailure(t *testing.T) {
-	// Listen but don't accept any connections — dial will succeed but auth will
-	// timeout since nobody reads/writes on the server side.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

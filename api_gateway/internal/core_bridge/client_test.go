@@ -22,7 +22,7 @@ func fakeCoreServer(t *testing.T, addr string) net.Listener {
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
-			return // listener closed
+			return
 		}
 		defer conn.Close()
 
@@ -47,7 +47,6 @@ func fakeCoreServer(t *testing.T, addr string) net.Listener {
 				writeFrameToConn(conn, resp)
 
 			default:
-				// Send ACK first.
 				ack := Envelope{
 					MsgType:    MsgServerACK,
 					SourceRole: RoleServer,
@@ -63,7 +62,6 @@ func fakeCoreServer(t *testing.T, addr string) net.Listener {
 				ack.Checksum = computeChecksum(ack.MsgType, ack.SourceID)
 				writeFrameToConn(conn, ack)
 
-				// Then echo back as a COMMAND_RESPONSE.
 				echo := env
 				echo.MsgType = MsgGatewayResponse
 				echo.SourceRole = RoleServer
@@ -74,7 +72,6 @@ func fakeCoreServer(t *testing.T, addr string) net.Listener {
 				echo.Checksum = computeChecksum(echo.MsgType, echo.SourceID)
 				writeFrameToConn(conn, echo)
 
-				// Read the ACK the client sends back.
 				readFrameFromConn(conn)
 			}
 		}
@@ -113,7 +110,7 @@ func writeFrameToConn(conn net.Conn, env Envelope) error {
 }
 
 func TestTCPClient_ConnectAndSend(t *testing.T) {
-	const addr = "127.0.0.1:0" // OS picks a free port
+	const addr = "127.0.0.1:0"
 	ln := fakeCoreServer(t, addr)
 	defer ln.Close()
 
@@ -124,7 +121,6 @@ func TestTCPClient_ConnectAndSend(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// --- Test Connect (auth handshake) ---
 	if err := client.Connect(ctx); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -134,7 +130,6 @@ func TestTCPClient_ConnectAndSend(t *testing.T) {
 		t.Fatal("expected client to be healthy after Connect")
 	}
 
-	// --- Test Send (gateway command roundtrip) ---
 	req := Envelope{
 		MsgType:    MsgGatewayCommand,
 		SourceRole: RoleGateway,
@@ -157,7 +152,6 @@ func TestTCPClient_ConnectAndSend(t *testing.T) {
 }
 
 func TestTCPClient_AuthRejected(t *testing.T) {
-	// Custom server that rejects auth.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -197,17 +191,14 @@ func TestTCPClient_AuthRejected(t *testing.T) {
 }
 
 func TestComputeChecksum(t *testing.T) {
-	// DJB2 is deterministic; verify a known value is stable across runs.
 	cs1 := computeChecksum(MsgAuthRequest, "api_gateway")
 	cs2 := computeChecksum(MsgAuthRequest, "api_gateway")
 	if cs1 != cs2 {
 		t.Fatalf("checksum not deterministic: %s vs %s", cs1, cs2)
 	}
-	// The checksum must NOT be zero-padded — C++ uses "%lX".
 	if len(cs1) == 0 || len(cs1) > 6 {
 		t.Fatalf("expected 1-6 char hex checksum, got %q (len %d)", cs1, len(cs1))
 	}
-	// Ensure no leading zeros.
 	if len(cs1) > 1 && cs1[0] == '0' {
 		t.Fatalf("checksum should not be zero-padded, got %q", cs1)
 	}
@@ -223,7 +214,6 @@ func TestTimestamp_RoundTrip(t *testing.T) {
 	if err := json.Unmarshal(data, &ts2); err != nil {
 		t.Fatal(err)
 	}
-	// Truncate to millisecond for comparison (our format only keeps ms).
 	want := ts.UTC().Truncate(time.Millisecond)
 	got := ts2.UTC().Truncate(time.Millisecond)
 	if !want.Equal(got) {

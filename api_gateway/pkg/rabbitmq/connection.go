@@ -21,6 +21,7 @@ type Connection struct {
 	closeOnce sync.Once
 }
 
+// Connect dials RabbitMQ and prepares the publisher channel.
 func Connect(url string) (*Connection, error) {
 	connection, err := amqp.Dial(url)
 	if err != nil {
@@ -40,11 +41,13 @@ func Connect(url string) (*Connection, error) {
 	}, nil
 }
 
+// URL returns the configured RabbitMQ connection string.
 func (connection *Connection) URL() string {
 	return connection.url
 
 }
 
+// Publish ensures the queue exists and publishes one persistent message.
 func (connection *Connection) Publish(ctx context.Context, queue string, body []byte) error {
 	connection.publishMu.Lock()
 	defer connection.publishMu.Unlock()
@@ -69,6 +72,7 @@ func (connection *Connection) Publish(ctx context.Context, queue string, body []
 	return nil
 }
 
+// Consume opens the shared consumer channel for the given queue.
 func (connection *Connection) Consume(ctx context.Context, queue string) (<-chan amqp.Delivery, error) {
 	connection.consumeMu.Lock()
 	defer connection.consumeMu.Unlock()
@@ -114,6 +118,7 @@ func (connection *Connection) Consume(ctx context.Context, queue string) (<-chan
 	return deliveries, nil
 }
 
+// Close shuts down consumer, publisher, and connection resources.
 func (connection *Connection) Close() error {
 	var closeErr error
 
@@ -147,6 +152,7 @@ func (connection *Connection) Close() error {
 	return closeErr
 }
 
+// declareQueue declares the durable queue used by the gateway.
 func declareQueue(channel *amqp.Channel, queue string) (amqp.Queue, error) {
 	declared, err := channel.QueueDeclare(queue, true, false, false, false, nil)
 	if err != nil {

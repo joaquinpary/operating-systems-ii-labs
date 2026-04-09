@@ -40,6 +40,7 @@ type trackedShipment struct {
 	CreatedAt     time.Time
 }
 
+// New builds a dispatcher that tracks shipments and consumes queue messages.
 func New(pool *core_bridge.Pool, rabbit *rabbitmq.Connection, workers int) *Dispatcher {
 	if workers < 1 {
 		workers = 1
@@ -55,6 +56,7 @@ func New(pool *core_bridge.Pool, rabbit *rabbitmq.Connection, workers int) *Disp
 	}
 }
 
+// Start opens the RabbitMQ consumer and runs the configured worker goroutines.
 func (dispatcher *Dispatcher) Start(ctx context.Context) error {
 	dispatcher.startOnce.Do(func() {
 		deliveries, err := dispatcher.rabbit.Consume(ctx, shipments.ShipmentsQueue)
@@ -82,11 +84,13 @@ func (dispatcher *Dispatcher) Start(ctx context.Context) error {
 	return nil
 }
 
+// Stop waits for active worker goroutines to finish.
 func (dispatcher *Dispatcher) Stop() error {
 	dispatcher.wg.Wait()
 	return nil
 }
 
+// RegisterShipment records a shipment request and returns its tracked status.
 func (dispatcher *Dispatcher) RegisterShipment(request shipments.ShipmentRequest) shipments.StatusResponse {
 	prepared := request
 	if strings.TrimSpace(prepared.ShipmentID) == "" {
@@ -113,6 +117,7 @@ func (dispatcher *Dispatcher) RegisterShipment(request shipments.ShipmentRequest
 	return toStatusResponse(record)
 }
 
+// GetShipment returns a tracked shipment by shipment or transaction identifier.
 func (dispatcher *Dispatcher) GetShipment(identifier string) (shipments.StatusResponse, bool) {
 	identifier = strings.TrimSpace(identifier)
 	if identifier == "" {
@@ -129,6 +134,7 @@ func (dispatcher *Dispatcher) GetShipment(identifier string) (shipments.StatusRe
 	return toStatusResponse(record), true
 }
 
+// HasShipment reports whether a shipment is currently tracked.
 func (dispatcher *Dispatcher) HasShipment(shipmentID string) bool {
 	shipmentID = strings.TrimSpace(shipmentID)
 	if shipmentID == "" {
@@ -141,6 +147,7 @@ func (dispatcher *Dispatcher) HasShipment(shipmentID string) bool {
 	return exists
 }
 
+// DeleteShipment removes a shipment and its transaction index from memory.
 func (dispatcher *Dispatcher) DeleteShipment(shipmentID string) {
 	shipmentID = strings.TrimSpace(shipmentID)
 	if shipmentID == "" {
@@ -158,6 +165,7 @@ func (dispatcher *Dispatcher) DeleteShipment(shipmentID string) {
 	dispatcher.mu.Unlock()
 }
 
+// CancelShipment deletes a pending shipment owned by the current caller.
 func (dispatcher *Dispatcher) CancelShipment(shipmentID string, callerUsername string) (shipments.StatusResponse, error) {
 	shipmentID = strings.TrimSpace(shipmentID)
 	callerUsername = strings.TrimSpace(callerUsername)
@@ -188,10 +196,12 @@ func (dispatcher *Dispatcher) CancelShipment(shipmentID string, callerUsername s
 	return response, nil
 }
 
+// Snapshot returns the full in-memory shipment view.
 func (dispatcher *Dispatcher) Snapshot() []shipments.StatusResponse {
 	return dispatcher.snapshot(func(trackedShipment) bool { return true })
 }
 
+// SnapshotForOwner returns the shipment view filtered by owner.
 func (dispatcher *Dispatcher) SnapshotForOwner(owner string) []shipments.StatusResponse {
 	owner = strings.TrimSpace(owner)
 	return dispatcher.snapshot(func(record trackedShipment) bool {
@@ -199,6 +209,7 @@ func (dispatcher *Dispatcher) SnapshotForOwner(owner string) []shipments.StatusR
 	})
 }
 
+// snapshot builds a sorted shipment list for records matching include.
 func (dispatcher *Dispatcher) snapshot(include func(trackedShipment) bool) []shipments.StatusResponse {
 	dispatcher.mu.RLock()
 	responses := make([]shipments.StatusResponse, 0, len(dispatcher.shipments))
@@ -221,6 +232,7 @@ func (dispatcher *Dispatcher) snapshot(include func(trackedShipment) bool) []shi
 	return responses
 }
 
+// consumeLoop processes queue deliveries until the context or channel closes.
 func (dispatcher *Dispatcher) consumeLoop(ctx context.Context, deliveries <-chan amqp.Delivery) {
 	defer dispatcher.wg.Done()
 
@@ -245,6 +257,7 @@ func (dispatcher *Dispatcher) consumeLoop(ctx context.Context, deliveries <-chan
 	}
 }
 
+// handleDelivery decodes one queue message and routes it to the dispatcher logic.
 func (dispatcher *Dispatcher) handleDelivery(ctx context.Context, delivery amqp.Delivery) (bool, error) {
 	var message shipments.QueueMessage
 	if err := json.Unmarshal(delivery.Body, &message); err != nil {
@@ -288,6 +301,7 @@ var errShipmentNotFound = errors.New("shipment not found")
 var errShipmentAlreadyDispatched = errors.New("shipment already dispatched")
 var errNotOwner = errors.New("shipment does not belong to current user")
 
+// dispatchShipment sends the create order command to the C++ core.
 func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID string) error {
 	record, err := dispatcher.getShipment(shipmentID)
 	if err != nil {
@@ -357,6 +371,7 @@ func (dispatcher *Dispatcher) dispatchShipment(ctx context.Context, shipmentID s
 	return nil
 }
 
+// getShipment resolves one tracked shipment or returns a not-found error.
 func (dispatcher *Dispatcher) getShipment(shipmentID string) (trackedShipment, error) {
 	shipmentID = strings.TrimSpace(shipmentID)
 
@@ -370,6 +385,7 @@ func (dispatcher *Dispatcher) getShipment(shipmentID string) (trackedShipment, e
 	return record, nil
 }
 
+// lookupShipmentLocked searches both shipment and transaction indexes.
 func (dispatcher *Dispatcher) lookupShipmentLocked(identifier string) (trackedShipment, bool) {
 	if record, exists := dispatcher.shipments[identifier]; exists {
 		return record, true
@@ -384,6 +400,7 @@ func (dispatcher *Dispatcher) lookupShipmentLocked(identifier string) (trackedSh
 	return record, exists
 }
 
+// toStatusResponse converts an in-memory tracked shipment into an API response.
 func toStatusResponse(record trackedShipment) shipments.StatusResponse {
 	response := shipments.StatusResponse{
 		ShipmentID:    record.Request.ShipmentID,

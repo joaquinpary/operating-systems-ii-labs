@@ -12,6 +12,7 @@ type Handler struct {
 	client *Client
 }
 
+// NewHandler builds the HTTP handler for the prediction service proxy.
 func NewHandler(client *Client) *Handler {
 	return &Handler{client: client}
 }

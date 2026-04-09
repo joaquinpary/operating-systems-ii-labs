@@ -33,8 +33,8 @@ import (
 
 const emergencyAlertMsgType corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
 
+// main configures the API gateway process and starts its background services.
 func main() {
-	// --- Log to both stdout and file ---
 	logDir := strings.TrimSpace(os.Getenv("LOG_DIR"))
 	if logDir == "" {
 		logDir = filepath.Join("logs", "server")
@@ -59,7 +59,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// --- TCP connection pool (N authenticated connections) ---
 	pool := corebridge.NewPool(corebridge.PoolConfig{
 		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
@@ -74,14 +73,12 @@ func main() {
 	}
 	defer pool.Close()
 
-	// --- RabbitMQ ---
 	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("connect rabbitmq: %v", err)
 	}
 	defer rabbitConnection.Close()
 
-	// --- Application components ---
 	dispatcherWorker := dispatcher.New(pool, rabbitConnection, cfg.CorePoolSize)
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub(cfg.JWTSecret, log.Default(), dispatcherWorker)
@@ -93,7 +90,6 @@ func main() {
 		log.Fatalf("auth handler: %v", err)
 	}
 
-	// --- Event listener (authenticates LAST → reverse-map in C++) ---
 	listener := corebridge.NewListener(corebridge.ListenerConfig{
 		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
@@ -118,19 +114,16 @@ func main() {
 	}
 	defer listener.Close()
 
-	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	metricsMiddleware := middleware.NewMetricsMiddleware()
 	tracingMiddleware := middleware.NewTracingMiddleware()
 	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
 	defer rateLimiter.Close()
 
-	// --- Eureka service registration ---
 	if cfg.EurekaEnabled {
 		go registerEureka(ctx, cfg)
 	}
 
-	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(metricsMiddleware.Handler())
 	app.Use(tracingMiddleware.Handler())
@@ -146,7 +139,6 @@ func main() {
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
 	protected.Post("/predict", predictorHandler.HandlePredict)
 
-	// --- Background workers ---
 	go func() {
 		<-ctx.Done()
 		log.Printf("shutdown signal received")
@@ -216,7 +208,6 @@ func registerEureka(ctx context.Context, cfg config.Config) {
 
 	conn := fargo.NewConn(cfg.EurekaURL)
 
-	// Retry registration with backoff (Eureka may not be ready yet).
 	backoff := time.Second
 	for {
 		if err := conn.RegisterInstance(instance); err != nil {
@@ -235,7 +226,6 @@ func registerEureka(ctx context.Context, cfg config.Config) {
 		break
 	}
 
-	// Heartbeat loop — Eureka expects a beat every 30s (default lease).
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
 
