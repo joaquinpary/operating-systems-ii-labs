@@ -1,0 +1,59 @@
+mainmenu "DHL Courier Firmware"
+
+menu "DHL Courier Settings"
+
+config DHL_EMPLOYEE_ID
+	string "Courier employee identifier (compile-time fallback)"
+	default "courier-001"
+	help
+	  Compile-time default. At runtime this is overridden by the value
+	  entered in the captive-portal provisioning page and stored in NVS.
+
+config DHL_MQTT_CLIENT_ID
+	string "MQTT client identifier"
+	default "dhl_courier_001"
+	help
+	  MQTT client identifier presented to the broker at connect time.
+
+config DHL_MQTT_BROKER_HOSTNAME
+	string "MQTT broker hostname or IPv4 address"
+	default "localhost"
+	help
+	  Hostname or IP address of the MQTT broker.
+
+config DHL_MQTT_BROKER_PORT
+	int "MQTT broker port"
+	range 1 65535
+	default 1883
+
+config DHL_MQTT_KEEPALIVE
+	int "MQTT keepalive in seconds"
+	range 10 1200
+	default 60
+
+config DHL_MQTT_RECONNECT_DELAY
+	int "MQTT reconnect delay in seconds"
+	range 1 300
+	default 5
+
+if WIFI
+
+config DHL_WIFI_SSID
+	string "Wi-Fi SSID (compile-time fallback)"
+	default ""
+	help
+	  Compile-time default only. At runtime the SSID is entered via the
+	  captive-portal and stored in NVS flash. Leave empty to always use
+	  the captive portal on first boot.
+
+config DHL_WIFI_PSK
+	string "Wi-Fi passphrase (compile-time fallback)"
+	default ""
+	help
+	  Compile-time default only. See DHL_WIFI_SSID.
+
+endif
+
+endmenu
+
+source "Kconfig.zephyr"
