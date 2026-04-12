@@ -23,8 +23,12 @@ type RateLimiter struct {
 	cleanupDone chan struct{}
 }
 
+// KeyFunc extracts the rate-limiting key from a request.
+// If it returns "" the limiter falls back to the client IP.
+type KeyFunc func(*fiber.Ctx) string
+
 // NewRateLimiter creates a rate limiter that allows maxRequests per interval
-// for each unique client IP. A background goroutine prunes stale entries
+// for each unique client key. A background goroutine prunes stale entries
 // every 5 minutes.
 func NewRateLimiter(maxRequests int, interval time.Duration) *RateLimiter {
 	limiter := &RateLimiter{
@@ -39,11 +43,21 @@ func NewRateLimiter(maxRequests int, interval time.Duration) *RateLimiter {
 
 // Handler returns a Fiber middleware that enforces the rate limit.
 // Requests exceeding the limit receive 429 Too Many Requests.
-func (limiter *RateLimiter) Handler() fiber.Handler {
+// The key defaults to the client IP.
+func (limiter *RateLimiter) Handler(keyFuncs ...KeyFunc) fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		clientIP := ctx.IP()
+		key := ""
+		for _, fn := range keyFuncs {
+			if k := fn(ctx); k != "" {
+				key = k
+				break
+			}
+		}
+		if key == "" {
+			key = ctx.IP()
+		}
 
-		if !limiter.allow(clientIP) {
+		if !limiter.allow(key) {
 			ctx.Set("Retry-After", fmt.Sprintf("%.0f", limiter.refillInterval.Seconds()))
 			return ctx.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
 				"error": "rate limit exceeded",

@@ -50,10 +50,11 @@ func NewMetricsMiddleware() MetricsMiddleware {
 	return MetricsMiddleware{}
 }
 
-// Handler records request metrics for non-metrics endpoints.
+// Handler records request metrics for non-metrics and non-health endpoints.
 func (middleware MetricsMiddleware) Handler() fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
-		if ctx.Path() == "/metrics" {
+		p := ctx.Path()
+		if p == "/metrics" || p == "/health" {
 			return ctx.Next()
 		}
 
@@ -69,11 +70,24 @@ func (middleware MetricsMiddleware) Handler() fiber.Handler {
 			statusCode = fiber.StatusInternalServerError
 		}
 
+		method := sanitizeMethod(ctx.Method())
 		path := routePattern(ctx)
-		httpRequestsTotal.WithLabelValues(ctx.Method(), path, strconv.Itoa(statusCode)).Inc()
-		httpRequestDuration.WithLabelValues(ctx.Method(), path).Observe(time.Since(startedAt).Seconds())
+		httpRequestsTotal.WithLabelValues(method, path, strconv.Itoa(statusCode)).Inc()
+		httpRequestDuration.WithLabelValues(method, path).Observe(time.Since(startedAt).Seconds())
 
 		return err
+	}
+}
+
+// sanitizeMethod restricts recorded HTTP methods to a known set, preventing
+// unbounded label cardinality and Prometheus collection conflicts from
+// malformed requests.
+func sanitizeMethod(m string) string {
+	switch strings.ToUpper(m) {
+	case "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS":
+		return strings.ToUpper(m)
+	default:
+		return "OTHER"
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/gofiber/adaptor/v2"
 	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/hudl/fargo"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -32,6 +32,7 @@ import (
 )
 
 const emergencyAlertMsgType corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
+const orderDispatchedMsgType corebridge.MsgType = "SERVER_TO_GATEWAY__ORDER_DISPATCHED"
 
 // main configures the API gateway process and starts its background services.
 func main() {
@@ -48,7 +49,7 @@ func main() {
 		log.Fatalf("open log file: %v", err)
 	}
 	defer logFile.Close()
-	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	log.SetOutput(logFile)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
 	cfg, err := config.Load()
@@ -107,6 +108,12 @@ func main() {
 		if env.MsgType == emergencyAlertMsgType {
 			chatHub.BroadcastCoreEvent(env)
 		}
+		if env.MsgType == orderDispatchedMsgType {
+			transactionID := strings.TrimSpace(env.Payload.Args)
+			if transactionID != "" {
+				dispatcherWorker.MarkDispatched(transactionID)
+			}
+		}
 	})
 
 	if err := listener.Start(ctx); err != nil {
@@ -117,7 +124,7 @@ func main() {
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	metricsMiddleware := middleware.NewMetricsMiddleware()
 	tracingMiddleware := middleware.NewTracingMiddleware()
-	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
+	rateLimiter := middleware.NewRateLimiter(600, time.Minute)
 	defer rateLimiter.Close()
 
 	if cfg.EurekaEnabled {
@@ -127,12 +134,27 @@ func main() {
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(metricsMiddleware.Handler())
 	app.Use(tracingMiddleware.Handler())
-	app.Use(rateLimiter.Handler())
-	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
-	app.Post("/login", authHandler.Login)
-	app.Get("/ws/chat", chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
 
-	protected := app.Group("", jwtMiddleware.Handler())
+	// Health check — always available, no middleware
+	app.Get("/health", func(ctx *fiber.Ctx) error {
+		return ctx.SendStatus(fiber.StatusOK)
+	})
+
+	// Public routes — rate-limited by client IP
+	app.Get("/metrics", rateLimiter.Handler(), adaptor.HTTPHandler(promhttp.Handler()))
+	app.Post("/login", rateLimiter.Handler(), authHandler.Login)
+	app.Get("/ws/chat", rateLimiter.Handler(), chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
+
+	// Protected routes — rate-limited by JWT username (falls back to IP)
+	userKeyFunc := middleware.KeyFunc(func(ctx *fiber.Ctx) string {
+		if claims, ok := ctx.Locals("user").(jwt.MapClaims); ok {
+			if sub, ok := claims["sub"].(string); ok {
+				return sub
+			}
+		}
+		return ""
+	})
+	protected := app.Group("", jwtMiddleware.Handler(), rateLimiter.Handler(userKeyFunc))
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
 	protected.Get("/status", shipmentHandler.GetAllStatuses)
