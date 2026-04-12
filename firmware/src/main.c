@@ -21,6 +21,7 @@
 
 #include "gps_telemetry.h"
 #include "provisioning.h"
+#include "route_manager.h"
 
 LOG_MODULE_REGISTER(dhl_courier, LOG_LEVEL_INF);
 
@@ -31,6 +32,12 @@ LOG_MODULE_REGISTER(dhl_courier, LOG_LEVEL_INF);
 #define WIFI_CONNECT_RETRIES 3
 #define WIFI_CONNECT_TIMEOUT_S 30
 #define NET_L4_EVENT_MASK (NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED)
+
+/* Topic prefix for route assignments from the backend */
+#define ROUTE_TOPIC_PREFIX "routes/"
+
+/* Next MQTT message id for subscribe / QoS-1 ack (wraps at UINT16_MAX) */
+static uint16_t next_msg_id = 1U;
 
 static uint8_t rx_buffer[MQTT_BUFFER_SIZE];
 static uint8_t tx_buffer[MQTT_BUFFER_SIZE];
@@ -109,11 +116,111 @@ static int broker_init(struct sockaddr_storage *broker_addr)
 	return 0;
 }
 
+static int subscribe_to_topics(struct mqtt_client *client)
+{
+	static char route_topic[sizeof(ROUTE_TOPIC_PREFIX) +
+				sizeof(g_prov.employee_id)];
+
+	snprintf(route_topic, sizeof(route_topic), "%s%s",
+		 ROUTE_TOPIC_PREFIX, g_prov.employee_id);
+
+	struct mqtt_topic topics[] = {
+		{
+			.topic = {
+				.utf8 = (const uint8_t *)route_topic,
+				.size = strlen(route_topic),
+			},
+			.qos = MQTT_QOS_1_AT_LEAST_ONCE,
+		},
+	};
+
+	struct mqtt_subscription_list sub_list = {
+		.list = topics,
+		.list_count = ARRAY_SIZE(topics),
+		.message_id = next_msg_id++,
+	};
+
+	int rc = mqtt_subscribe(client, &sub_list);
+
+	if (rc != 0) {
+		LOG_ERR("mqtt_subscribe failed (%d)", rc);
+	} else {
+		LOG_INF("Subscribed to %s (msg_id %u)",
+			route_topic, sub_list.message_id);
+	}
+
+	return rc;
+}
+
+static int handle_publish(struct mqtt_client *client,
+			  const struct mqtt_evt *evt)
+{
+	const struct mqtt_publish_param *pub = &evt->param.publish;
+	const struct mqtt_topic *topic = &pub->message.topic;
+	uint32_t payload_len = pub->message.payload.len;
+	int rc;
+
+	/* Read payload into a stack buffer (bounded by MQTT_BUFFER_SIZE) */
+	uint8_t payload[MQTT_BUFFER_SIZE];
+	size_t to_read = payload_len;
+
+	if (to_read > sizeof(payload)) {
+		LOG_WRN("Publish payload too large (%u bytes), truncating",
+			payload_len);
+		to_read = sizeof(payload);
+	}
+
+	rc = mqtt_read_publish_payload(client, payload, to_read);
+	if (rc < 0) {
+		LOG_ERR("Failed to read MQTT payload (%d)", rc);
+		return rc;
+	}
+
+	size_t received = (size_t)rc;
+
+	/* Discard remaining bytes if payload was truncated */
+	if (payload_len > to_read) {
+		uint8_t discard;
+		size_t remaining = payload_len - to_read;
+
+		while (remaining > 0) {
+			rc = mqtt_read_publish_payload(client, &discard, 1);
+			if (rc <= 0) {
+				break;
+			}
+			remaining--;
+		}
+	}
+
+	/* ACK QoS 1 messages */
+	if (topic->qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+		struct mqtt_puback_param ack = {
+			.message_id = pub->message_id,
+		};
+
+		(void)mqtt_publish_qos1_ack(client, &ack);
+	}
+
+	/* Route topic? "routes/{employee_id}" */
+	size_t prefix_len = strlen(ROUTE_TOPIC_PREFIX);
+
+	if (topic->topic.size >= prefix_len &&
+	    memcmp(topic->topic.utf8, ROUTE_TOPIC_PREFIX, prefix_len) == 0) {
+		rc = route_manager_parse_json((const char *)payload, received);
+		if (rc != 0) {
+			LOG_WRN("Route JSON rejected (%d)", rc);
+		}
+	} else {
+		LOG_DBG("Unhandled topic: %.*s",
+			(int)topic->topic.size, topic->topic.utf8);
+	}
+
+	return 0;
+}
+
 static void mqtt_evt_handler(struct mqtt_client *const client,
 				     const struct mqtt_evt *evt)
 {
-	ARG_UNUSED(client);
-
 	switch (evt->type) {
 	case MQTT_EVT_CONNACK:
 		if (evt->result != 0) {
@@ -123,6 +230,19 @@ static void mqtt_evt_handler(struct mqtt_client *const client,
 
 		mqtt_connected = true;
 		LOG_INF("MQTT connected to broker");
+
+		/* Subscribe after every (re)connect so the broker
+		 * knows our topic interest even after a clean session. */
+		subscribe_to_topics(client);
+		break;
+
+	case MQTT_EVT_SUBACK:
+		LOG_INF("MQTT SUBACK received (msg_id %u)",
+			evt->param.suback.message_id);
+		break;
+
+	case MQTT_EVT_PUBLISH:
+		(void)handle_publish(client, evt);
 		break;
 
 	case MQTT_EVT_DISCONNECT:
@@ -485,6 +605,7 @@ int main(void)
 
 	settings_load();
 	gps_telemetry_init();
+	route_manager_init();
 
 	iface = net_if_get_default();
 	if (iface == NULL) {
