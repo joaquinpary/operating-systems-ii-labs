@@ -1,7 +1,9 @@
+#include <errno.h>
 #include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <cJSON.h>
 
 #include "route_manager.h"
 
@@ -90,4 +92,76 @@ void route_manager_clear(void)
 	memset(&state, 0, sizeof(state));
 	LOG_INF("Route cleared");
 	k_mutex_unlock(&route_lock);
+}
+
+int route_manager_parse_json(const char *json, size_t len)
+{
+	/*
+	 * cJSON_ParseWithLength requires a null-terminated string internally
+	 * but respects the length parameter to bound the parse.  We use it
+	 * instead of cJSON_Parse so we don't depend on the MQTT payload
+	 * being null-terminated.
+	 */
+	cJSON *root = cJSON_ParseWithLength(json, len);
+
+	if (root == NULL) {
+		LOG_ERR("Route JSON parse failed");
+		return -EINVAL;
+	}
+
+	if (!cJSON_IsArray(root)) {
+		LOG_ERR("Route JSON payload is not an array");
+		cJSON_Delete(root);
+		return -EINVAL;
+	}
+
+	int array_size = cJSON_GetArraySize(root);
+
+	if (array_size == 0) {
+		LOG_WRN("Received empty route array – clearing route");
+		route_manager_clear();
+		cJSON_Delete(root);
+		return 0;
+	}
+
+	int count = array_size;
+
+	if (count > CONFIG_DHL_ROUTE_MAX_STOPS) {
+		LOG_WRN("Route has %d stops, clamping to %d",
+			count, CONFIG_DHL_ROUTE_MAX_STOPS);
+		count = CONFIG_DHL_ROUTE_MAX_STOPS;
+	}
+
+	/* Validate every element is a string before committing the update */
+	const cJSON *elem;
+	int idx = 0;
+
+	cJSON_ArrayForEach(elem, root) {
+		if (idx >= count) {
+			break;
+		}
+		if (!cJSON_IsString(elem) || elem->valuestring == NULL) {
+			LOG_ERR("Route element %d is not a string", idx);
+			cJSON_Delete(root);
+			return -EINVAL;
+		}
+		idx++;
+	}
+
+	/* Build a temporary pointer array for route_manager_update */
+	const char *stops[CONFIG_DHL_ROUTE_MAX_STOPS];
+
+	idx = 0;
+	cJSON_ArrayForEach(elem, root) {
+		if (idx >= count) {
+			break;
+		}
+		stops[idx] = elem->valuestring;
+		idx++;
+	}
+
+	route_manager_update(stops, count);
+	cJSON_Delete(root);
+
+	return 0;
 }
