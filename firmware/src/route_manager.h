@@ -32,6 +32,13 @@ void route_manager_update(const char *stops[], int count);
 const char *get_current_stop(void);
 
 /**
+ * @brief Get the zero-based index of the current stop.
+ *
+ * @return Index of the active stop, or -1 if the route is empty/exhausted.
+ */
+int get_current_stop_index(void);
+
+/**
  * @brief Return the total number of stops in the loaded route.
  */
 int get_stop_count(void);
@@ -39,7 +46,7 @@ int get_stop_count(void);
 /**
  * @brief Advance to the next stop.
  *
- * @return 0 on success, -1 if already at the last stop or route is empty.
+ * @return 0 on success, -1 if the route is empty or already exhausted.
  */
 int advance_stop(void);
 
