@@ -4,11 +4,14 @@ import "encoding/json"
 
 const (
 	ShipmentsQueue            = "shipments"
-	CreateShipmentMessageType = "create_shipment"
-	DispatchCommandType       = "dispatch_command"
+	ShipmentsFanoutExchange   = "shipments.fanout"
+	CreateShipmentMessageType    = "create_shipment"
+	DispatchCommandType          = "dispatch_command"
+	DispatchConfirmedMessageType = "dispatch_confirmed"
 
 	StatusPendingConfirmation = "pending_confirmation"
-	StatusConfirmed           = "confirm"
+	StatusConfirmed           = "confirmed"
+	StatusDispatched          = "dispatched"
 	StatusCancelled           = "cancelled"
 )
 

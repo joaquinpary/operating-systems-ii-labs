@@ -95,7 +95,7 @@ if(BUILD_TARGET STREQUAL "server")
         ${cjson_SOURCE_DIR}
         ${PostgreSQL_INCLUDE_DIRS}
     )
-    target_link_libraries(api_gateway PRIVATE cjson ${PostgreSQL_LIBRARIES})
+    target_link_libraries(api_gateway PRIVATE cjson ${PostgreSQL_LIBRARIES} pthread)
     set_target_properties(api_gateway PROPERTIES
         POSITION_INDEPENDENT_CODE ON
         SOVERSION 1

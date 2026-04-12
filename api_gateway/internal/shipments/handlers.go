@@ -22,6 +22,7 @@ type coreBridge interface {
 
 type publisher interface {
 	Publish(ctx context.Context, queue string, body []byte) error
+	PublishFanout(ctx context.Context, exchange string, body []byte) error
 }
 
 type shipmentTracker interface {
@@ -170,6 +171,12 @@ func (handler *Handler) publish(ctx context.Context, messageType string, payload
 		return fmt.Errorf("marshal queue message: %w", err)
 	}
 
+	// create_shipment goes to the fanout exchange so every replica registers
+	// the shipment in memory. dispatch_command stays on the shared queue so
+	// only one replica processes it (competing consumers).
+	if messageType == CreateShipmentMessageType {
+		return handler.publisher.PublishFanout(ctx, ShipmentsFanoutExchange, envelopeBytes)
+	}
 	return handler.publisher.Publish(ctx, ShipmentsQueue, envelopeBytes)
 }
 

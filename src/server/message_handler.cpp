@@ -473,6 +473,23 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(),
                          fulfilled.transaction_id);
         }
+
+        // When a HUB reports inventory, check if pending gateway orders can now be fulfilled.
+        if (std::strcmp(msg.source_role, HUB) == 0)
+        {
+            auto gateway_fulfilled = m_inventory_manager.process_pending_gateway_orders(msg.source_id);
+            for (const auto& order : gateway_fulfilled)
+            {
+                message_t dispatch_msg;
+                if (create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, SERVER,
+                                         order.requesting_hub_id.c_str(), order.items, order.item_count, NULL) == 0)
+                {
+                    responses.push_back(make_send_to_username(order.requesting_hub_id.c_str(), dispatch_msg));
+                    LOG_INFO_MSG("[MSG] pending gateway order -> hub=%s txn=%d", order.requesting_hub_id.c_str(),
+                                 order.transaction_id);
+                }
+            }
+        }
     }
     else if (category == message_category::STOCK_REQ)
     {
@@ -506,10 +523,46 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
     else if (category == message_category::RECEIPT_CONFIRM)
     {
         m_inventory_manager.handle_receipt_confirmation(msg);
+
+        // When a HUB receives stock, check if pending gateway orders can now be fulfilled.
+        if (std::strcmp(msg.source_role, HUB) == 0)
+        {
+            auto gateway_fulfilled = m_inventory_manager.process_pending_gateway_orders(msg.source_id);
+            for (const auto& order : gateway_fulfilled)
+            {
+                // Tell the HUB to dispatch the stock.
+                message_t dispatch_msg;
+                if (create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, SERVER,
+                                         order.requesting_hub_id.c_str(), order.items, order.item_count, NULL) == 0)
+                {
+                    responses.push_back(make_send_to_username(order.requesting_hub_id.c_str(), dispatch_msg));
+                    LOG_INFO_MSG("[MSG] pending gateway order -> hub=%s txn=%d", order.requesting_hub_id.c_str(),
+                                 order.transaction_id);
+                }
+            }
+        }
     }
     else if (category == message_category::DISPATCH_CONFIRM)
     {
-        m_inventory_manager.handle_dispatch_confirmation(msg);
+        int transaction_id = -1;
+        if (m_inventory_manager.handle_dispatch_confirmation(msg, transaction_id) == 0 && transaction_id >= 0)
+        {
+            // Notify every gateway session that this order was dispatched.
+            message_t notify;
+            std::memset(&notify, 0, sizeof(notify));
+            std::strncpy(notify.msg_type, SERVER_TO_GATEWAY__ORDER_DISPATCHED, MESSAGE_TYPE_SIZE - 1);
+            std::strncpy(notify.source_role, SERVER, ROLE_SIZE - 1);
+            std::strncpy(notify.source_id, SERVER, ID_SIZE - 1);
+            std::strncpy(notify.target_role, GATEWAY, ROLE_SIZE - 1);
+            std::strncpy(notify.timestamp, msg.timestamp, TIMESTAMP_SIZE - 1);
+
+            char txn_str[32];
+            std::snprintf(txn_str, sizeof(txn_str), "%d", transaction_id);
+            std::strncpy(notify.payload.generic_args.args, txn_str, sizeof(notify.payload.generic_args.args) - 1);
+
+            responses.push_back(make_send_to_username("api_gateway", notify));
+            LOG_INFO_MSG("[MSG] order_dispatched -> gateway txn=%d hub=%s", transaction_id, msg.source_id);
+        }
     }
     else if (category == message_category::DISPATCH_NOTICE)
     {
@@ -575,10 +628,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                 std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
                 std::memcpy(slot.payload, json_buf, len);
                 slot.payload_len = len;
-                slot.start_ack_timer = true;
-                std::strncpy(slot.timer_key, broadcast_msg.timestamp, TIMESTAMP_SIZE - 1);
-                slot.timer_timeout = m_ack_timeout_seconds;
-                slot.max_retries = m_max_retries;
                 responses.push_back(slot);
             }
             LOG_INFO_MSG("[MSG] emergency broadcast from=%s code=%d", msg.source_id,

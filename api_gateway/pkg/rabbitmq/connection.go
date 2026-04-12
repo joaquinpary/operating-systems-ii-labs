@@ -152,6 +152,78 @@ func (connection *Connection) Close() error {
 	return closeErr
 }
 
+// PublishFanout declares a fanout exchange and publishes a message to it.
+// Every consumer bound to the exchange receives a copy.
+func (connection *Connection) PublishFanout(ctx context.Context, exchange string, body []byte) error {
+	connection.publishMu.Lock()
+	defer connection.publishMu.Unlock()
+
+	if connection.publisher == nil {
+		return fmt.Errorf("rabbitmq publisher channel is closed")
+	}
+
+	if err := connection.publisher.ExchangeDeclare(exchange, "fanout", true, false, false, false, nil); err != nil {
+		return fmt.Errorf("declare fanout exchange %q: %w", exchange, err)
+	}
+
+	if err := connection.publisher.PublishWithContext(ctx, exchange, "", false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Timestamp:    time.Now().UTC(),
+		Body:         body,
+	}); err != nil {
+		return fmt.Errorf("publish to fanout exchange %q: %w", exchange, err)
+	}
+
+	return nil
+}
+
+// ConsumeFanout creates an exclusive auto-delete queue bound to a fanout
+// exchange and returns a delivery channel.  Each replica gets its own queue
+// so every message is delivered to ALL consumers.
+func (connection *Connection) ConsumeFanout(ctx context.Context, exchange string) (<-chan amqp.Delivery, error) {
+	connection.consumeMu.Lock()
+	defer connection.consumeMu.Unlock()
+
+	if connection.connection == nil {
+		return nil, fmt.Errorf("rabbitmq connection is closed")
+	}
+
+	channel, err := connection.connection.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("open rabbitmq fanout consumer channel: %w", err)
+	}
+
+	if err := channel.ExchangeDeclare(exchange, "fanout", true, false, false, false, nil); err != nil {
+		channel.Close()
+		return nil, fmt.Errorf("declare fanout exchange %q: %w", exchange, err)
+	}
+
+	queue, err := channel.QueueDeclare("", false, true, true, false, nil)
+	if err != nil {
+		channel.Close()
+		return nil, fmt.Errorf("declare exclusive queue for fanout %q: %w", exchange, err)
+	}
+
+	if err := channel.QueueBind(queue.Name, "", exchange, false, nil); err != nil {
+		channel.Close()
+		return nil, fmt.Errorf("bind queue to fanout %q: %w", exchange, err)
+	}
+
+	deliveries, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
+	if err != nil {
+		channel.Close()
+		return nil, fmt.Errorf("consume fanout %q: %w", exchange, err)
+	}
+
+	go func() {
+		<-ctx.Done()
+		_ = channel.Close()
+	}()
+
+	return deliveries, nil
+}
+
 // declareQueue declares the durable queue used by the gateway.
 func declareQueue(channel *amqp.Channel, queue string) (amqp.Queue, error) {
 	declared, err := channel.QueueDeclare(queue, true, false, false, false, nil)

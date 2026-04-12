@@ -135,7 +135,13 @@ func (tc *TCPClient) Send(ctx context.Context, msg Envelope) (Envelope, error) {
 			return Envelope{}, fmt.Errorf("core_bridge: read: %w", err)
 		}
 
-		if resp.MsgType == MsgServerACK {
+		// Only accept COMMAND_RESPONSE as the actual reply; skip ACKs
+		// and any unsolicited server-pushed messages (e.g. emergency alerts)
+		// that may arrive on the same connection.
+		if resp.MsgType != MsgGatewayResponse {
+			if resp.MsgType != MsgServerACK {
+				log.Printf("core_bridge: skipping unsolicited %s while waiting for COMMAND_RESPONSE", resp.MsgType)
+			}
 			continue
 		}
 
