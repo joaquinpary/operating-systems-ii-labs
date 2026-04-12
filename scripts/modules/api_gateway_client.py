@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import http.cookiejar
 import json
 import os
 import socket
@@ -33,7 +34,7 @@ import urllib.request
 import uuid
 from typing import Any
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8081"
+DEFAULT_BASE_URL = "https://api.localhost"
 DEFAULT_JWT_SECRET = "change-me"
 DEFAULT_CHAT_PATH = "/ws/chat"
 
@@ -53,6 +54,14 @@ _WS_CLOSE_NORMAL = 1000
 _SSL_CTX = ssl.create_default_context()
 _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
+
+# Cookie-aware opener so Traefik sticky-session cookies (ws_affinity) are
+# preserved across requests — all calls from one session hit the same replica.
+_COOKIE_JAR = http.cookiejar.CookieJar()
+_OPENER = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(_COOKIE_JAR),
+    urllib.request.HTTPSHandler(context=_SSL_CTX),
+)
 
 ITEM_CATALOGUE = [
     (1, "food"),
@@ -109,7 +118,7 @@ def _request(
 
     req = urllib.request.Request(url=url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30, context=_SSL_CTX) as resp:
+        with _OPENER.open(req, timeout=30) as resp:
             charset = resp.headers.get_content_charset("utf-8")
             body = resp.read().decode(charset)
             return json.loads(body) if body else {}
