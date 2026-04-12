@@ -7,4 +7,5 @@ target_sources(app PRIVATE
 	src/gps_telemetry.c
 	src/main.c
 	src/provisioning.c
+	src/route_manager.c
 )
