@@ -19,6 +19,7 @@
 #include <zephyr/net/wifi_mgmt.h>
 #endif
 
+#include "gps_telemetry.h"
 #include "provisioning.h"
 
 LOG_MODULE_REGISTER(dhl_courier, LOG_LEVEL_INF);
@@ -241,7 +242,7 @@ static int publish_heartbeat(struct mqtt_client *client, const char *employee_id
 				.qos = MQTT_QOS_0_AT_MOST_ONCE
 			},
 			.payload = {
-				.data = (const uint8_t *)payload,
+				.data = (uint8_t *)payload,
 				.len = strlen(payload)
 			}
 		},
@@ -306,6 +307,11 @@ static int mqtt_run(struct mqtt_client *client, const char *employee_id)
 				LOG_WRN("Heartbeat publish failed (%d)", rc);
 			}
 			last_heartbeat = k_uptime_get();
+		}
+
+		rc = gps_telemetry_publish(client, employee_id);
+		if (rc != 0 && rc != -EAGAIN) {
+			LOG_WRN("GPS telemetry publish failed (%d)", rc);
 		}
 	}
 
@@ -478,6 +484,7 @@ int main(void)
 	}
 
 	settings_load();
+	gps_telemetry_init();
 
 	iface = net_if_get_default();
 	if (iface == NULL) {
@@ -525,11 +532,13 @@ int main(void)
 			continue;
 		}
 
+		gps_telemetry_start();
 		rc = mqtt_run(&client_ctx, g_prov.employee_id);
 		if (rc != 0) {
 			LOG_WRN("MQTT loop ended with %d", rc);
 		}
 
+		gps_telemetry_stop();
 		mqtt_disconnect(&client_ctx, NULL);
 		mqtt_abort(&client_ctx);
 		clear_fds();
