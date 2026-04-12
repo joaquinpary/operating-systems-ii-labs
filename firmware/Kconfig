@@ -54,6 +54,31 @@ config DHL_WIFI_PSK
 
 endif
 
+menu "Route Manager"
+
+config DHL_ROUTE_MAX_STOPS
+	int "Maximum number of stops in a delivery route"
+	range 1 64
+	default 16
+	help
+	  Upper bound on the number of stops the device can hold in memory
+	  for a single route.  Each stop occupies DHL_ROUTE_STOP_NAME_MAX
+	  bytes of static RAM, so raising this value increases the
+	  route_state footprint linearly.  16 covers the typical last-mile
+	  delivery run with comfortable margin.
+
+config DHL_ROUTE_STOP_NAME_MAX
+	int "Maximum length of a stop name (bytes, including null terminator)"
+	range 8 256
+	default 64
+	help
+	  Maximum number of bytes (including the trailing null) for a single
+	  stop name received from the backend.  Names longer than this are
+	  silently truncated.  64 bytes is enough for a full street-level
+	  address in Spanish/English.
+
+endmenu
+
 endmenu
 
 source "Kconfig.zephyr"
