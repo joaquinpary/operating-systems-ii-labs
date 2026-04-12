@@ -102,6 +102,22 @@ void gps_telemetry_stop(void)
 	atomic_clear(&gps_pending);
 }
 
+void gps_telemetry_get_position(int32_t *lat_microdegrees,
+				      int32_t *lng_microdegrees)
+{
+	k_mutex_lock(&gps_lock, K_FOREVER);
+
+	if (lat_microdegrees != NULL) {
+		*lat_microdegrees = current_lat_microdegrees;
+	}
+
+	if (lng_microdegrees != NULL) {
+		*lng_microdegrees = current_lng_microdegrees;
+	}
+
+	k_mutex_unlock(&gps_lock);
+}
+
 int gps_telemetry_publish(struct mqtt_client *client, const char *employee_id)
 {
 	char topic[GPS_TOPIC_SIZE];
