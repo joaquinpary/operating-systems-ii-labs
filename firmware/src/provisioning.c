@@ -8,6 +8,24 @@
 
 LOG_MODULE_REGISTER(provisioning, LOG_LEVEL_INF);
 
+#if defined(CONFIG_DHL_WIFI_SSID)
+#define PROV_DEFAULT_SSID CONFIG_DHL_WIFI_SSID
+#else
+#define PROV_DEFAULT_SSID ""
+#endif
+
+#if defined(CONFIG_DHL_WIFI_PSK)
+#define PROV_DEFAULT_PSK CONFIG_DHL_WIFI_PSK
+#else
+#define PROV_DEFAULT_PSK ""
+#endif
+
+#if defined(CONFIG_WIFI)
+#define PROV_WIFI_REQUIRED 1
+#else
+#define PROV_WIFI_REQUIRED 0
+#endif
+
 /* ── NVS / settings keys ─────────────────────────────────────────────────── */
 #define PROV_SETTINGS_ROOT  "prov"
 #define KEY_SSID            PROV_SETTINGS_ROOT "/ssid"
@@ -60,25 +78,35 @@ SETTINGS_STATIC_HANDLER_DEFINE(prov, PROV_SETTINGS_ROOT, NULL,
 
 int prov_load(struct prov_config *cfg)
 {
+	bool has_flash_employee_id = g_flash_cfg.employee_id[0] != '\0';
+	bool has_flash_wifi = !PROV_WIFI_REQUIRED || g_flash_cfg.ssid[0] != '\0';
+
 	/* g_flash_cfg was filled by the settings handler during settings_load() */
-	if (g_flash_cfg.ssid[0] != '\0' && g_flash_cfg.employee_id[0] != '\0') {
+	if (has_flash_employee_id && has_flash_wifi) {
 		*cfg = g_flash_cfg;
 		LOG_INF("Loaded provisioning from NVS: ssid=%s eid=%s",
 			cfg->ssid, cfg->employee_id);
 		return 0;
 	}
 
+	memset(cfg, 0, sizeof(*cfg));
+
 	/* Fall back to compile-time credentials if set */
-	if (sizeof(CONFIG_DHL_WIFI_SSID) > 1) {
-		strncpy(cfg->ssid, CONFIG_DHL_WIFI_SSID, sizeof(cfg->ssid) - 1);
-		strncpy(cfg->psk,  CONFIG_DHL_WIFI_PSK,  sizeof(cfg->psk) - 1);
+	if (sizeof(PROV_DEFAULT_SSID) > 1 || sizeof(CONFIG_DHL_EMPLOYEE_ID) > 1) {
+		strncpy(cfg->ssid, PROV_DEFAULT_SSID, sizeof(cfg->ssid) - 1);
+		strncpy(cfg->psk, PROV_DEFAULT_PSK, sizeof(cfg->psk) - 1);
 		strncpy(cfg->employee_id, CONFIG_DHL_EMPLOYEE_ID,
 			sizeof(cfg->employee_id) - 1);
 		cfg->ssid[sizeof(cfg->ssid) - 1] = '\0';
-		cfg->psk[sizeof(cfg->psk) - 1]   = '\0';
+		cfg->psk[sizeof(cfg->psk) - 1] = '\0';
 		cfg->employee_id[sizeof(cfg->employee_id) - 1] = '\0';
-		LOG_INF("Using compile-time credentials: ssid=%s", cfg->ssid);
-		return 0;
+
+		if (cfg->employee_id[0] != '\0' &&
+		    (!PROV_WIFI_REQUIRED || cfg->ssid[0] != '\0')) {
+			LOG_INF("Using compile-time provisioning: ssid=%s eid=%s",
+				cfg->ssid, cfg->employee_id);
+			return 0;
+		}
 	}
 
 	return -ENOENT;
