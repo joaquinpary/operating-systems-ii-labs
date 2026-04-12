@@ -181,9 +181,9 @@ services:
       - "8081"
     volumes:
       - ./config/gateway:/etc/gateway:ro
-      - ./logs/server:/var/log/dhl
+      - ./logs/gateway:/var/log/dhl
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/metrics"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/health"]
       interval: 10s
       timeout: 5s
       retries: 5

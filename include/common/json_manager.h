@@ -47,6 +47,7 @@ extern "C"
 #define SERVER_TO_GATEWAY__AUTH_RESPONSE "SERVER_TO_GATEWAY__AUTH_RESPONSE"
 #define SERVER_TO_GATEWAY__ACK "SERVER_TO_GATEWAY__ACK"
 #define SERVER_TO_GATEWAY__COMMAND_RESPONSE "SERVER_TO_GATEWAY__COMMAND_RESPONSE"
+#define SERVER_TO_GATEWAY__ORDER_DISPATCHED "SERVER_TO_GATEWAY__ORDER_DISPATCHED"
 
 
 #define WAREHOUSE "WAREHOUSE"
@@ -147,6 +148,11 @@ extern "C"
         char instructions[EMERGENCY_INSTRUCTIONS_SIZE];
     } payload_server_emergency_alert;
 
+    typedef struct payload_generic_args
+    {
+        char args[DESCRIPTION_SIZE];
+    } payload_generic_args;
+
     typedef union payload_t {
         payload_auth_request client_auth_request;
         payload_auth_response server_auth_response;
@@ -160,6 +166,7 @@ extern "C"
         payload_order_stock order_stock;
         payload_restock_notice restock_notice;
         payload_acknowledgment acknowledgment;
+        payload_generic_args generic_args;
     } payload_t;
 
     typedef struct message_t

@@ -6,21 +6,14 @@ import (
 	"time"
 )
 
-// Circuit breaker states.
 const (
-	stateClosed   = iota // Normal operation — requests flow through.
-	stateOpen            // Too many failures — reject immediately.
-	stateHalfOpen        // Cooling off — allow one probe request.
+	stateClosed = iota
+	stateOpen
+	stateHalfOpen
 )
 
-// ErrBreakerOpen is returned when the circuit breaker is open.
 var ErrBreakerOpen = errors.New("circuit breaker is open")
 
-// CircuitBreaker implements a simple three-state circuit breaker.
-//
-// Closed  → counts consecutive failures; trips to Open after maxFailures.
-// Open    → rejects all calls for resetTimeout, then transitions to HalfOpen.
-// HalfOpen→ allows one probe call; success → Closed, failure → Open.
 type CircuitBreaker struct {
 	lock             sync.Mutex
 	state            int
@@ -54,20 +47,17 @@ func (breaker *CircuitBreaker) Execute(operation func() ([]byte, error)) ([]byte
 			breaker.lock.Unlock()
 			return nil, ErrBreakerOpen
 		}
-		// Timeout elapsed — transition to half-open and let this request probe.
 		breaker.state = stateHalfOpen
 		breaker.lock.Unlock()
 
 	case stateHalfOpen:
-		// Already probing — reject concurrent requests while the probe is in flight.
 		breaker.lock.Unlock()
 		return nil, ErrBreakerOpen
 
-	default: // stateClosed
+	default:
 		breaker.lock.Unlock()
 	}
 
-	// Run the actual call outside the lock.
 	data, err := operation()
 
 	breaker.lock.Lock()
@@ -82,7 +72,6 @@ func (breaker *CircuitBreaker) Execute(operation func() ([]byte, error)) ([]byte
 		return nil, err
 	}
 
-	// Success — reset.
 	breaker.state = stateClosed
 	breaker.consecutiveFails = 0
 	return data, nil

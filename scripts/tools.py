@@ -19,6 +19,7 @@ from modules import rest_api_client
 from modules import benchmark
 from modules import profiling_graph
 from modules import api_gateway_client
+from modules import stress_test
 
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ def _header():
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}5){RESET} Profiling Graph                   {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}6){RESET} API Gateway Tester                {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}7){RESET} Generate TLS Certs                {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}8){RESET} Gateway Stress Test               {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {RED}0){RESET} Exit                              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}╚═══════════════════════════════════════╝{RESET}")
     print()
@@ -348,6 +350,34 @@ def menu_gen_certs():
     _pause()
 
 
+def menu_stress_test():
+    print(f"\n  {BOLD}── Gateway Stress Test ────────────────────{RESET}\n")
+    print(f"  {DIM}Gateway rate limit: 600 req/min per IP (retries on 429 automatically).{RESET}")
+    print(f"  {DIM}Each client logs in once, then runs random cycles of:{RESET}")
+    print(f"  {DIM}  create+dispatch (50%), predict (25%), status check (25%).{RESET}")
+    print(f"  {DIM}Use ramp-up and inter-request delay to avoid hitting the limit.{RESET}\n")
+    base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
+    num = _prompt_int("Number of clients", 10)
+    c_min = _prompt_int("Min cycles per client", 3)
+    c_max = _prompt_int("Max cycles per client", 8)
+    if c_max < c_min:
+        c_max = c_min
+    ramp_up = _prompt_int("Ramp-up period (seconds, 0 = all at once)", 0)
+    delay_ms = _prompt_int("Delay between requests per client (ms, 0 = none)", 0)
+    ws_choice = _prompt("Enable WebSocket phase? (y/N)", "N")
+    enable_ws = ws_choice.lower() in ("y", "yes")
+    print()
+    stress_test.run_stress_test(
+        base_url, num,
+        enable_ws=enable_ws,
+        ramp_up_s=float(ramp_up),
+        req_delay_s=delay_ms / 1000.0,
+        cycles_min=c_min,
+        cycles_max=c_max,
+    )
+    _pause()
+
+
 def menu_api_gateway():
     print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
     base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
@@ -477,6 +507,8 @@ def main():
                 menu_api_gateway()
             elif choice == "7":
                 menu_gen_certs()
+            elif choice == "8":
+                menu_stress_test()
             elif choice == "0":
                 print(f"\n  {DIM}Bye!{RESET}\n")
                 break

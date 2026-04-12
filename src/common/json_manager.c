@@ -100,6 +100,25 @@ static cJSON* serialize_server_emergency(const void* ptr)
     return root;
 }
 
+static cJSON* serialize_generic_args(const void* ptr)
+{
+    const payload_generic_args* payload = (const payload_generic_args*)ptr;
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "args", payload->args);
+    return root;
+}
+
+static void deserialize_generic_args(const cJSON* root, void* ptr)
+{
+    payload_generic_args* payload = (payload_generic_args*)ptr;
+    cJSON* args_item = cJSON_GetObjectItemCaseSensitive(root, "args");
+    if (cJSON_IsString(args_item) && args_item->valuestring)
+    {
+        strncpy(payload->args, args_item->valuestring, DESCRIPTION_SIZE - 1);
+        payload->args[DESCRIPTION_SIZE - 1] = '\0';
+    }
+}
+
 static void deserialize_items_list(const cJSON* root, void* ptr)
 {
     payload_items_list* payload = (payload_items_list*)ptr;
@@ -253,6 +272,7 @@ static const payload_handler_t handlers[] = {
     {SERVER_TO_HUB__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_WAREHOUSE__ACK, serialize_acknowledgment, deserialize_acknowledgment},
     {SERVER_TO_GATEWAY__ACK, serialize_acknowledgment, deserialize_acknowledgment},
+    {SERVER_TO_GATEWAY__ORDER_DISPATCHED, serialize_generic_args, deserialize_generic_args},
     {NULL, NULL, NULL}};
 
 static const payload_handler_t* find_handler(const char* msg_type)

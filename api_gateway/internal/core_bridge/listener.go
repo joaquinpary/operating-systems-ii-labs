@@ -9,21 +9,8 @@ import (
 	"time"
 )
 
-// EventHandler is invoked by the Listener for every pushed frame that is
-// not an ACK or keepalive response.
 type EventHandler func(Envelope)
 
-// Listener maintains a dedicated TCP connection to the C++ core that
-// continuously reads server-pushed events (inventory updates, emergency
-// alerts, etc.). It authenticates LAST — after the Pool — so its session
-// is the one indexed by username in the C++ session_manager reverse-map.
-//
-// Internally it runs two goroutines:
-//   - readLoop:      blocking reads → ACK + dispatch to registered handlers
-//   - keepaliveLoop: periodic KEEPALIVE writes to avoid session timeout
-//
-// Go's net.Conn supports concurrent Read and Write, so no read-mutex is
-// needed; only writes (ACKs + keepalives) are serialised with writeMu.
 type Listener struct {
 	addr     string
 	sourceID string
@@ -40,7 +27,6 @@ type Listener struct {
 	connTimeout  time.Duration
 }
 
-// ListenerConfig groups the knobs for NewListener.
 type ListenerConfig struct {
 	Addr         string
 	SourceID     string
@@ -112,8 +98,7 @@ func (l *Listener) Close() error {
 	return err
 }
 
-// --- auth ---
-
+// authenticate performs the startup AUTH_REQUEST handshake for the listener.
 func (l *Listener) authenticate(ctx context.Context) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		l.conn.SetDeadline(deadline)
@@ -147,8 +132,6 @@ func (l *Listener) authenticate(ctx context.Context) error {
 	return nil
 }
 
-// --- read loop ---
-
 // readLoop spawns a blocking reader goroutine that feeds frames into a
 // channel. The main select dispatches events while the done channel allows
 // graceful shutdown.
@@ -156,7 +139,6 @@ func (l *Listener) readLoop() {
 	frames := make(chan Envelope)
 	errs := make(chan error, 1)
 
-	// Blocking reader — runs until conn is closed.
 	go func() {
 		for {
 			env, err := readFrameFrom(l.conn)
@@ -175,7 +157,6 @@ func (l *Listener) readLoop() {
 		case err := <-errs:
 			select {
 			case <-l.done:
-				// Expected: Close() was called, conn.Read returned error.
 			default:
 				l.logger.Printf("listener: read error: %v", err)
 			}
@@ -186,16 +167,14 @@ func (l *Listener) readLoop() {
 	}
 }
 
+// processFrame handles ACK suppression, reply ACKs, and event dispatch.
 func (l *Listener) processFrame(env Envelope) {
-	// Server ACKs (for our keepalives) are silently consumed.
 	if env.MsgType == MsgServerACK {
 		return
 	}
 
-	// Send ACK for every non-ACK frame.
 	l.sendACK(env)
 
-	// Keepalive responses are harmless noise — don't bubble to handlers.
 	if env.MsgType == MsgGatewayResponse && env.Payload.Message == "ALIVE" {
 		return
 	}
@@ -203,6 +182,7 @@ func (l *Listener) processFrame(env Envelope) {
 	l.dispatch(env)
 }
 
+// sendACK acknowledges one frame received from the core listener socket.
 func (l *Listener) sendACK(env Envelope) {
 	ack := Envelope{
 		MsgType:    MsgACK,
@@ -223,6 +203,7 @@ func (l *Listener) sendACK(env Envelope) {
 	l.writeMu.Unlock()
 }
 
+// dispatch forwards an event frame to every registered handler.
 func (l *Listener) dispatch(env Envelope) {
 	l.handlersMu.RLock()
 	defer l.handlersMu.RUnlock()
@@ -231,8 +212,7 @@ func (l *Listener) dispatch(env Envelope) {
 	}
 }
 
-// --- keepalive loop ---
-
+// keepaliveLoop periodically sends keepalive frames until the listener closes.
 func (l *Listener) keepaliveLoop() {
 	ticker := time.NewTicker(l.keepaliveIvl)
 	defer ticker.Stop()
@@ -247,6 +227,7 @@ func (l *Listener) keepaliveLoop() {
 	}
 }
 
+// sendKeepalive writes one keepalive frame on the listener connection.
 func (l *Listener) sendKeepalive() {
 	msg := Envelope{
 		MsgType:    MsgKeepAlive,

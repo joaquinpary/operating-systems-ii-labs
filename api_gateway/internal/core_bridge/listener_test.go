@@ -25,7 +25,6 @@ func fakePushServer(t *testing.T, numPush int) net.Listener {
 		}
 		defer conn.Close()
 
-		// --- auth handshake ---
 		env, err := readFrameFromConn(conn)
 		if err != nil {
 			return
@@ -45,7 +44,6 @@ func fakePushServer(t *testing.T, numPush int) net.Listener {
 		resp.Checksum = computeChecksum(resp.MsgType, resp.SourceID)
 		writeFrameToConn(conn, resp)
 
-		// --- push events ---
 		for i := 0; i < numPush; i++ {
 			push := Envelope{
 				MsgType:    MsgGatewayResponse,
@@ -62,12 +60,9 @@ func fakePushServer(t *testing.T, numPush int) net.Listener {
 			push.Checksum = computeChecksum(push.MsgType, push.SourceID)
 			writeFrameToConn(conn, push)
 
-			// Read the ACK the listener sends back.
 			readFrameFromConn(conn)
 		}
 
-		// Keep connection alive for a bit so keepalive tests can run.
-		// Handle any keepalive frames that arrive.
 		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 		for {
 			env, err := readFrameFromConn(conn)
@@ -102,7 +97,6 @@ func fakePushServer(t *testing.T, numPush int) net.Listener {
 				alive.Checksum = computeChecksum(alive.MsgType, alive.SourceID)
 				writeFrameToConn(conn, alive)
 
-				// read ACK for alive response
 				readFrameFromConn(conn)
 			}
 		}
@@ -118,7 +112,7 @@ func newTestListener(t *testing.T, addr string) *Listener {
 		SourceID:     "api_gateway",
 		PasswordMD5:  "d41d8cd98f00b204e9800998ecf8427e",
 		ConnTimeout:  5 * time.Second,
-		KeepaliveIvl: 24 * time.Hour, // disabled for most tests
+		KeepaliveIvl: 24 * time.Hour,
 	})
 }
 
@@ -142,7 +136,6 @@ func TestListener_ReceivePushedEvents(t *testing.T) {
 	}
 	defer listener.Close()
 
-	// Wait for events to be dispatched.
 	deadline := time.After(3 * time.Second)
 	for {
 		if received.Load() == int32(numEvents) {
@@ -158,7 +151,7 @@ func TestListener_ReceivePushedEvents(t *testing.T) {
 }
 
 func TestListener_Keepalive(t *testing.T) {
-	ln := fakePushServer(t, 0) // no push events
+	ln := fakePushServer(t, 0)
 	defer ln.Close()
 
 	listener := NewListener(ListenerConfig{
@@ -166,10 +159,9 @@ func TestListener_Keepalive(t *testing.T) {
 		SourceID:     "api_gateway",
 		PasswordMD5:  "d41d8cd98f00b204e9800998ecf8427e",
 		ConnTimeout:  5 * time.Second,
-		KeepaliveIvl: 100 * time.Millisecond, // very short
+		KeepaliveIvl: 100 * time.Millisecond,
 	})
 
-	// Keepalive responses ("ALIVE") should NOT reach event handlers.
 	var spurious atomic.Int32
 	listener.OnEvent(func(env Envelope) {
 		spurious.Add(1)
@@ -183,7 +175,6 @@ func TestListener_Keepalive(t *testing.T) {
 	}
 	defer listener.Close()
 
-	// Wait for a few keepalive rounds.
 	time.Sleep(350 * time.Millisecond)
 
 	if got := spurious.Load(); got != 0 {
@@ -208,14 +199,12 @@ func TestListener_Close(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Double close should be safe.
 	if err := listener.Close(); err != nil {
 		t.Fatalf("second Close: %v", err)
 	}
 }
 
 func TestListener_AuthFailure(t *testing.T) {
-	// Server that rejects auth.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -229,10 +218,8 @@ func TestListener_AuthFailure(t *testing.T) {
 		}
 		defer conn.Close()
 
-		// Read auth request.
 		readFrameFromConn(conn)
 
-		// Reject.
 		resp := Envelope{
 			MsgType:    MsgAuthResponse,
 			SourceRole: RoleServer,

@@ -2,9 +2,6 @@ package core_bridge
 
 import "context"
 
-// Bridge is the primary port through which the rest of the application
-// communicates with the C++ logistics core. Implementations must handle
-// the 1024-byte framing, authentication handshake, and checksum protocol.
 type Bridge interface {
 	// Connect establishes the TCP connection and performs the authentication
 	// handshake with the C++ core. It must be called before Send.

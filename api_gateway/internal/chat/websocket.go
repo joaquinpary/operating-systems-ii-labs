@@ -20,19 +20,17 @@ const (
 	messageTypeCancelShipment = "cancel_shipment"
 	messageTypeCancelResponse = "cancel_response"
 	messageTypeEmergencyAlert = "emergency_alert"
-
-	coreEmergencyAlert corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
-	gatewaySourceID                       = "api_gateway"
-
-	clientSendBuffer    = 256
-	broadcastBuffer     = 256
-	writeWait           = 10 * time.Second
-	pongWait            = 40 * time.Second
-	pingPeriod          = 30 * time.Second
-	maxIncomingMsgBytes = 4 * 1024
-
-	defaultGuestRole = corebridge.RoleCLI
+	gatewaySourceID           = "api_gateway"
+	clientSendBuffer          = 256
+	broadcastBuffer           = 256
+	writeWait                 = 10 * time.Second
+	pongWait                  = 40 * time.Second
+	pingPeriod                = 30 * time.Second
+	maxIncomingMsgBytes       = 4 * 1024
+	defaultGuestRole          = corebridge.RoleCLI
 )
+
+const coreEmergencyAlert corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
 
 type ShipmentCanceller interface {
 	CancelShipment(shipmentID string, callerUsername string) (shipments.StatusResponse, error)
@@ -78,6 +76,7 @@ type Hub struct {
 	broadcast     chan []byte
 }
 
+// NewHub builds the WebSocket hub used by the chat endpoint.
 func NewHub(secret string, logger *log.Logger, canceller ShipmentCanceller) *Hub {
 	if logger == nil {
 		logger = log.Default()
@@ -95,6 +94,7 @@ func NewHub(secret string, logger *log.Logger, canceller ShipmentCanceller) *Hub
 	}
 }
 
+// Run processes client registration, deregistration, and broadcast requests.
 func (hub *Hub) Run(ctx context.Context) error {
 	for {
 		select {
@@ -112,6 +112,7 @@ func (hub *Hub) Run(ctx context.Context) error {
 	}
 }
 
+// HandleUpgrade validates the WebSocket upgrade and stores caller identity.
 func (hub *Hub) HandleUpgrade(ctx *fiber.Ctx) error {
 	if !websocket.IsWebSocketUpgrade(ctx) {
 		return fiber.ErrUpgradeRequired
@@ -139,6 +140,7 @@ func (hub *Hub) HandleUpgrade(ctx *fiber.Ctx) error {
 	return ctx.Next()
 }
 
+// HandleWS serves a single upgraded WebSocket connection.
 func (hub *Hub) HandleWS(conn *websocket.Conn) {
 	client := &Client{
 		hub:      hub,
@@ -157,6 +159,7 @@ func (hub *Hub) HandleWS(conn *websocket.Conn) {
 	client.readPump()
 }
 
+// Broadcast queues one message for delivery to every connected client.
 func (hub *Hub) Broadcast(data []byte) {
 	message := append([]byte(nil), data...)
 	select {
@@ -166,6 +169,7 @@ func (hub *Hub) Broadcast(data []byte) {
 	}
 }
 
+// BroadcastCoreEvent converts one core event into a WebSocket broadcast.
 func (hub *Hub) BroadcastCoreEvent(env corebridge.Envelope) {
 	data, err := buildCoreEventMessage(env)
 	if err != nil {
@@ -176,6 +180,7 @@ func (hub *Hub) BroadcastCoreEvent(env corebridge.Envelope) {
 	hub.Broadcast(data)
 }
 
+// parseClaims validates the JWT token used during WebSocket upgrade.
 func (hub *Hub) parseClaims(tokenString string) (jwt.MapClaims, error) {
 	if hub.secret == "" {
 		return jwt.MapClaims{}, nil
@@ -200,12 +205,14 @@ func (hub *Hub) parseClaims(tokenString string) (jwt.MapClaims, error) {
 	return claims, nil
 }
 
+// shutdown disconnects every currently registered WebSocket client.
 func (hub *Hub) shutdown() {
 	for client := range hub.clients {
 		hub.removeClient(client)
 	}
 }
 
+// registerClient adds a client to the hub indexes.
 func (hub *Hub) registerClient(client *Client) {
 	hub.clients[client] = struct{}{}
 	if _, ok := hub.clientsByName[client.username]; !ok {
@@ -214,6 +221,7 @@ func (hub *Hub) registerClient(client *Client) {
 	hub.clientsByName[client.username][client] = struct{}{}
 }
 
+// unregisterClient removes a client and logs the disconnect.
 func (hub *Hub) unregisterClient(client *Client) {
 	if !hub.removeClient(client) {
 		return
@@ -221,6 +229,7 @@ func (hub *Hub) unregisterClient(client *Client) {
 	hub.logger.Printf("chat: client disconnected user=%s active=%d", client.username, len(hub.clients))
 }
 
+// removeClient drops a client from hub indexes and closes its send queue.
 func (hub *Hub) removeClient(client *Client) bool {
 	if _, ok := hub.clients[client]; !ok {
 		return false
@@ -237,6 +246,7 @@ func (hub *Hub) removeClient(client *Client) bool {
 	return true
 }
 
+// broadcastMessage pushes a message to all connected clients.
 func (hub *Hub) broadcastMessage(message []byte) {
 	for client := range hub.clients {
 		if !client.enqueue(message) {
@@ -246,6 +256,7 @@ func (hub *Hub) broadcastMessage(message []byte) {
 	}
 }
 
+// readPump reads client messages until the socket closes.
 func (client *Client) readPump() {
 	defer client.conn.Close()
 
@@ -278,6 +289,7 @@ func (client *Client) readPump() {
 	}
 }
 
+// handleCancel decodes and executes one shipment cancellation request.
 func (client *Client) handleCancel(rawPayload json.RawMessage) bool {
 	var payload CancelPayload
 	if err := json.Unmarshal(rawPayload, &payload); err != nil {
@@ -297,6 +309,7 @@ func (client *Client) handleCancel(rawPayload json.RawMessage) bool {
 	return client.replyCancel(status, payload.ShipmentID, err)
 }
 
+// replyCancel sends the result of a cancellation request back to the client.
 func (client *Client) replyCancel(status shipments.StatusResponse, requestedShipmentID string, cancelErr error) bool {
 	data, err := buildCancelResponse(client.username, client.role, requestedShipmentID, status, cancelErr)
 	if err != nil {
@@ -311,6 +324,7 @@ func (client *Client) replyCancel(status shipments.StatusResponse, requestedShip
 	return false
 }
 
+// writePump writes queued outbound messages and periodic pings.
 func (client *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -342,6 +356,7 @@ func (client *Client) writePump() {
 	}
 }
 
+// buildCoreEventMessage converts a core event into the WebSocket envelope.
 func buildCoreEventMessage(env corebridge.Envelope) ([]byte, error) {
 	if env.MsgType != coreEmergencyAlert {
 		return nil, fmt.Errorf("unsupported core event type %s", env.MsgType)
@@ -366,6 +381,7 @@ func buildCoreEventMessage(env corebridge.Envelope) ([]byte, error) {
 	return json.Marshal(message)
 }
 
+// buildCancelResponse formats a shipment cancellation result for the client.
 func buildCancelResponse(targetID, targetRole, requestedShipmentID string, status shipments.StatusResponse, cancelErr error) ([]byte, error) {
 	payload := CancelResponsePayload{
 		ShipmentID: requestedShipmentID,
@@ -401,6 +417,7 @@ func buildCancelResponse(targetID, targetRole, requestedShipmentID string, statu
 	return json.Marshal(message)
 }
 
+// formatTimestamp normalises timestamps for WebSocket payloads.
 func formatTimestamp(ts time.Time) string {
 	if ts.IsZero() {
 		ts = time.Now().UTC()
@@ -409,6 +426,7 @@ func formatTimestamp(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339Nano)
 }
 
+// enqueue copies and queues one outbound message for the client.
 func (client *Client) enqueue(message []byte) (sent bool) {
 	buffered := append([]byte(nil), message...)
 	defer func() {
@@ -425,6 +443,7 @@ func (client *Client) enqueue(message []byte) (sent bool) {
 	}
 }
 
+// localString returns a string stored in the WebSocket connection locals.
 func localString(conn *websocket.Conn, key string, fallback string) string {
 	value, ok := conn.Locals(key).(string)
 	if !ok || strings.TrimSpace(value) == "" {
@@ -434,6 +453,7 @@ func localString(conn *websocket.Conn, key string, fallback string) string {
 	return value
 }
 
+// claimString returns the first non-empty claim value among the provided keys.
 func claimString(claims jwt.MapClaims, keys ...string) string {
 	for _, key := range keys {
 		value, ok := claims[key]

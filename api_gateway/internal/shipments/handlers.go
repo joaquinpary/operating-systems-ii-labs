@@ -22,6 +22,7 @@ type coreBridge interface {
 
 type publisher interface {
 	Publish(ctx context.Context, queue string, body []byte) error
+	PublishFanout(ctx context.Context, exchange string, body []byte) error
 }
 
 type shipmentTracker interface {
@@ -38,6 +39,7 @@ type Handler struct {
 	tracker   shipmentTracker
 }
 
+// NewHandler builds the HTTP shipment handler dependencies.
 func NewHandler(bridge coreBridge, publisher publisher, tracker shipmentTracker) *Handler {
 	return &Handler{
 		bridge:    bridge,
@@ -46,6 +48,7 @@ func NewHandler(bridge coreBridge, publisher publisher, tracker shipmentTracker)
 	}
 }
 
+// CreateShipment validates and enqueues a shipment creation request.
 func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 	var request ShipmentRequest
 	if err := ctx.BodyParser(&request); err != nil {
@@ -75,6 +78,7 @@ func (handler *Handler) CreateShipment(ctx *fiber.Ctx) error {
 	})
 }
 
+// Dispatch validates and enqueues a shipment dispatch request.
 func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 	var request DispatchRequest
 	if err := ctx.BodyParser(&request); err != nil {
@@ -107,10 +111,12 @@ func (handler *Handler) Dispatch(ctx *fiber.Ctx) error {
 	})
 }
 
+// GetAllStatuses returns the tracked shipments owned by the current caller.
 func (handler *Handler) GetAllStatuses(ctx *fiber.Ctx) error {
 	return ctx.Status(fiber.StatusOK).JSON(handler.tracker.SnapshotForOwner(callerUsername(ctx)))
 }
 
+// GetStatus returns the current status for one tracked shipment.
 func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 	identifier := strings.TrimSpace(ctx.Params("id"))
 	if identifier == "" {
@@ -150,6 +156,7 @@ func (handler *Handler) GetStatus(ctx *fiber.Ctx) error {
 	return ctx.Status(fiber.StatusOK).JSON(response)
 }
 
+// publish wraps a queue payload in the shipments envelope and publishes it.
 func (handler *Handler) publish(ctx context.Context, messageType string, payload any) error {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
@@ -164,9 +171,16 @@ func (handler *Handler) publish(ctx context.Context, messageType string, payload
 		return fmt.Errorf("marshal queue message: %w", err)
 	}
 
+	// create_shipment goes to the fanout exchange so every replica registers
+	// the shipment in memory. dispatch_command stays on the shared queue so
+	// only one replica processes it (competing consumers).
+	if messageType == CreateShipmentMessageType {
+		return handler.publisher.PublishFanout(ctx, ShipmentsFanoutExchange, envelopeBytes)
+	}
 	return handler.publisher.Publish(ctx, ShipmentsQueue, envelopeBytes)
 }
 
+// validateShipmentRequest checks the HTTP shipment creation payload.
 func validateShipmentRequest(request ShipmentRequest) error {
 	if len(request.Items) == 0 {
 		return errors.New("items are required")
@@ -185,6 +199,7 @@ func validateShipmentRequest(request ShipmentRequest) error {
 	return nil
 }
 
+// validateDispatchRequest checks the HTTP dispatch payload.
 func validateDispatchRequest(request DispatchRequest) error {
 	if strings.TrimSpace(request.ShipmentID) == "" {
 		return errors.New("shipment_id is required")
@@ -193,10 +208,12 @@ func validateDispatchRequest(request DispatchRequest) error {
 	return nil
 }
 
+// writeError sends a JSON error response with the provided status code.
 func writeError(ctx *fiber.Ctx, status int, message string) error {
 	return ctx.Status(status).JSON(fiber.Map{"error": message})
 }
 
+// callerUsername extracts the authenticated username from JWT claims.
 func callerUsername(ctx *fiber.Ctx) string {
 	claims, ok := ctx.Locals("user").(jwt.MapClaims)
 	if !ok {

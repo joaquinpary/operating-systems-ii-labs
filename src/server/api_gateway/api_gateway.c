@@ -1,17 +1,9 @@
-/**
- * @file api_gateway.c
- * @brief API Gateway plugin — loaded at runtime by the server via dlopen.
- *
- * Handles GATEWAY_TO_SERVER__COMMAND messages from the Go API gateway.
- * Self-contained: owns its own libpq connection so adding new gateway
- * commands never requires touching the server core.
- */
-
 #include "api_gateway_interface.h"
 #include "cJSON.h"
 
 #include <libpq-fe.h>
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +14,7 @@
 #define CMD_BUF_SIZE 64
 
 static PGconn* s_conn = NULL;
+static pthread_mutex_t s_conn_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 const char* api_gateway_version(void)
 {
@@ -53,27 +46,28 @@ void api_gateway_shutdown(void)
     }
 }
 
-/* Build a COMMAND_RESPONSE JSON string directly via cJSON.
- * Re-serialises from scratch because the helper functions
- * (generate_timestamp, generate_checksum) are static in json_manager.c. */
+/**
+ * @brief Builds a COMMAND_RESPONSE JSON payload for the gateway.
+ * @param out Destination buffer for the serialised JSON response.
+ * @param max_len Size of the destination buffer.
+ * @param req Original gateway request being answered.
+ * @param status Status string returned in the response payload.
+ * @param data Optional JSON object stored under payload.data.
+ * @return 0 on success, -1 on serialisation or allocation failure.
+ */
 static int build_response_json(char* out, size_t max_len, const message_t* req, const char* status, cJSON* data)
 {
-    /* Build a response message using the public API. */
     message_t resp;
     memset(&resp, 0, sizeof(resp));
 
-    /* Use create_acknowledgment_message just to get a properly initialised
-     * message_t with timestamp + checksum. Then overwrite msg_type and payload. */
     create_acknowledgment_message(&resp, SERVER, SERVER, req->source_role, req->source_id, req->timestamp, OK);
     strncpy(resp.msg_type, SERVER_TO_GATEWAY__COMMAND_RESPONSE, MESSAGE_TYPE_SIZE - 1);
     resp.msg_type[MESSAGE_TYPE_SIZE - 1] = '\0';
 
-    /* Serialise the envelope via the public API (gives us timestamp + checksum). */
     char envelope_buf[BUFFER_SIZE];
     if (serialize_message_to_json(&resp, envelope_buf) != 0)
         return -1;
 
-    /* Parse it, replace the payload with our custom one. */
     cJSON* root = cJSON_Parse(envelope_buf);
     if (!root)
         return -1;
@@ -95,6 +89,14 @@ static int build_response_json(char* out, size_t max_len, const message_t* req, 
     return 0;
 }
 
+/**
+ * @brief Builds an error response for a gateway command.
+ * @param out Destination buffer for the serialised JSON response.
+ * @param max_len Size of the destination buffer.
+ * @param req Original gateway request being answered.
+ * @param message Error message returned in payload.data.message.
+ * @return 0 on success, -1 on serialisation or allocation failure.
+ */
 static int build_error(char* out, size_t max_len, const message_t* req, const char* message)
 {
     cJSON* data = cJSON_CreateObject();
@@ -102,6 +104,13 @@ static int build_error(char* out, size_t max_len, const message_t* req, const ch
     return build_response_json(out, max_len, req, "error", data);
 }
 
+/**
+ * @brief Handles the gateway ping command.
+ * @param out Destination buffer for the serialised JSON response.
+ * @param max_len Size of the destination buffer.
+ * @param req Original gateway request being answered.
+ * @return 0 on success, -1 on serialisation or allocation failure.
+ */
 static int cmd_ping(char* out, size_t max_len, const message_t* req)
 {
     cJSON* data = cJSON_CreateObject();
@@ -111,13 +120,21 @@ static int cmd_ping(char* out, size_t max_len, const message_t* req)
 
 static const char* s_item_names[] = {"food", "water", "medicine", "tools", "guns", "ammo"};
 
+/**
+ * @brief Creates a shipment transaction and optional hub side-effect message.
+ * @param out Destination buffer for the serialised JSON response.
+ * @param max_len Size of the destination buffer.
+ * @param req Original gateway request being answered.
+ * @param payload Parsed request payload containing shipment items.
+ * @param side Optional side-effect populated with the dispatch message.
+ * @return 0 on success, -1 on command failure.
+ */
 static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, cJSON* payload,
                                gateway_side_effect_t* side)
 {
     if (!s_conn)
         return build_error(out, max_len, req, "database not connected");
 
-    /* Parse items from payload. */
     cJSON* items_arr = cJSON_GetObjectItemCaseSensitive(payload, "items");
     if (!cJSON_IsArray(items_arr) || cJSON_GetArraySize(items_arr) == 0)
         return build_error(out, max_len, req, "items array required");
@@ -135,7 +152,6 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
             quantities[id - 1] = qty_json->valueint;
     }
 
-    /* Find a hub with sufficient stock (random pick). */
     const char* find_sql =
         "SELECT client_id FROM client_inventory "
         "WHERE client_type = 'HUB' "
@@ -157,28 +173,28 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
     }
 
     PGresult* res = PQexecParams(s_conn, find_sql, QUANTITY_ITEMS, NULL, params, NULL, NULL, 0);
-    if (PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0)
-    {
-        PQclear(res);
-        return build_error(out, max_len, req, "no hub with sufficient stock");
-    }
+    int hub_found = (PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0);
 
-    char hub_id[ID_SIZE];
-    strncpy(hub_id, PQgetvalue(res, 0, 0), sizeof(hub_id) - 1);
-    hub_id[sizeof(hub_id) - 1] = '\0';
+    char hub_id[ID_SIZE] = {0};
+    if (hub_found)
+    {
+        strncpy(hub_id, PQgetvalue(res, 0, 0), sizeof(hub_id) - 1);
+        hub_id[sizeof(hub_id) - 1] = '\0';
+    }
     PQclear(res);
 
-    /* Create transaction: source = hub, destination = EXTERNAL_CLIENT. */
     const char* txn_sql =
         "INSERT INTO inventory_transactions "
         "(transaction_type, source_id, source_type, destination_id, destination_type, "
         " status, food, water, medicine, tools, guns, ammo) "
         "VALUES ('ORDER_DISPATCH', $1, 'HUB', 'EXTERNAL_CLIENT', 'EXTERNAL_CLIENT', "
-        " 'PENDING', $2, $3, $4, $5, $6, $7) "
+        " $8, $2, $3, $4, $5, $6, $7) "
         "RETURNING transaction_id";
 
-    const char* txn_params[7] = {hub_id, q[0], q[1], q[2], q[3], q[4], q[5]};
-    PGresult* txn_res = PQexecParams(s_conn, txn_sql, 7, NULL, txn_params, NULL, NULL, 0);
+    const char* src = hub_found ? hub_id : "";
+    const char* status = hub_found ? "ASSIGNED" : "PENDING";
+    const char* txn_params[8] = {src, q[0], q[1], q[2], q[3], q[4], q[5], status};
+    PGresult* txn_res = PQexecParams(s_conn, txn_sql, 8, NULL, txn_params, NULL, NULL, 0);
     if (PQresultStatus(txn_res) != PGRES_TUPLES_OK || PQntuples(txn_res) == 0)
     {
         PQclear(txn_res);
@@ -188,8 +204,7 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
     int transaction_id = atoi(PQgetvalue(txn_res, 0, 0));
     PQclear(txn_res);
 
-    /* Build the dispatch message for the hub (side-effect). */
-    if (side)
+    if (hub_found && side)
     {
         inventory_item_t items[QUANTITY_ITEMS];
         memset(items, 0, sizeof(items));
@@ -216,14 +231,23 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
         }
     }
 
-    /* Build success response for the gateway. */
     cJSON* data = cJSON_CreateObject();
-    cJSON_AddStringToObject(data, "dispatch_hub_id", hub_id);
+    cJSON_AddStringToObject(data, "status", hub_found ? "assigned" : "pending");
+    if (hub_found)
+        cJSON_AddStringToObject(data, "dispatch_hub_id", hub_id);
     cJSON_AddNumberToObject(data, "transaction_id", transaction_id);
 
     return build_response_json(out, max_len, req, "ok", data);
 }
 
+/**
+ * @brief Fetches the shipment status for one transaction identifier.
+ * @param out Destination buffer for the serialised JSON response.
+ * @param max_len Size of the destination buffer.
+ * @param req Original gateway request being answered.
+ * @param payload Parsed request payload containing the transaction id in args.
+ * @return 0 on success, -1 on command failure.
+ */
 static int cmd_get_shipment_status(char* out, size_t max_len, const message_t* req, cJSON* payload)
 {
     if (!s_conn)
@@ -250,7 +274,6 @@ static int cmd_get_shipment_status(char* out, size_t max_len, const message_t* r
     strncpy(db_status, PQgetvalue(res, 0, 0), sizeof(db_status) - 1);
     PQclear(res);
 
-    /* Convert DB status to lowercase for consistency with the Go layer. */
     for (int i = 0; db_status[i]; i++)
         db_status[i] = (char)tolower((unsigned char)db_status[i]);
 
@@ -267,7 +290,6 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
     if (deserialize_message_from_json(raw_json, &req) != 0)
         return -1;
 
-    /* Extract command and keep payload around for command handlers. */
     cJSON* root = cJSON_Parse(raw_json);
     if (!root)
         return -1;
@@ -282,6 +304,8 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
         cmd[CMD_BUF_SIZE - 1] = '\0';
     }
 
+    pthread_mutex_lock(&s_conn_mutex);
+
     int rc;
     if (strcmp(cmd, "ping") == 0)
         rc = cmd_ping(resp_json, max_len, &req);
@@ -291,6 +315,8 @@ int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
         rc = cmd_get_shipment_status(resp_json, max_len, &req, payload);
     else
         rc = build_error(resp_json, max_len, &req, "unknown command");
+
+    pthread_mutex_unlock(&s_conn_mutex);
 
     cJSON_Delete(root);
     return rc;

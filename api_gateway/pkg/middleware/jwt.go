@@ -12,14 +12,17 @@ type JWTMiddleware struct {
 	secret string
 }
 
+// NewJWTMiddleware builds the JWT authentication middleware.
 func NewJWTMiddleware(secret string) JWTMiddleware {
 	return JWTMiddleware{secret: secret}
 }
 
+// Enabled reports whether JWT validation is configured.
 func (middleware JWTMiddleware) Enabled() bool {
 	return middleware.secret != ""
 }
 
+// Handler validates bearer tokens and stores claims in the Fiber context.
 func (middleware JWTMiddleware) Handler() fiber.Handler {
 	return func(ctx *fiber.Ctx) error {
 		if !middleware.Enabled() {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/gofiber/adaptor/v2"
 	ws "github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/hudl/fargo"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -32,9 +32,10 @@ import (
 )
 
 const emergencyAlertMsgType corebridge.MsgType = "SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT"
+const orderDispatchedMsgType corebridge.MsgType = "SERVER_TO_GATEWAY__ORDER_DISPATCHED"
 
+// main configures the API gateway process and starts its background services.
 func main() {
-	// --- Log to both stdout and file ---
 	logDir := strings.TrimSpace(os.Getenv("LOG_DIR"))
 	if logDir == "" {
 		logDir = filepath.Join("logs", "server")
@@ -48,7 +49,7 @@ func main() {
 		log.Fatalf("open log file: %v", err)
 	}
 	defer logFile.Close()
-	log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+	log.SetOutput(logFile)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
 
 	cfg, err := config.Load()
@@ -59,7 +60,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// --- TCP connection pool (N authenticated connections) ---
 	pool := corebridge.NewPool(corebridge.PoolConfig{
 		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
@@ -74,14 +74,12 @@ func main() {
 	}
 	defer pool.Close()
 
-	// --- RabbitMQ ---
 	rabbitConnection, err := rabbitmq.Connect(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("connect rabbitmq: %v", err)
 	}
 	defer rabbitConnection.Close()
 
-	// --- Application components ---
 	dispatcherWorker := dispatcher.New(pool, rabbitConnection, cfg.CorePoolSize)
 	shipmentHandler := shipments.NewHandler(pool, rabbitConnection, dispatcherWorker)
 	chatHub := chat.NewHub(cfg.JWTSecret, log.Default(), dispatcherWorker)
@@ -93,7 +91,6 @@ func main() {
 		log.Fatalf("auth handler: %v", err)
 	}
 
-	// --- Event listener (authenticates LAST → reverse-map in C++) ---
 	listener := corebridge.NewListener(corebridge.ListenerConfig{
 		Addr:         cfg.CoreAddress(),
 		SourceID:     cfg.CoreSourceID,
@@ -111,6 +108,12 @@ func main() {
 		if env.MsgType == emergencyAlertMsgType {
 			chatHub.BroadcastCoreEvent(env)
 		}
+		if env.MsgType == orderDispatchedMsgType {
+			transactionID := strings.TrimSpace(env.Payload.Args)
+			if transactionID != "" {
+				dispatcherWorker.MarkDispatched(transactionID)
+			}
+		}
 	})
 
 	if err := listener.Start(ctx); err != nil {
@@ -118,35 +121,46 @@ func main() {
 	}
 	defer listener.Close()
 
-	// --- Middlewares ---
 	jwtMiddleware := middleware.NewJWTMiddleware(cfg.JWTSecret)
 	metricsMiddleware := middleware.NewMetricsMiddleware()
 	tracingMiddleware := middleware.NewTracingMiddleware()
-	rateLimiter := middleware.NewRateLimiter(60, time.Minute)
+	rateLimiter := middleware.NewRateLimiter(600, time.Minute)
 	defer rateLimiter.Close()
 
-	// --- Eureka service registration ---
 	if cfg.EurekaEnabled {
 		go registerEureka(ctx, cfg)
 	}
 
-	// --- Fiber HTTP server ---
 	app := fiber.New(fiber.Config{AppName: "lora-chads-api-gateway"})
 	app.Use(metricsMiddleware.Handler())
 	app.Use(tracingMiddleware.Handler())
-	app.Use(rateLimiter.Handler())
-	app.Get("/metrics", adaptor.HTTPHandler(promhttp.Handler()))
-	app.Post("/login", authHandler.Login)
-	app.Get("/ws/chat", chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
 
-	protected := app.Group("", jwtMiddleware.Handler())
+	// Health check — always available, no middleware
+	app.Get("/health", func(ctx *fiber.Ctx) error {
+		return ctx.SendStatus(fiber.StatusOK)
+	})
+
+	// Public routes — rate-limited by client IP
+	app.Get("/metrics", rateLimiter.Handler(), adaptor.HTTPHandler(promhttp.Handler()))
+	app.Post("/login", rateLimiter.Handler(), authHandler.Login)
+	app.Get("/ws/chat", rateLimiter.Handler(), chatHub.HandleUpgrade, ws.New(chatHub.HandleWS))
+
+	// Protected routes — rate-limited by JWT username (falls back to IP)
+	userKeyFunc := middleware.KeyFunc(func(ctx *fiber.Ctx) string {
+		if claims, ok := ctx.Locals("user").(jwt.MapClaims); ok {
+			if sub, ok := claims["sub"].(string); ok {
+				return sub
+			}
+		}
+		return ""
+	})
+	protected := app.Group("", jwtMiddleware.Handler(), rateLimiter.Handler(userKeyFunc))
 	protected.Post("/shipments", shipmentHandler.CreateShipment)
 	protected.Post("/dispatch", shipmentHandler.Dispatch)
 	protected.Get("/status", shipmentHandler.GetAllStatuses)
 	protected.Get("/status/:id", shipmentHandler.GetStatus)
 	protected.Post("/predict", predictorHandler.HandlePredict)
 
-	// --- Background workers ---
 	go func() {
 		<-ctx.Done()
 		log.Printf("shutdown signal received")
@@ -216,7 +230,6 @@ func registerEureka(ctx context.Context, cfg config.Config) {
 
 	conn := fargo.NewConn(cfg.EurekaURL)
 
-	// Retry registration with backoff (Eureka may not be ready yet).
 	backoff := time.Second
 	for {
 		if err := conn.RegisterInstance(instance); err != nil {
@@ -235,7 +248,6 @@ func registerEureka(ctx context.Context, cfg config.Config) {
 		break
 	}
 
-	// Heartbeat loop — Eureka expects a beat every 30s (default lease).
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
 

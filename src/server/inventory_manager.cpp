@@ -193,14 +193,15 @@ int inventory_manager::handle_receipt_confirmation(const message_t& msg)
     }
 }
 
-int inventory_manager::handle_dispatch_confirmation(const message_t& msg)
+int inventory_manager::handle_dispatch_confirmation(const message_t& msg, int& out_transaction_id)
 {
+    out_transaction_id = -1;
     try
     {
         auto guard = m_pool.acquire();
         pqxx::work txn(guard.get());
 
-        int transaction_id = ::find_transaction_id(txn, std::string(msg.source_id), "", "PENDING");
+        int transaction_id = ::find_transaction_id(txn, std::string(msg.source_id), "", "ASSIGNED");
 
         if (transaction_id < 0)
         {
@@ -223,6 +224,7 @@ int inventory_manager::handle_dispatch_confirmation(const message_t& msg)
         mark_transaction_dispatched(txn, transaction_id, msg.timestamp);
 
         txn.commit();
+        out_transaction_id = transaction_id;
         return 0;
     }
     catch (const std::exception& ex)
@@ -339,6 +341,10 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
 
         for (int i = 0; i < count; i++)
         {
+            // Only process STOCK_REQUEST; gateway orders (ORDER_DISPATCH) are handled by HUBs.
+            if (pending[i].transaction_type == "ORDER_DISPATCH")
+                continue;
+
             int quantities[QUANTITY_ITEMS] = {pending[i].food,  pending[i].water, pending[i].medicine,
                                               pending[i].tools, pending[i].guns,  pending[i].ammo};
 
@@ -388,6 +394,91 @@ std::vector<stock_request_result> inventory_manager::process_pending_orders(cons
     catch (const std::exception& ex)
     {
         std::cerr << "[INVENTORY_MANAGER] process_pending_orders error: " << ex.what() << std::endl;
+    }
+
+    return fulfilled;
+}
+
+std::vector<stock_request_result> inventory_manager::process_pending_gateway_orders(const std::string& hub_id)
+{
+    std::vector<stock_request_result> fulfilled;
+
+    try
+    {
+        auto guard = m_pool.acquire();
+        pqxx::work txn(guard.get());
+
+        int stock[QUANTITY_ITEMS] = {0};
+        if (get_client_inventory(txn, hub_id, "HUB", stock) != 0)
+        {
+            return fulfilled;
+        }
+
+        transaction_record pending[MAX_PENDING_TRANSACTIONS];
+        int count = get_pending_transactions(txn, pending, MAX_PENDING_TRANSACTIONS);
+
+        if (count == 0)
+        {
+            return fulfilled;
+        }
+
+        const char* item_names[QUANTITY_ITEMS] = {"food", "water", "medicine", "tools", "guns", "ammo"};
+
+        for (int i = 0; i < count; i++)
+        {
+            if (pending[i].transaction_type != "ORDER_DISPATCH")
+                continue;
+
+            int quantities[QUANTITY_ITEMS] = {pending[i].food,  pending[i].water, pending[i].medicine,
+                                              pending[i].tools, pending[i].guns,  pending[i].ammo};
+
+            bool can_fulfill = true;
+            for (int j = 0; j < QUANTITY_ITEMS; j++)
+            {
+                if (quantities[j] > stock[j])
+                {
+                    can_fulfill = false;
+                    break;
+                }
+            }
+
+            if (can_fulfill)
+            {
+                set_transaction_source(txn, pending[i].transaction_id, hub_id, "HUB");
+                mark_transaction_assigned(txn, pending[i].transaction_id);
+
+                for (int j = 0; j < QUANTITY_ITEMS; j++)
+                    stock[j] -= quantities[j];
+
+                stock_request_result result;
+                result.transaction_id = pending[i].transaction_id;
+                result.success = true;
+                result.warehouse_assigned = false;
+                result.assigned_warehouse_id = hub_id;
+                result.requesting_hub_id = hub_id;
+
+                result.item_count = 0;
+                for (int j = 0; j < QUANTITY_ITEMS; j++)
+                {
+                    if (quantities[j] > 0)
+                    {
+                        result.items[result.item_count].item_id = j + 1;
+                        strncpy(result.items[result.item_count].item_name, item_names[j],
+                                sizeof(result.items[result.item_count].item_name) - 1);
+                        result.items[result.item_count].quantity = quantities[j];
+                        result.item_count++;
+                    }
+                }
+
+                fulfilled.push_back(result);
+            }
+        }
+
+        txn.commit();
+    }
+    catch (const std::exception& ex)
+    {
+        std::cerr << "[INVENTORY_MANAGER] process_pending_gateway_orders error: " << ex.what() << std::endl;
     }
 
     return fulfilled;
