@@ -23,22 +23,24 @@ void route_manager_update(const char *stops[], int count)
 {
 	k_mutex_lock(&route_lock, K_FOREVER);
 
-	if (count > CONFIG_DHL_ROUTE_MAX_STOPS) {
-		count = CONFIG_DHL_ROUTE_MAX_STOPS;
-	}
+	int space = CONFIG_DHL_ROUTE_MAX_STOPS - state.count;
 
-	memset(&state, 0, sizeof(state));
+	if (count > space) {
+		LOG_WRN("Route append: %d stop(s) requested, only %d slot(s) free; clamping",
+			count, space);
+		count = space;
+	}
 
 	for (int i = 0; i < count; i++) {
-		strncpy(state.stops[i], stops[i], CONFIG_DHL_ROUTE_STOP_NAME_MAX - 1);
-		state.stops[i][CONFIG_DHL_ROUTE_STOP_NAME_MAX - 1] = '\0';
+		strncpy(state.stops[state.count + i], stops[i],
+			CONFIG_DHL_ROUTE_STOP_NAME_MAX - 1);
+		state.stops[state.count + i][CONFIG_DHL_ROUTE_STOP_NAME_MAX - 1] = '\0';
 	}
 
-	state.count = count;
-	state.current_index = 0;
+	state.count += count;
 
-	LOG_INF("Route updated: %d stop(s), first=\"%s\"",
-		count, count > 0 ? state.stops[0] : "(none)");
+	LOG_INF("Route append: +%d stop(s), total=%d, current=%d/%d",
+		count, state.count, state.current_index + 1, state.count);
 
 	k_mutex_unlock(&route_lock);
 }
