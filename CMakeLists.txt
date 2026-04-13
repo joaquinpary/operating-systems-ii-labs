@@ -60,6 +60,7 @@ if(BUILD_TARGET STREQUAL "server")
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+    pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
@@ -114,6 +115,7 @@ if(BUILD_TARGET STREQUAL "server")
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
     target_link_libraries(${TARGET_EXEC} PkgConfig::MONGOC)
+    target_link_libraries(${TARGET_EXEC} PkgConfig::MOSQUITTO)
     set_target_properties(${TARGET_EXEC} PROPERTIES
         BUILD_RPATH  "${CMAKE_BINARY_DIR}"
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"

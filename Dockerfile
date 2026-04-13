@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     libomp-dev \
     libmongoc-dev \
     libbson-dev \
+    libmosquitto-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -51,6 +52,7 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libmongoc-1.0-0t64 \
     libbson-1.0-0t64 \
+    libmosquitto0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
