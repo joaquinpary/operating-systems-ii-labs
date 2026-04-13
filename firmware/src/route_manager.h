@@ -17,10 +17,14 @@ struct route_state {
 void route_manager_init(void);
 
 /**
- * @brief Replace the current route with a new list of stops.
+ * @brief Append stops to the current route.
+ *
+ * New stops are added after the last existing stop without resetting the
+ * current position. To reset, publish an empty array ([]) which calls
+ * route_manager_clear() internally.
  *
  * @param stops  Array of stop name pointers.
- * @param count  Number of stops (clamped to CONFIG_DHL_ROUTE_MAX_STOPS).
+ * @param count  Number of stops to append (clamped to remaining free slots).
  */
 void route_manager_update(const char *stops[], int count);
 
@@ -32,6 +36,13 @@ void route_manager_update(const char *stops[], int count);
 const char *get_current_stop(void);
 
 /**
+ * @brief Get the zero-based index of the current stop.
+ *
+ * @return Index of the active stop, or -1 if the route is empty/exhausted.
+ */
+int get_current_stop_index(void);
+
+/**
  * @brief Return the total number of stops in the loaded route.
  */
 int get_stop_count(void);
@@ -39,7 +50,7 @@ int get_stop_count(void);
 /**
  * @brief Advance to the next stop.
  *
- * @return 0 on success, -1 if already at the last stop or route is empty.
+ * @return 0 on success, -1 if the route is empty or already exhausted.
  */
 int advance_stop(void);
 

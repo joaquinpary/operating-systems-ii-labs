@@ -36,6 +36,15 @@ config DHL_MQTT_RECONNECT_DELAY
 	range 1 300
 	default 5
 
+config DHL_UI_QT
+	bool "Enable Qt desktop UI for local simulation"
+	depends on BOARD_NATIVE_POSIX || BOARD_NATIVE_POSIX_64 || BOARD_NATIVE_SIM
+	default y
+	help
+	  Build the desktop UI implementation used for local simulation on the
+	  host machine. Real boards keep using the UI bridge API but compile the
+	  stub implementation until an LVGL backend is added.
+
 if WIFI
 
 config DHL_WIFI_SSID

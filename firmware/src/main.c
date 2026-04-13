@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -12,6 +13,7 @@
 #include <zephyr/net/net_mgmt.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/posix/poll.h>
+#include <zephyr/net/sntp.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/reboot.h>
 
@@ -22,19 +24,26 @@
 #include "gps_telemetry.h"
 #include "provisioning.h"
 #include "route_manager.h"
+#include "ui_bridge.h"
 
 LOG_MODULE_REGISTER(dhl_courier, LOG_LEVEL_INF);
 
 #define MQTT_BUFFER_SIZE 1024
 #define MQTT_CONNECT_TIMEOUT_MS 5000
 #define MQTT_POLL_SLICE_MS 1000
-#define MQTT_HEARTBEAT_INTERVAL_MS 30000
 #define WIFI_CONNECT_RETRIES 3
 #define WIFI_CONNECT_TIMEOUT_S 30
 #define NET_L4_EVENT_MASK (NET_EVENT_L4_CONNECTED | NET_EVENT_L4_DISCONNECTED)
 
 /* Topic prefix for route assignments from the backend */
 #define ROUTE_TOPIC_PREFIX "routes/"
+#define ALERTS_SOS_TOPIC_PREFIX "alerts/sos/"
+#define DELIVERED_TOPIC_PREFIX "delivered/"
+#define MQTT_TOPIC_SIZE 96
+#define MQTT_PAYLOAD_SIZE 192
+#define MQTT_TIMESTAMP_SIZE 32
+#define MQTT_COORDINATE_SIZE 16
+#define UI_SLEEP_SLICE_MS 100
 
 /* Next MQTT message id for subscribe / QoS-1 ack (wraps at UINT16_MAX) */
 static uint16_t next_msg_id = 1U;
@@ -83,6 +92,171 @@ static int wait_on_socket(int timeout_ms)
 	}
 
 	return poll(mqtt_fds, mqtt_nfds, timeout_ms);
+}
+
+static void format_coordinate(char *buf, size_t size, int32_t microdegrees)
+{
+	int64_t absolute_value = (microdegrees < 0) ? -(int64_t)microdegrees : (int64_t)microdegrees;
+	int64_t integer_part = absolute_value / 1000000LL;
+	int64_t fractional_part = absolute_value % 1000000LL;
+
+	snprintf(buf, size, "%s%lld.%06lld",
+		 microdegrees < 0 ? "-" : "",
+		 (long long)integer_part,
+		 (long long)fractional_part);
+}
+
+static void refresh_ui_stop(void)
+{
+	int current_index = get_current_stop_index();
+	int display_position = current_index >= 0 ? current_index + 1 : 0;
+
+	ui_update_stop(get_current_stop(), display_position, get_stop_count());
+}
+
+static void ui_pump_sleep(int32_t duration_ms)
+{
+	while (duration_ms > 0) {
+		int32_t slice_ms = duration_ms > UI_SLEEP_SLICE_MS ?
+			UI_SLEEP_SLICE_MS : duration_ms;
+
+		ui_process();
+		k_msleep(slice_ms);
+		duration_ms -= slice_ms;
+	}
+}
+
+static int publish_json(struct mqtt_client *client,
+			 const char *topic,
+			 const char *payload)
+{
+	struct mqtt_publish_param param = {
+		.message = {
+			.topic = {
+				.topic = {
+					.utf8 = (const uint8_t *)topic,
+					.size = strlen(topic)
+				},
+				.qos = MQTT_QOS_0_AT_MOST_ONCE
+			},
+			.payload = {
+				.data = (uint8_t *)payload,
+				.len = strlen(payload)
+			}
+		},
+		.message_id = 0,
+		.dup_flag = 0U,
+		.retain_flag = 0U
+	};
+
+	return mqtt_publish(client, &param);
+}
+
+static int publish_employee_event(const char *topic_prefix, const char *payload)
+{
+	char topic[MQTT_TOPIC_SIZE];
+	int rc;
+
+	if (!mqtt_connected) {
+		return -ENOTCONN;
+	}
+
+	rc = snprintf(topic, sizeof(topic), "%s%s", topic_prefix, g_prov.employee_id);
+	if (rc < 0 || rc >= sizeof(topic)) {
+		return -EMSGSIZE;
+	}
+
+	return publish_json(&client_ctx, topic, payload);
+}
+
+static int build_iso8601_utc(char *buf, size_t size)
+{
+	time_t now = time(NULL);
+	struct tm utc_now;
+
+	if (now == (time_t)-1) {
+		return -EINVAL;
+	}
+
+	if (gmtime_r(&now, &utc_now) == NULL) {
+		return -EINVAL;
+	}
+
+	if (strftime(buf, size, "%Y-%m-%dT%H:%M:%SZ", &utc_now) == 0U) {
+		return -EMSGSIZE;
+	}
+
+	return 0;
+}
+
+static void on_sos_pressed(void)
+{
+	int32_t lat_microdegrees;
+	int32_t lng_microdegrees;
+	char latitude[MQTT_COORDINATE_SIZE];
+	char longitude[MQTT_COORDINATE_SIZE];
+	char timestamp[MQTT_TIMESTAMP_SIZE];
+	char payload[MQTT_PAYLOAD_SIZE];
+	int rc;
+
+	gps_telemetry_get_position(&lat_microdegrees, &lng_microdegrees);
+	format_coordinate(latitude, sizeof(latitude), lat_microdegrees);
+	format_coordinate(longitude, sizeof(longitude), lng_microdegrees);
+
+	rc = build_iso8601_utc(timestamp, sizeof(timestamp));
+	if (rc != 0) {
+		LOG_WRN("Unable to build SOS timestamp (%d)", rc);
+		return;
+	}
+
+	rc = snprintf(payload, sizeof(payload),
+		      "{\"time\":\"%s\",\"coordinates\":{\"lat\":%s,\"lon\":%s}}",
+		      timestamp, latitude, longitude);
+	if (rc < 0 || rc >= sizeof(payload)) {
+		LOG_WRN("SOS payload too large");
+		return;
+	}
+
+	rc = publish_employee_event(ALERTS_SOS_TOPIC_PREFIX, payload);
+	if (rc != 0) {
+		LOG_WRN("Failed to publish SOS alert (%d)", rc);
+		return;
+	}
+
+	LOG_INF("SOS alert published for %s", g_prov.employee_id);
+}
+
+static void on_delivered_pressed(void)
+{
+	const char *current_stop = get_current_stop();
+	char payload[MQTT_PAYLOAD_SIZE];
+	int rc;
+
+	if (current_stop == NULL) {
+		LOG_WRN("Delivered pressed without an active stop");
+		return;
+	}
+
+	rc = snprintf(payload, sizeof(payload),
+		      "{\"stop\":\"%s\",\"status\":\"done\"}",
+		      current_stop);
+	if (rc < 0 || rc >= sizeof(payload)) {
+		LOG_WRN("Delivered payload too large");
+		return;
+	}
+
+	rc = publish_employee_event(DELIVERED_TOPIC_PREFIX, payload);
+	if (rc != 0) {
+		LOG_WRN("Failed to publish delivery confirmation (%d)", rc);
+		return;
+	}
+
+	if (advance_stop() != 0) {
+		LOG_WRN("Unable to advance route after delivery confirmation");
+	}
+
+	refresh_ui_stop();
+	LOG_INF("Delivery confirmation published for \"%s\"", current_stop);
 }
 
 static int broker_init(struct sockaddr_storage *broker_addr)
@@ -209,6 +383,8 @@ static int handle_publish(struct mqtt_client *client,
 		rc = route_manager_parse_json((const char *)payload, received);
 		if (rc != 0) {
 			LOG_WRN("Route JSON rejected (%d)", rc);
+		} else {
+			refresh_ui_stop();
 		}
 	} else {
 		LOG_DBG("Unhandled topic: %.*s",
@@ -312,6 +488,8 @@ static int mqtt_connect_and_wait(struct mqtt_client *client)
 	prepare_fds(client);
 
 	while (!mqtt_connected && k_uptime_get() < deadline) {
+		ui_process();
+
 		rc = wait_on_socket(MQTT_POLL_SLICE_MS);
 		if (rc < 0) {
 			LOG_ERR("poll failed (%d)", errno);
@@ -343,48 +521,33 @@ static int mqtt_connect_and_wait(struct mqtt_client *client)
 	return 0;
 }
 
-static int publish_heartbeat(struct mqtt_client *client, const char *employee_id)
+static void sync_time_sntp(void)
 {
-	char topic[64];
-	char payload[64];
+	struct sntp_time sntp_ts;
+	struct timespec ts;
+	int rc;
 
-	snprintf(topic, sizeof(topic), "couriers/%s/status", employee_id);
-	snprintf(payload, sizeof(payload), "{\"status\":\"online\",\"uptime\":%lld}",
-		 (long long)(k_uptime_get() / 1000));
+	rc = sntp_simple("pool.ntp.org", 5000, &sntp_ts);
+	if (rc != 0) {
+		LOG_WRN("SNTP sync failed (%d) - timestamps may be inaccurate", rc);
+		return;
+	}
 
-	struct mqtt_publish_param param = {
-		.message = {
-			.topic = {
-				.topic = {
-					.utf8 = (const uint8_t *)topic,
-					.size = strlen(topic)
-				},
-				.qos = MQTT_QOS_0_AT_MOST_ONCE
-			},
-			.payload = {
-				.data = (uint8_t *)payload,
-				.len = strlen(payload)
-			}
-		},
-		.message_id = 0,
-		.dup_flag = 0U,
-		.retain_flag = 0U
-	};
+	ts.tv_sec = (time_t)sntp_ts.seconds;
+	ts.tv_nsec = 0;
 
-	return mqtt_publish(client, &param);
+	if (clock_settime(CLOCK_REALTIME, &ts) != 0) {
+		LOG_WRN("clock_settime failed");
+		return;
+	}
+
+	LOG_INF("Time synced via SNTP");
 }
 
 static int mqtt_run(struct mqtt_client *client, const char *employee_id)
 {
 	int rc;
 	int timeout_ms;
-	int64_t last_heartbeat = k_uptime_get();
-
-	/* Publish immediately on connect to confirm broker linkup */
-	rc = publish_heartbeat(client, employee_id);
-	if (rc != 0) {
-		LOG_WRN("Initial heartbeat publish failed (%d)", rc);
-	}
 
 	while (mqtt_connected) {
 		timeout_ms = mqtt_keepalive_time_left(client);
@@ -420,19 +583,12 @@ static int mqtt_run(struct mqtt_client *client, const char *employee_id)
 			}
 		}
 
-		/* Periodic heartbeat */
-		if (k_uptime_get() - last_heartbeat >= MQTT_HEARTBEAT_INTERVAL_MS) {
-			rc = publish_heartbeat(client, employee_id);
-			if (rc != 0) {
-				LOG_WRN("Heartbeat publish failed (%d)", rc);
-			}
-			last_heartbeat = k_uptime_get();
-		}
-
 		rc = gps_telemetry_publish(client, employee_id);
 		if (rc != 0 && rc != -EAGAIN) {
 			LOG_WRN("GPS telemetry publish failed (%d)", rc);
 		}
+
+		ui_process();
 	}
 
 	return 0;
@@ -580,12 +736,19 @@ static int wifi_connect(const struct prov_config *prov)
 
 static void wait_for_network(void)
 {
+	int64_t last_log_ms = 0;
+
 	while (!network_ready) {
-		if (k_sem_take(&network_ready_sem, K_SECONDS(1)) == 0) {
+		ui_process();
+
+		if (k_sem_take(&network_ready_sem, K_MSEC(UI_SLEEP_SLICE_MS)) == 0) {
 			break;
 		}
 
-		LOG_INF("Waiting for network connectivity...");
+		if (k_uptime_get() - last_log_ms >= 1000) {
+			LOG_INF("Waiting for network connectivity...");
+			last_log_ms = k_uptime_get();
+		}
 	}
 }
 
@@ -606,24 +769,30 @@ int main(void)
 	settings_load();
 	gps_telemetry_init();
 	route_manager_init();
+	rc = prov_load(&g_prov);
+	if (rc != 0) {
+		LOG_ERR("No provisioning available – set CONFIG_DHL_EMPLOYEE_ID and Wi-Fi creds when needed");
+		ui_shutdown();
+		return rc;
+	}
+
+	ui_init();
+	ui_register_sos_callback(on_sos_pressed);
+	ui_register_delivered_callback(on_delivered_pressed);
+	refresh_ui_stop();
 
 	iface = net_if_get_default();
 	if (iface == NULL) {
 		LOG_ERR("No network interface available");
+		ui_shutdown();
 		return -ENODEV;
 	}
 
 	net_mgmt_init_event_callback(&net_l4_cb, net_l4_event_handler, NET_L4_EVENT_MASK);
 	net_mgmt_add_event_callback(&net_l4_cb);
 
-#if defined(CONFIG_WIFI)
-	/* ── Provisioning ─────────────────────────────────────────────────── */
-	rc = prov_load(&g_prov);
-	if (rc != 0) {
-		LOG_ERR("No credentials available – set CONFIG_DHL_WIFI_SSID in prj.conf");
-		return rc;
-	}
 
+#if defined(CONFIG_WIFI)
 	/* ── Connect to the saved Wi-Fi network ───────────────────────────── */
 	rc = wifi_connect(&g_prov);
 	if (rc != 0) {
@@ -635,10 +804,19 @@ int main(void)
 	}
 #endif
 
+
+#if defined(CONFIG_WIFI)
 	conn_mgr_mon_resend_status();
 	wait_for_network();
+#else
+	/* On native_sim the host network stack is always available;
+	 * there is no Wi-Fi association event to await. */
+	network_ready = true;
+#endif
 
 	LOG_INF("Courier %s starting MQTT bootstrap", g_prov.employee_id);
+
+	sync_time_sntp();
 
 	while (1) {
 		if (!network_ready) {
@@ -649,7 +827,7 @@ int main(void)
 		if (rc != 0) {
 			LOG_WRN("MQTT connect attempt failed (%d), retrying in %d seconds",
 				rc, CONFIG_DHL_MQTT_RECONNECT_DELAY);
-			k_sleep(K_SECONDS(CONFIG_DHL_MQTT_RECONNECT_DELAY));
+			ui_pump_sleep(CONFIG_DHL_MQTT_RECONNECT_DELAY * MSEC_PER_SEC);
 			continue;
 		}
 
@@ -663,8 +841,9 @@ int main(void)
 		mqtt_disconnect(&client_ctx, NULL);
 		mqtt_abort(&client_ctx);
 		clear_fds();
-		k_sleep(K_SECONDS(CONFIG_DHL_MQTT_RECONNECT_DELAY));
+		ui_pump_sleep(CONFIG_DHL_MQTT_RECONNECT_DELAY * MSEC_PER_SEC);
 	}
 
+	ui_shutdown();
 	return 0;
 }

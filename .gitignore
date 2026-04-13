@@ -35,6 +35,7 @@
 # Directories
 build/
 firmware/build/
+firmware/external/
 external/
 .github/prompts/
 .vscode/
