@@ -2,6 +2,7 @@
 #define MQTT_CLIENT_HPP
 
 #include "config.hpp"
+#include "connection_pool.hpp"
 #include "event_loop.hpp"
 #include <chrono>
 #include <cstdint>
@@ -34,7 +35,7 @@ struct courier_info
 class mqtt_client
 {
   public:
-    mqtt_client(const config::server_config& cfg, event_loop& loop);
+    mqtt_client(const config::server_config& cfg, event_loop& loop, std::shared_ptr<connection_pool> db_pool);
     ~mqtt_client();
 
     mqtt_client(const mqtt_client&) = delete;
@@ -79,6 +80,8 @@ class mqtt_client
 
     /// Topic-specific handlers.
     void handle_tracking(const std::string& employee_id, const std::string& payload);
+    void handle_delivered(const std::string& employee_id, const std::string& payload);
+    void handle_sos(const std::string& employee_id, const std::string& payload);
 
     struct mosquitto* m_mosq = nullptr;
     event_loop& m_loop;
@@ -92,6 +95,9 @@ class mqtt_client
 
     /// Round-robin index for courier assignment.
     std::size_t m_rr_index = 0;
+
+    /// Small DB connection pool for delivered confirmations.
+    std::shared_ptr<connection_pool> m_db_pool;
 };
 
 #endif // MQTT_CLIENT_HPP

@@ -1,5 +1,8 @@
 #include "mqtt_client.hpp"
 
+#include "database.hpp"
+#include <algorithm>
+#include <cJSON.h>
 #include <common/logger.h>
 #include <cstring>
 #include <iostream>
@@ -36,8 +39,8 @@ void mqtt_client::on_message_cb(struct mosquitto* /*mosq*/, void* userdata, cons
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-mqtt_client::mqtt_client(const config::server_config& cfg, event_loop& loop)
-    : m_loop(loop), m_host(cfg.mqtt_broker_host), m_port(cfg.mqtt_broker_port)
+mqtt_client::mqtt_client(const config::server_config& cfg, event_loop& loop, std::shared_ptr<connection_pool> db_pool)
+    : m_loop(loop), m_host(cfg.mqtt_broker_host), m_port(cfg.mqtt_broker_port), m_db_pool(std::move(db_pool))
 {
     m_mosq = mosquitto_new("dhl_server", true, this);
     if (!m_mosq)
@@ -237,10 +240,15 @@ void mqtt_client::handle_message(const std::string& topic, const std::string& pa
         std::string employee_id = topic.substr(9); // len("tracking/") == 9
         handle_tracking(employee_id, payload);
     }
-    else if (topic.rfind("delivered/", 0) == 0 || topic.rfind("alerts/sos/", 0) == 0)
+    else if (topic.rfind("delivered/", 0) == 0)
     {
-        // Handled in Stint 4.
-        std::cout << "[MQTT] msg topic=" << topic << " payload=" << payload << '\n';
+        std::string employee_id = topic.substr(10); // len("delivered/") == 10
+        handle_delivered(employee_id, payload);
+    }
+    else if (topic.rfind("alerts/sos/", 0) == 0)
+    {
+        std::string employee_id = topic.substr(11); // len("alerts/sos/") == 11
+        handle_sos(employee_id, payload);
     }
 }
 
@@ -293,4 +301,120 @@ int mqtt_client::assign_route(int transaction_id)
     publish(topic, json, 1);
 
     return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Delivered handler
+// ---------------------------------------------------------------------------
+
+void mqtt_client::handle_delivered(const std::string& employee_id, const std::string& payload)
+{
+    // Parse: {"stop": "Mercado Norte 54", "status": "done"}
+    cJSON* json = cJSON_Parse(payload.c_str());
+    if (!json)
+    {
+        LOG_ERROR_MSG("[MQTT] delivered: invalid JSON from courier=%s", employee_id.c_str());
+        return;
+    }
+
+    cJSON* stop_field = cJSON_GetObjectItemCaseSensitive(json, "stop");
+    if (!stop_field || !cJSON_IsString(stop_field))
+    {
+        LOG_ERROR_MSG("[MQTT] delivered: missing 'stop' field from courier=%s", employee_id.c_str());
+        cJSON_Delete(json);
+        return;
+    }
+
+    std::string stop_str(stop_field->valuestring);
+    cJSON_Delete(json);
+
+    // Extract transaction_id from the trailing number: "Mercado Norte 54" → 54
+    int transaction_id = -1;
+    auto last_space = stop_str.rfind(' ');
+    if (last_space != std::string::npos)
+    {
+        try
+        {
+            transaction_id = std::stoi(stop_str.substr(last_space + 1));
+        }
+        catch (...)
+        {
+            LOG_ERROR_MSG("[MQTT] delivered: cannot parse txn_id from stop=\"%s\"", stop_str.c_str());
+            return;
+        }
+    }
+
+    if (transaction_id < 0)
+    {
+        LOG_ERROR_MSG("[MQTT] delivered: invalid txn_id from stop=\"%s\"", stop_str.c_str());
+        return;
+    }
+
+    // Mark transaction as COMPLETED in DB.
+    try
+    {
+        auto guard = m_db_pool->acquire();
+        // Use current UTC time as reception timestamp.
+        auto now = std::chrono::system_clock::now();
+        auto tt = std::chrono::system_clock::to_time_t(now);
+        char ts_buf[32];
+        std::strftime(ts_buf, sizeof(ts_buf), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&tt));
+
+        complete_transaction(guard.get(), transaction_id, std::string(ts_buf));
+
+        LOG_INFO_MSG("[MQTT] delivered: txn=%d completed, courier=%s stop=\"%s\"", transaction_id,
+                     employee_id.c_str(), stop_str.c_str());
+        std::cout << "[MQTT] delivered: txn=" << transaction_id << " completed, courier=" << employee_id << '\n';
+    }
+    catch (const std::exception& ex)
+    {
+        LOG_ERROR_MSG("[MQTT] delivered: DB error txn=%d: %s", transaction_id, ex.what());
+        std::cerr << "[MQTT] delivered: DB error txn=" << transaction_id << ": " << ex.what() << '\n';
+    }
+
+    // Remove the stop from the courier's pending list.
+    auto cit = m_couriers.find(employee_id);
+    if (cit != m_couriers.end())
+    {
+        auto& stops = cit->second.pending_stops;
+        stops.erase(std::remove(stops.begin(), stops.end(), stop_str), stops.end());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SOS handler
+// ---------------------------------------------------------------------------
+
+void mqtt_client::handle_sos(const std::string& employee_id, const std::string& payload)
+{
+    // Parse: {"time": "2025-06-01T14:05:00Z", "coordinates": {"lat": -31.4, "lon": -64.2}}
+    cJSON* json = cJSON_Parse(payload.c_str());
+
+    std::string time_str = "unknown";
+    double lat = 0.0, lon = 0.0;
+
+    if (json)
+    {
+        cJSON* time_field = cJSON_GetObjectItemCaseSensitive(json, "time");
+        if (time_field && cJSON_IsString(time_field))
+            time_str = time_field->valuestring;
+
+        cJSON* coords = cJSON_GetObjectItemCaseSensitive(json, "coordinates");
+        if (coords)
+        {
+            cJSON* lat_field = cJSON_GetObjectItemCaseSensitive(coords, "lat");
+            cJSON* lon_field = cJSON_GetObjectItemCaseSensitive(coords, "lon");
+            if (lat_field && cJSON_IsNumber(lat_field))
+                lat = lat_field->valuedouble;
+            if (lon_field && cJSON_IsNumber(lon_field))
+                lon = lon_field->valuedouble;
+        }
+        cJSON_Delete(json);
+    }
+
+    // CRITICAL alarm — stderr + logger.
+    std::cerr << "\n!! SOS ALERT !! courier=" << employee_id << " time=" << time_str << " lat=" << lat
+              << " lon=" << lon << '\n';
+    LOG_ERROR_MSG("!! SOS ALERT !! courier=%s time=%s lat=%.6f lon=%.6f", employee_id.c_str(), time_str.c_str(), lat,
+                  lon);
 }

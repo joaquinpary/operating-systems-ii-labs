@@ -117,7 +117,8 @@ int main()
         server srv(loop, shm, response_efd, cfg, std::move(session_mgr), std::move(timer_mgr));
 
         // MQTT client — connects to broker and wires socket into the event loop.
-        mqtt_client mqtt(cfg, loop);
+        auto mqtt_db_pool = std::make_shared<connection_pool>(build_connection_string(), 2);
+        mqtt_client mqtt(cfg, loop, mqtt_db_pool);
         srv.set_mqtt_client(&mqtt);
         if (mqtt.connect() != 0)
         {
