@@ -562,6 +562,12 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
 
             responses.push_back(make_send_to_username("api_gateway", notify));
             LOG_INFO_MSG("[MSG] order_dispatched -> gateway txn=%d hub=%s", transaction_id, msg.source_id);
+
+            // Publish route to a courier via MQTT.
+            response_slot_t mqtt_resp{};
+            mqtt_resp.command = static_cast<std::uint8_t>(response_command::MQTT_PUBLISH_ROUTE);
+            mqtt_resp.mqtt_transaction_id = transaction_id;
+            responses.push_back(mqtt_resp);
         }
     }
     else if (category == message_category::DISPATCH_NOTICE)

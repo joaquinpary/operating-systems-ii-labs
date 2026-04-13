@@ -41,7 +41,8 @@ enum class response_command : std::uint8_t
     START_KEEPALIVE_TIMER = 6,
     RESET_KEEPALIVE_TIMER = 7,
     DISCONNECT = 8, // Force-disconnect a session (e.g. keepalive timeout)
-    BROADCAST = 9   // Send payload to all authenticated sessions
+    BROADCAST = 9,   // Send payload to all authenticated sessions
+    MQTT_PUBLISH_ROUTE = 10 // Publish a route to a courier via MQTT
 };
 
 /**
@@ -97,6 +98,9 @@ struct response_slot_t
 
     // When true on a SEND command, reactor will also start an ACK timer after sending
     bool start_ack_timer;
+
+    // For MQTT_PUBLISH_ROUTE: transaction id to assign to a courier route
+    int mqtt_transaction_id;
 };
 
 /**

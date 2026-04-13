@@ -20,6 +20,8 @@ struct server_config
     std::uint32_t pool_size;         ///< Database connection pool size.
     std::uint32_t worker_threads;    ///< Worker thread count.
     std::string credentials_path;    ///< Directory containing client credential files.
+    std::string mqtt_broker_host;    ///< MQTT broker hostname.
+    std::uint16_t mqtt_broker_port;  ///< MQTT broker port.
 };
 
 /**
