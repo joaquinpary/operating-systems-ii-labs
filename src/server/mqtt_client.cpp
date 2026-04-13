@@ -4,6 +4,7 @@
 #include <cstring>
 #include <iostream>
 #include <mosquitto.h>
+#include <random>
 #include <sys/timerfd.h>
 #include <unistd.h>
 
@@ -229,5 +230,67 @@ void mqtt_client::handle_connect(int rc)
 void mqtt_client::handle_message(const std::string& topic, const std::string& payload)
 {
     LOG_INFO_MSG("[MQTT] msg topic=%s payload=%s", topic.c_str(), payload.c_str());
-    std::cout << "[MQTT] msg topic=" << topic << " payload=" << payload << '\n';
+
+    // Route to topic-specific handlers based on prefix.
+    if (topic.rfind("tracking/", 0) == 0)
+    {
+        std::string employee_id = topic.substr(9); // len("tracking/") == 9
+        handle_tracking(employee_id, payload);
+    }
+    else if (topic.rfind("delivered/", 0) == 0 || topic.rfind("alerts/sos/", 0) == 0)
+    {
+        // Handled in Stint 4.
+        std::cout << "[MQTT] msg topic=" << topic << " payload=" << payload << '\n';
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Topic handlers
+// ---------------------------------------------------------------------------
+
+void mqtt_client::handle_tracking(const std::string& employee_id, const std::string& /*payload*/)
+{
+    auto& courier = m_couriers[employee_id];
+    courier.last_seen = std::chrono::steady_clock::now();
+    LOG_DEBUG_MSG("[MQTT] tracking update courier=%s", employee_id.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// Route assignment
+// ---------------------------------------------------------------------------
+
+int mqtt_client::assign_route(int transaction_id)
+{
+    if (m_couriers.empty())
+    {
+        std::cerr << "[MQTT] no active couriers, cannot assign route for txn=" << transaction_id << '\n';
+        LOG_ERROR_MSG("[MQTT] no active couriers for txn=%d", transaction_id);
+        return -1;
+    }
+
+    // Round-robin: advance index and wrap around.
+    auto it = m_couriers.begin();
+    std::advance(it, m_rr_index % m_couriers.size());
+    ++m_rr_index;
+
+    auto& [employee_id, courier] = *it;
+
+    // Pick a random destination from the 15 predefined stops.
+    static thread_local std::mt19937 rng{std::random_device{}()};
+    std::uniform_int_distribution<std::size_t> dist(0, NUM_DESTINATIONS - 1);
+    const char* dest = DELIVERY_DESTINATIONS[dist(rng)];
+
+    // Build stop string: "DestinationName TXN_ID"
+    std::string stop = std::string(dest) + " " + std::to_string(transaction_id);
+    courier.pending_stops.push_back(stop);
+
+    LOG_INFO_MSG("[MQTT] assigned stop \"%s\" to courier=%s", stop.c_str(), employee_id.c_str());
+    std::cout << "[MQTT] assigned stop \"" << stop << "\" to courier=" << employee_id << '\n';
+
+    // Publish only the new stop — firmware appends to its internal route list.
+    std::string json = "[\"" + stop + "\"]";
+    std::string topic = "routes/" + employee_id;
+    publish(topic, json, 1);
+
+    return 0;
 }
