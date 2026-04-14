@@ -13,8 +13,7 @@
 void gps_telemetry_init(void);
 void gps_telemetry_start(void);
 void gps_telemetry_stop(void);
-void gps_telemetry_get_position(int32_t *lat_microdegrees,
-				      int32_t *lng_microdegrees);
-int gps_telemetry_publish(struct mqtt_client *client, const char *employee_id);
+void gps_telemetry_get_position(int32_t* lat_microdegrees, int32_t* lng_microdegrees);
+int gps_telemetry_publish(struct mqtt_client* client, const char* employee_id);
 
 #endif /* GPS_TELEMETRY_H_ */

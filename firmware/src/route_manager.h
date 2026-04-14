@@ -5,10 +5,11 @@
 
 #include <autoconf.h>
 
-struct route_state {
-	char stops[CONFIG_DHL_ROUTE_MAX_STOPS][CONFIG_DHL_ROUTE_STOP_NAME_MAX];
-	int count;
-	int current_index;
+struct route_state
+{
+    char stops[CONFIG_DHL_ROUTE_MAX_STOPS][CONFIG_DHL_ROUTE_STOP_NAME_MAX];
+    int count;
+    int current_index;
 };
 
 /**
@@ -26,14 +27,14 @@ void route_manager_init(void);
  * @param stops  Array of stop name pointers.
  * @param count  Number of stops to append (clamped to remaining free slots).
  */
-void route_manager_update(const char *stops[], int count);
+void route_manager_update(const char* stops[], int count);
 
 /**
  * @brief Get the name of the current stop.
  *
  * @return Pointer to the stop name, or NULL if the route is empty / exhausted.
  */
-const char *get_current_stop(void);
+const char* get_current_stop(void);
 
 /**
  * @brief Get the zero-based index of the current stop.
@@ -64,7 +65,7 @@ int advance_stop(void);
  * @param len   Length of the JSON payload in bytes.
  * @return 0 on success, -EINVAL on malformed JSON or unexpected types.
  */
-int route_manager_parse_json(const char *json, size_t len);
+int route_manager_parse_json(const char* json, size_t len);
 
 /**
  * @brief Clear the current route entirely.

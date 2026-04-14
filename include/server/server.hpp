@@ -113,7 +113,10 @@ class server
     void stop();
 
     /** Set the MQTT client (owned externally, lifetime must exceed server). */
-    void set_mqtt_client(mqtt_client* mqtt) { m_mqtt = mqtt; }
+    void set_mqtt_client(mqtt_client* mqtt)
+    {
+        m_mqtt = mqtt;
+    }
 
   private:
     // TCP acceptor setup & callbacks

@@ -40,8 +40,8 @@ enum class response_command : std::uint8_t
     MARK_AUTHENTICATED = 5, // Mark a session as authenticated
     START_KEEPALIVE_TIMER = 6,
     RESET_KEEPALIVE_TIMER = 7,
-    DISCONNECT = 8, // Force-disconnect a session (e.g. keepalive timeout)
-    BROADCAST = 9,   // Send payload to all authenticated sessions
+    DISCONNECT = 8,         // Force-disconnect a session (e.g. keepalive timeout)
+    BROADCAST = 9,          // Send payload to all authenticated sessions
     MQTT_PUBLISH_ROUTE = 10 // Publish a route to a courier via MQTT
 };
 

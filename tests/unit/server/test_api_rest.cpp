@@ -1,8 +1,8 @@
 #include "api_rest.hpp"
 
-#include <cstdlib>
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <httplib.h>
 #include <thread>

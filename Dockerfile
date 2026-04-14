@@ -52,7 +52,7 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     libmongoc-1.0-0t64 \
     libbson-1.0-0t64 \
-    libmosquitto0 \
+    libmosquitto1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

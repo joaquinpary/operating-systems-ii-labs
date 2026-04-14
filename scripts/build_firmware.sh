@@ -14,7 +14,7 @@
 set -euo pipefail
 
 # Zephyr workspace — west must be invoked from here.
-ZEPHYR_WORKSPACE="/home/joaquin/zephyrproject"
+ZEPHYR_WORKSPACE="${HOME}/zephyrproject"
 
 # Activate the Zephyr virtual environment so that 'west' is available.
 ZEPHYR_VENV="${ZEPHYR_WORKSPACE}/.venv"

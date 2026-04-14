@@ -126,12 +126,13 @@ void load_config_from_file(const std::string& config_path, server_config& config
 
     // MQTT broker config — optional, with env-var overrides
     cJSON* mqtt_host = cJSON_GetObjectItemCaseSensitive(json, "mqtt_broker_host");
-    config.mqtt_broker_host = get_env_var("MQTT_BROKER_HOST",
-        (mqtt_host && cJSON_IsString(mqtt_host)) ? mqtt_host->valuestring : "localhost");
+    config.mqtt_broker_host = get_env_var(
+        "MQTT_BROKER_HOST", (mqtt_host && cJSON_IsString(mqtt_host)) ? mqtt_host->valuestring : "localhost");
 
     cJSON* mqtt_port = cJSON_GetObjectItemCaseSensitive(json, "mqtt_broker_port");
-    std::string port_str = get_env_var("MQTT_BROKER_PORT",
-        (mqtt_port && cJSON_IsNumber(mqtt_port)) ? std::to_string(mqtt_port->valueint).c_str() : "1883");
+    std::string port_str =
+        get_env_var("MQTT_BROKER_PORT",
+                    (mqtt_port && cJSON_IsNumber(mqtt_port)) ? std::to_string(mqtt_port->valueint).c_str() : "1883");
     config.mqtt_broker_port = static_cast<std::uint16_t>(std::stoi(port_str));
 
     cJSON_Delete(json);

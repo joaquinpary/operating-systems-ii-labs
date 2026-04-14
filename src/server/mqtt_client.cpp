@@ -14,8 +14,14 @@
 /// One-time libmosquitto initialisation guard.
 static struct mosquitto_init_guard
 {
-    mosquitto_init_guard() { mosquitto_lib_init(); }
-    ~mosquitto_init_guard() { mosquitto_lib_cleanup(); }
+    mosquitto_init_guard()
+    {
+        mosquitto_lib_init();
+    }
+    ~mosquitto_init_guard()
+    {
+        mosquitto_lib_cleanup();
+    }
 } s_mosq_guard;
 
 // ---------------------------------------------------------------------------
@@ -123,8 +129,8 @@ void mqtt_client::disconnect()
 
 int mqtt_client::publish(const std::string& topic, const std::string& payload, int qos)
 {
-    int rc =
-        mosquitto_publish(m_mosq, nullptr, topic.c_str(), static_cast<int>(payload.size()), payload.c_str(), qos, false);
+    int rc = mosquitto_publish(m_mosq, nullptr, topic.c_str(), static_cast<int>(payload.size()), payload.c_str(), qos,
+                               false);
     if (rc != MOSQ_ERR_SUCCESS)
     {
         std::cerr << "[MQTT] publish to " << topic << " failed: " << mosquitto_strerror(rc) << '\n';
@@ -362,8 +368,8 @@ void mqtt_client::handle_delivered(const std::string& employee_id, const std::st
 
         complete_transaction(guard.get(), transaction_id, std::string(ts_buf));
 
-        LOG_INFO_MSG("[MQTT] delivered: txn=%d completed, courier=%s stop=\"%s\"", transaction_id,
-                     employee_id.c_str(), stop_str.c_str());
+        LOG_INFO_MSG("[MQTT] delivered: txn=%d completed, courier=%s stop=\"%s\"", transaction_id, employee_id.c_str(),
+                     stop_str.c_str());
         std::cout << "[MQTT] delivered: txn=" << transaction_id << " completed, courier=" << employee_id << '\n';
     }
     catch (const std::exception& ex)
@@ -413,8 +419,8 @@ void mqtt_client::handle_sos(const std::string& employee_id, const std::string& 
     }
 
     // CRITICAL alarm — stderr + logger.
-    std::cerr << "\n!! SOS ALERT !! courier=" << employee_id << " time=" << time_str << " lat=" << lat
-              << " lon=" << lon << '\n';
+    std::cerr << "\n!! SOS ALERT !! courier=" << employee_id << " time=" << time_str << " lat=" << lat << " lon=" << lon
+              << '\n';
     LOG_ERROR_MSG("!! SOS ALERT !! courier=%s time=%s lat=%.6f lon=%.6f", employee_id.c_str(), time_str.c_str(), lat,
                   lon);
 }

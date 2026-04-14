@@ -1,8 +1,8 @@
 #ifndef MESSAGE_HANDLER_HPP
 #define MESSAGE_HANDLER_HPP
 
-#include "auth_module.hpp"
 #include "api_gateway_interface.h"
+#include "auth_module.hpp"
 #include "inventory_manager.hpp"
 #include "ipc.hpp"
 #include <common/json_manager.h>
@@ -15,19 +15,19 @@
 
 enum class message_category
 {
-    AUTH_REQUEST,    ///< Authentication request from a client.
-    ACK_MESSAGE,     ///< ACK emitted by a client for a previous outbound message.
-    KEEPALIVE_MSG,   ///< Keepalive ping from an authenticated client.
-    INV_UPDATE,      ///< Inventory update emitted by a hub or warehouse.
-    STOCK_REQ,       ///< Stock request emitted by a hub.
-    RECEIPT_CONFIRM, ///< Receipt confirmation emitted after stock delivery.
-    DISPATCH_NOTICE, ///< Shipment notice emitted by a warehouse.
-    REPLENISH_REQ,   ///< Replenish request emitted by a warehouse.
+    AUTH_REQUEST,     ///< Authentication request from a client.
+    ACK_MESSAGE,      ///< ACK emitted by a client for a previous outbound message.
+    KEEPALIVE_MSG,    ///< Keepalive ping from an authenticated client.
+    INV_UPDATE,       ///< Inventory update emitted by a hub or warehouse.
+    STOCK_REQ,        ///< Stock request emitted by a hub.
+    RECEIPT_CONFIRM,  ///< Receipt confirmation emitted after stock delivery.
+    DISPATCH_NOTICE,  ///< Shipment notice emitted by a warehouse.
+    REPLENISH_REQ,    ///< Replenish request emitted by a warehouse.
     DISPATCH_CONFIRM, ///< Dispatch confirmation from a hub (order fulfilled).
     EMERGENCY_ALERT,  ///< Emergency alert from a hub or warehouse.
     CLI_COMMAND,      ///< Admin CLI command (handled by libadmin_cli.so).
-    GATEWAY_COMMAND, ///< API Gateway command (handled by libapi_gateway.so).
-    OTHER            ///< Any unrecognized or unsupported message type.
+    GATEWAY_COMMAND,  ///< API Gateway command (handled by libapi_gateway.so).
+    OTHER             ///< Any unrecognized or unsupported message type.
 };
 
 /**

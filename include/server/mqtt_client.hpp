@@ -15,9 +15,9 @@ struct mosquitto;
 
 /// 15 predefined delivery destinations.
 inline constexpr const char* DELIVERY_DESTINATIONS[] = {
-    "Mercado Sur",       "Mercado Norte",    "FCEFyN",          "Plaza Espana",   "Patio Olmos",
-    "Nueva Cordoba",     "Alto Alberdi",     "Guemes",          "San Vicente",    "Centro",
-    "Cerro Campanas",    "Chateau Carreras", "Villa Belgrano",  "Arguello",       "La Calera",
+    "Mercado Sur",    "Mercado Norte",    "FCEFyN",         "Plaza Espana", "Patio Olmos",
+    "Nueva Cordoba",  "Alto Alberdi",     "Guemes",         "San Vicente",  "Centro",
+    "Cerro Campanas", "Chateau Carreras", "Villa Belgrano", "Arguello",     "La Calera",
 };
 inline constexpr std::size_t NUM_DESTINATIONS = sizeof(DELIVERY_DESTINATIONS) / sizeof(DELIVERY_DESTINATIONS[0]);
 
@@ -62,7 +62,10 @@ class mqtt_client
     int assign_route(int transaction_id);
 
     /** Get the courier registry (read-only). */
-    const std::unordered_map<std::string, courier_info>& couriers() const { return m_couriers; }
+    const std::unordered_map<std::string, courier_info>& couriers() const
+    {
+        return m_couriers;
+    }
 
   private:
     /// Register/update the MQTT socket fd in the event loop.

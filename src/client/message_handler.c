@@ -209,8 +209,8 @@ int handle_server_message(const message_t* msg)
         log_inventory_snapshot("ORDER_TO_DISPATCH_STOCK recv");
 
         message_t confirm_msg;
-        if (create_items_message(&confirm_msg, HUB_TO_SERVER__DISPATCH_CONFIRMATION, shared_data->client_id,
-                                 SERVER, order->items, QUANTITY_ITEMS, msg->timestamp) != 0)
+        if (create_items_message(&confirm_msg, HUB_TO_SERVER__DISPATCH_CONFIRMATION, shared_data->client_id, SERVER,
+                                 order->items, QUANTITY_ITEMS, msg->timestamp) != 0)
         {
             LOG_ERROR_MSG("Failed to create dispatch confirmation message");
             return -1;

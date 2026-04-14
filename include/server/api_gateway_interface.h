@@ -13,7 +13,7 @@ extern "C"
 
     typedef struct gateway_side_effect
     {
-        int  has_message;
+        int has_message;
         char target_username[64];
         char send_json[GATEWAY_SIDE_MSG_MAX];
     } gateway_side_effect_t;
@@ -34,8 +34,7 @@ extern "C"
      *  @param side       Optional side-effect (message to forward to a client).
      *                    The caller must zero-initialise the struct before calling.
      *  @return 0 on success, negative on error.  */
-    int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
-                           gateway_side_effect_t* side);
+    int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len, gateway_side_effect_t* side);
 
     /** Clean up (close DB connection). */
     void api_gateway_shutdown(void);
