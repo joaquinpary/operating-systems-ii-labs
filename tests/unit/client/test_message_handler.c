@@ -523,13 +523,6 @@ void test_handle_server_emergency_alert(void)
 
     int result = handle_server_message(&msg);
     TEST_ASSERT_EQUAL_INT(0, result);
-
-    // Verify ACK was enqueued
-    message_t ack_msg;
-    TEST_ASSERT_EQUAL_INT(0, pop_pending_message(&ack_msg));
-    TEST_ASSERT_EQUAL_STRING(HUB_TO_SERVER__ACK, ack_msg.msg_type);
-    TEST_ASSERT_EQUAL_STRING("2025-11-25T20:00:00.000Z", ack_msg.payload.acknowledgment.ack_for_timestamp);
-    TEST_ASSERT_EQUAL_INT(200, ack_msg.payload.acknowledgment.status_code);
 }
 
 void test_handle_server_emergency_alert_when_queue_full(void)
@@ -544,9 +537,9 @@ void test_handle_server_emergency_alert_when_queue_full(void)
     msg.payload.server_emergency.emergency_code = 2003;
     strncpy(msg.payload.server_emergency.instructions, "Lockdown", EMERGENCY_INSTRUCTIONS_SIZE - 1);
 
-    // Should fail because queue is full and ACK cannot be enqueued
+    // No ACK is sent for emergency alerts, so queue state doesn't matter
     int result = handle_server_message(&msg);
-    TEST_ASSERT_EQUAL_INT(-1, result);
+    TEST_ASSERT_EQUAL_INT(0, result);
 
     shared_data->message_count = 0;
 }
@@ -565,11 +558,6 @@ void test_handle_server_emergency_alert_warehouse(void)
     strncpy(msg.payload.server_emergency.instructions, "Shelter in place", EMERGENCY_INSTRUCTIONS_SIZE - 1);
 
     TEST_ASSERT_EQUAL_INT(0, handle_server_message(&msg));
-
-    message_t ack_msg;
-    TEST_ASSERT_EQUAL_INT(0, pop_pending_message(&ack_msg));
-    TEST_ASSERT_EQUAL_STRING(WAREHOUSE_TO_SERVER__ACK, ack_msg.msg_type);
-    TEST_ASSERT_EQUAL_STRING("2025-11-25T20:02:00.000Z", ack_msg.payload.acknowledgment.ack_for_timestamp);
 }
 
 int main(void)

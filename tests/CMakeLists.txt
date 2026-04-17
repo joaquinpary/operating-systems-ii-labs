@@ -149,6 +149,7 @@ foreach(test_file ${SERVER_TEST})
     find_package(PostgreSQL REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+    pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
@@ -162,6 +163,7 @@ foreach(test_file ${SERVER_TEST})
         rt
         pqxx
         PkgConfig::MONGOC
+        PkgConfig::MOSQUITTO
         ${PostgreSQL_LIBRARIES}
     )
     target_compile_definitions(${exec_name} PRIVATE TESTING)

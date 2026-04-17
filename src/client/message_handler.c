@@ -275,13 +275,6 @@ int handle_server_message(const message_t* msg)
         const payload_server_emergency_alert* alert = &msg->payload.server_emergency;
         LOG_WARNING_MSG("Emergency broadcast received from server: code=%d instructions='%s'", alert->emergency_code,
                         alert->instructions);
-
-        // if (send_ack_to_server(msg->timestamp) != 0)
-        // {
-        //     return -1;
-        // }
-
-        LOG_DEBUG_MSG("ACK sent for SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT");
         return 0;
     }
 
