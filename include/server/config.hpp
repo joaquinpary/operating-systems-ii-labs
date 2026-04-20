@@ -12,6 +12,7 @@ struct server_config
     std::string ip_v4;               ///< IPv4 bind address.
     std::string ip_v6;               ///< IPv6 bind address.
     std::uint16_t network_port;      ///< Shared TCP/UDP listening port.
+    std::uint16_t api_rest_port;     ///< REST API listening port.
     std::uint32_t ack_timeout;       ///< ACK timeout in milliseconds.
     std::uint32_t max_auth_attempts; ///< Max invalid auth attempts before blacklisting.
     std::uint32_t max_retries;       ///< Max ACK retries before disconnecting the client.

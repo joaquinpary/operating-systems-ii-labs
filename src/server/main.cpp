@@ -1,3 +1,4 @@
+#include "api_rest.hpp"
 #include "config.hpp"
 #include "connection_pool.hpp"
 #include "database.hpp"
@@ -74,6 +75,20 @@ int main()
             _exit(0);
         }
 
+        pid_t api_rest_pid = fork();
+        if (api_rest_pid == -1)
+        {
+            throw std::runtime_error(std::string("fork api_rest: ") + strerror(errno));
+        }
+
+        if (api_rest_pid == 0)
+        {
+            sigprocmask(SIG_UNBLOCK, &mask, nullptr);
+
+            run_api_rest_process(cfg);
+            _exit(0);
+        }
+
         {
             const char* log_dir = std::getenv("LOG_DIR");
             if (!log_dir)
@@ -85,7 +100,7 @@ int main()
             log_init(&log_cfg);
         }
 
-        LOG_INFO_MSG("[REACTOR] pid=%d worker_pid=%d", getpid(), worker_pid);
+        LOG_INFO_MSG("[REACTOR] pid=%d worker_pid=%d api_rest_pid=%d", getpid(), worker_pid, api_rest_pid);
 
         int sig_fd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
         if (sig_fd == -1)
@@ -117,13 +132,19 @@ int main()
 
         loop.run();
 
-        LOG_INFO_MSG("[REACTOR] Event loop stopped, waiting for worker");
+        LOG_INFO_MSG("[REACTOR] Event loop stopped, waiting for children");
 
         int status;
         waitpid(worker_pid, &status, 0);
         if (WIFEXITED(status))
         {
             LOG_INFO_MSG("[REACTOR] Worker exited status=%d", WEXITSTATUS(status));
+        }
+
+        waitpid(api_rest_pid, &status, 0);
+        if (WIFEXITED(status))
+        {
+            LOG_INFO_MSG("[REACTOR] REST API exited status=%d", WEXITSTATUS(status));
         }
 
         close(sig_fd);

@@ -2,14 +2,20 @@ FROM ubuntu:24.04 AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     cmake \
     g++ \
     gcc \
     make \
     git \
+    libsasl2-dev \
+    libssl-dev \
     libpq-dev \
     pkg-config \
     zlib1g-dev \
+    libomp-dev \
+    libmongoc-dev \
+    libbson-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,10 +28,12 @@ COPY tests/ ./tests/
 
 # Build argument to determine what to build (client or server)
 ARG BUILD_TARGET=server
+ARG ENABLE_OPENMP_FLOW=OFF
+ARG ENABLE_OPENMP_CIRCUIT=OFF
 
 # Build the project
 RUN mkdir -p build && cd build && \
-    cmake -DBUILD_TARGET=${BUILD_TARGET} .. && \
+    cmake -DBUILD_TARGET=${BUILD_TARGET} -DENABLE_OPENMP_FLOW=${ENABLE_OPENMP_FLOW} -DENABLE_OPENMP_CIRCUIT=${ENABLE_OPENMP_CIRCUIT} .. && \
     make
 
 # Runtime stage
@@ -33,8 +41,15 @@ FROM ubuntu:24.04
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
+    ca-certificates \
     libpq5 \
+    libsasl2-2 \
+    libssl3 \
     zlib1g \
+    libomp5 \
+    libgomp1 \
+    libmongoc-1.0-0t64 \
+    libbson-1.0-0t64 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

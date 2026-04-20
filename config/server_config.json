@@ -2,6 +2,7 @@
     "ip_v4": "0.0.0.0",
     "ip_v6": "::",
     "network_port": 9999,
+    "api_rest_port": 8080,
     "ack_timeout": 3,
     "max_auth_attempts": 3,
     "max_retries": 3,

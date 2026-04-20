@@ -60,6 +60,14 @@ void load_config_from_file(const std::string& config_path, server_config& config
     }
     config.network_port = static_cast<std::uint16_t>(network_port->valueint);
 
+    cJSON* api_rest_port = cJSON_GetObjectItemCaseSensitive(json, "api_rest_port");
+    if (!api_rest_port || !cJSON_IsNumber(api_rest_port))
+    {
+        cJSON_Delete(json);
+        throw std::runtime_error("Missing or invalid 'api_rest_port' field in config file");
+    }
+    config.api_rest_port = static_cast<std::uint16_t>(api_rest_port->valueint);
+
     cJSON* ack_timeout = cJSON_GetObjectItemCaseSensitive(json, "ack_timeout");
     if (!ack_timeout || !cJSON_IsNumber(ack_timeout))
     {

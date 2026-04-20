@@ -1,5 +1,30 @@
 cmake_minimum_required(VERSION 3.22 FATAL_ERROR)
 
+include(FetchContent)
+set(FETCHCONTENT_QUIET OFF)
+
+# Download UNITY
+set(UNITY_GIT_URL "https://github.com/ThrowTheSwitch/Unity.git")
+FetchContent_Declare(
+    unity
+    GIT_REPOSITORY ${UNITY_GIT_URL}
+    GIT_TAG        master
+    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/../external/client/unity
+    UPDATE_COMMAND ""
+)
+FetchContent_MakeAvailable(unity)
+
+# DownLoad gtest
+set(GTEST_GIT_URL "https://github.com/google/googletest.git")
+FetchContent_Declare(
+    gtest
+    GIT_REPOSITORY ${GTEST_GIT_URL}
+    GIT_TAG        main
+    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/../external/server/gtest
+    UPDATE_COMMAND ""
+)
+FetchContent_MakeAvailable(gtest)
+
 # Collect test
 file(GLOB CLIENT_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/client/*.c)
 file(GLOB SERVER_TEST ${CMAKE_CURRENT_SOURCE_DIR}/unit/server/*.cpp)
@@ -122,7 +147,9 @@ foreach(test_file ${SERVER_TEST})
     
     # Find PostgreSQL for server tests
     find_package(PostgreSQL REQUIRED)
-    
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     target_include_directories(${exec_name} PRIVATE
         ${PROJECT_SOURCE_DIR}/include/server
         ${PROJECT_SOURCE_DIR}/include/common
@@ -134,9 +161,21 @@ foreach(test_file ${SERVER_TEST})
         pthread
         rt
         pqxx
+        PkgConfig::MONGOC
         ${PostgreSQL_LIBRARIES}
     )
     target_compile_definitions(${exec_name} PRIVATE TESTING)
+
+    if(ENABLE_OPENMP_FLOW OR ENABLE_OPENMP_CIRCUIT)
+        find_package(OpenMP REQUIRED)
+        target_link_libraries(${exec_name} PRIVATE OpenMP::OpenMP_CXX)
+        if(ENABLE_OPENMP_FLOW)
+            target_compile_definitions(${exec_name} PRIVATE USE_OPENMP_FLOW=1)
+        endif()
+        if(ENABLE_OPENMP_CIRCUIT)
+            target_compile_definitions(${exec_name} PRIVATE USE_OPENMP_CIRCUIT=1)
+        endif()
+    endif()
 
     add_test(NAME ${exec_name} COMMAND ${exec_name})
 endforeach()

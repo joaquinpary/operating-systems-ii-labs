@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 project(DHL_LOGISTICS
         LANGUAGES CXX C)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(CMAKE_CXX_STANDARD 20)  # C++20
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -12,30 +14,11 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 option(BUILD_TARGET "Build target: server or client" "server")
 option(RUN_TEST "Run tests" OFF)
+option(ENABLE_OPENMP_FLOW "Enable OpenMP parallelization for flow algorithm" OFF)
+option(ENABLE_OPENMP_CIRCUIT "Enable OpenMP parallelization for circuit algorithm" OFF)
 
-# Download UNITY
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
-set(UNITY_GIT_URL "https://github.com/ThrowTheSwitch/Unity.git")
-FetchContent_Declare(
-    unity
-    GIT_REPOSITORY ${UNITY_GIT_URL}
-    GIT_TAG        master
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/client/unity
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(unity)
-
-# DownLoad gtest
-set(GTEST_GIT_URL "https://github.com/google/googletest.git")
-FetchContent_Declare(
-    gtest
-    GIT_REPOSITORY ${GTEST_GIT_URL}
-    GIT_TAG        main
-    SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/gtest
-    UPDATE_COMMAND ""
-)
-FetchContent_MakeAvailable(gtest)
 
 set(CJSON_GIT_URL "https://github.com/DaveGamble/cJSON.git")
 set(ENABLE_CJSON_TEST OFF CACHE INTERNAL "Disable cJSON tests")
@@ -55,6 +38,16 @@ include_directories(include/common)
 
 if(BUILD_TARGET STREQUAL "server")
 
+    set(CPP_HTTPLIB_GIT_URL "https://github.com/yhirose/cpp-httplib.git")
+    FetchContent_Declare(
+        cpp_httplib
+        GIT_REPOSITORY ${CPP_HTTPLIB_GIT_URL}
+        GIT_TAG        master
+        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/external/server/cpp-httplib
+        UPDATE_COMMAND ""
+    )
+    FetchContent_MakeAvailable(cpp_httplib)
+
     set(PQXX_GIT_URL "https://github.com/jtv/libpqxx.git")
     FetchContent_Declare(
         pqxx
@@ -64,8 +57,13 @@ if(BUILD_TARGET STREQUAL "server")
         UPDATE_COMMAND ""
     )
     FetchContent_MakeAvailable(pqxx)
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(MONGOC REQUIRED IMPORTED_TARGET libmongoc-1.0)
+
     add_definitions(-DTARGET_SERVER)
     include_directories(include/server)
+    include_directories(${cpp_httplib_SOURCE_DIR})
 
     find_package(PostgreSQL REQUIRED)
     include_directories(${PostgreSQL_INCLUDE_DIRS})
@@ -93,9 +91,26 @@ if(BUILD_TARGET STREQUAL "server")
         include/server/*.hpp
     )
     set(TARGET_EXEC dhl_server)
+
     add_executable(${TARGET_EXEC} ${SOURCES})
     target_link_libraries(${TARGET_EXEC} pthread rt dl)
     target_link_libraries(${TARGET_EXEC} pqxx ${PostgreSQL_LIBRARIES})
+    target_link_libraries(${TARGET_EXEC} PkgConfig::MONGOC)
+    set_target_properties(${TARGET_EXEC} PROPERTIES
+        BUILD_RPATH  "${CMAKE_BINARY_DIR}"
+        INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib"
+    )
+
+    if(ENABLE_OPENMP_FLOW OR ENABLE_OPENMP_CIRCUIT)
+        find_package(OpenMP REQUIRED)
+        target_link_libraries(${TARGET_EXEC} OpenMP::OpenMP_CXX)
+        if(ENABLE_OPENMP_FLOW)
+            target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP_FLOW=1)
+        endif()
+        if(ENABLE_OPENMP_CIRCUIT)
+            target_compile_definitions(${TARGET_EXEC} PRIVATE USE_OPENMP_CIRCUIT=1)
+        endif()
+    endif()
 
     # Embed build-tree location of libadmin_cli.so into RPATH
     set_target_properties(${TARGET_EXEC} PROPERTIES

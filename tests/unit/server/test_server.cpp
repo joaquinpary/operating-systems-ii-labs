@@ -55,7 +55,6 @@ class ServerTest : public ::testing::Test
             m_db_connection = std::move(db_connection);
         }
 
-        // Create shared memory and eventfd for each test
         m_shm = std::make_unique<shared_queue>(shared_queue::create());
         m_response_efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
         m_loop = std::make_unique<event_loop>();
@@ -63,8 +62,6 @@ class ServerTest : public ::testing::Test
 
     void TearDown() override
     {
-        // Stop the event loop FIRST and join its thread so no callbacks fire
-        // during server teardown (avoids races on fd map and closed sockets).
         if (m_loop)
         {
             m_loop->stop();
@@ -73,7 +70,6 @@ class ServerTest : public ::testing::Test
         {
             m_io_thread->join();
         }
-        // Now safe to tear down the server (no concurrent epoll activity)
         if (m_server)
         {
             m_server->stop();
@@ -98,7 +94,6 @@ class ServerTest : public ::testing::Test
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    // Create a server keeping raw pointers to session_manager and timer_manager
     void create_server_with_refs(uint16_t port)
     {
         auto config = make_test_server_config();
@@ -110,7 +105,6 @@ class ServerTest : public ::testing::Test
         m_server = std::make_unique<server>(*m_loop, *m_shm, m_response_efd, config, std::move(sm), std::move(tm));
     }
 
-    // Connect a TCP client to 127.0.0.1:port and return the socket fd
     int connect_tcp(uint16_t port)
     {
         int sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -128,7 +122,6 @@ class ServerTest : public ::testing::Test
         return sock;
     }
 
-    // Send a BUFFER_SIZE frame over TCP (the server's wire format)
     void send_frame(int sock, const char* json)
     {
         char buf[BUFFER_SIZE]{};
@@ -136,7 +129,6 @@ class ServerTest : public ::testing::Test
         ::send(sock, buf, BUFFER_SIZE, 0);
     }
 
-    // Read a BUFFER_SIZE frame from TCP
     bool recv_frame(int sock, char* out, int timeout_ms = 500)
     {
         struct timeval tv
@@ -156,14 +148,11 @@ class ServerTest : public ::testing::Test
         return true;
     }
 
-    // Push a response into the shared queue and signal the eventfd
     void push_response(const response_slot_t& resp)
     {
         m_shm->push_response(resp, m_response_efd);
     }
 
-    // Try to consume a request from the shared queue (with timeout).
-    // Runs wait_request in a detached helper so we don't block forever.
     bool try_pop_request(request_slot_t& out, int timeout_ms = 1000)
     {
         std::atomic<bool> done{false};
@@ -185,7 +174,6 @@ class ServerTest : public ::testing::Test
                 out = tmp;
             return ok;
         }
-        // Still blocked — signal shutdown so the thread can exit
         m_shm->signal_shutdown();
         t.join();
         return false;
@@ -203,8 +191,6 @@ class ServerTest : public ::testing::Test
 };
 
 std::atomic<uint16_t> ServerTest::s_next_port{10000};
-
-// Test default configuration values
 TEST_F(ServerTest, DefaultConfigValues)
 {
     config::server_config config = make_test_server_config();
@@ -213,8 +199,6 @@ TEST_F(ServerTest, DefaultConfigValues)
     EXPECT_EQ(config.ip_v6, "::1");
     EXPECT_EQ(config.network_port, 9999);
 }
-
-// Test server initialization with default configuration
 TEST_F(ServerTest, ServerInitialization)
 {
     config::server_config config = make_test_server_config();
@@ -226,8 +210,6 @@ TEST_F(ServerTest, ServerInitialization)
     });
     ASSERT_NE(m_server, nullptr);
 }
-
-// Test server can start
 TEST_F(ServerTest, ServerStart)
 {
     config::server_config config = make_test_server_config();
@@ -238,8 +220,6 @@ TEST_F(ServerTest, ServerStart)
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
-
-// Test server can stop
 TEST_F(ServerTest, ServerStop)
 {
     config::server_config config = make_test_server_config();
@@ -251,8 +231,6 @@ TEST_F(ServerTest, ServerStop)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     ASSERT_NO_THROW(m_server->stop());
 }
-
-// Test basic TCP IPv4 connection using raw POSIX sockets
 TEST_F(ServerTest, TCPIPv4Connection)
 {
     config::server_config config = make_test_server_config();
@@ -278,8 +256,6 @@ TEST_F(ServerTest, TCPIPv4Connection)
 
     close(sock);
 }
-
-// Test basic TCP IPv6 connection
 TEST_F(ServerTest, TCPIPv6Connection)
 {
     config::server_config config = make_test_server_config();
@@ -305,8 +281,6 @@ TEST_F(ServerTest, TCPIPv6Connection)
 
     close(sock);
 }
-
-// Test TCP connection then close
 TEST_F(ServerTest, TCPMessageProcessing)
 {
     config::server_config config = make_test_server_config();
@@ -332,8 +306,6 @@ TEST_F(ServerTest, TCPMessageProcessing)
 
     close(sock);
 }
-
-// ====================== TCP Message Processing ======================
 
 TEST_F(ServerTest, TCPSendMessageAppearsInQueue)
 {
@@ -375,7 +347,6 @@ TEST_F(ServerTest, TCPPeerCloseGeneratesDisconnect)
     ASSERT_GE(sock, 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Authenticate the session so notify_disconnect fires
     message_t auth_msg;
     create_auth_request_message(&auth_msg, "HUB", "tuser", "tuser", "hash");
     char json[BUFFER_SIZE]{};
@@ -383,12 +354,10 @@ TEST_F(ServerTest, TCPPeerCloseGeneratesDisconnect)
     send_frame(sock, json);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Get the session_id from the queue
     request_slot_t req{};
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Mark the session authenticated (via response dispatch)
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -397,11 +366,9 @@ TEST_F(ServerTest, TCPPeerCloseGeneratesDisconnect)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Close the client socket — triggers on_readable n==0 path
     ::close(sock);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    // A disconnect request should appear in the queue
     request_slot_t disc{};
     bool found_disconnect = false;
     while (try_pop_request(disc))
@@ -419,8 +386,6 @@ TEST_F(ServerTest, TCPPeerCloseGeneratesDisconnect)
     }
 }
 
-// ====================== Response Dispatch ======================
-
 TEST_F(ServerTest, DispatchSendToTCPSession)
 {
     uint16_t port = get_unique_port();
@@ -433,7 +398,6 @@ TEST_F(ServerTest, DispatchSendToTCPSession)
     ASSERT_GE(sock, 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Send a message so we can get the session_id
     message_t msg;
     create_auth_request_message(&msg, "HUB", "u1", "u1", "h");
     char json[BUFFER_SIZE]{};
@@ -445,7 +409,6 @@ TEST_F(ServerTest, DispatchSendToTCPSession)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate so send_to_session can resolve the TCP session
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -454,7 +417,6 @@ TEST_F(ServerTest, DispatchSendToTCPSession)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Push a SEND response
     const char* payload = "{\"type\":\"ack\"}";
     response_slot_t send_resp{};
     send_resp.command = static_cast<std::uint8_t>(response_command::SEND);
@@ -464,7 +426,6 @@ TEST_F(ServerTest, DispatchSendToTCPSession)
     push_response(send_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Read the frame from the client
     char recv_buf[BUFFER_SIZE]{};
     ASSERT_TRUE(recv_frame(sock, recv_buf));
     EXPECT_STREQ(recv_buf, payload);
@@ -495,7 +456,6 @@ TEST_F(ServerTest, DispatchSendByTargetUsername)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -504,11 +464,9 @@ TEST_F(ServerTest, DispatchSendByTargetUsername)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // SEND with empty session_id, using target_username
     const char* payload = "{\"resolved\":true}";
     response_slot_t send_resp{};
     send_resp.command = static_cast<std::uint8_t>(response_command::SEND);
-    // session_id left empty
     std::strncpy(send_resp.target_username, "myuser", CREDENTIALS_SIZE - 1);
     std::memcpy(send_resp.payload, payload, std::strlen(payload));
     send_resp.payload_len = static_cast<std::uint32_t>(std::strlen(payload));
@@ -552,7 +510,6 @@ TEST_F(ServerTest, DispatchSendWithAckTimer)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -561,7 +518,6 @@ TEST_F(ServerTest, DispatchSendWithAckTimer)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // SEND with start_ack_timer=true
     const char* payload = "{\"ack\":1}";
     response_slot_t send_resp{};
     send_resp.command = static_cast<std::uint8_t>(response_command::SEND);
@@ -576,12 +532,10 @@ TEST_F(ServerTest, DispatchSendWithAckTimer)
     push_response(send_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Client should receive the data
     char recv_buf[BUFFER_SIZE]{};
     ASSERT_TRUE(recv_frame(sock, recv_buf));
     EXPECT_STREQ(recv_buf, payload);
 
-    // Cancel the timer so it doesn't fire during teardown
     response_slot_t cancel_resp{};
     cancel_resp.command = static_cast<std::uint8_t>(response_command::CANCEL_ACK_TIMER);
     std::strncpy(cancel_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -690,7 +644,6 @@ TEST_F(ServerTest, DispatchStartAndCancelAckTimer)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // START_ACK_TIMER
     response_slot_t start_resp{};
     start_resp.command = static_cast<std::uint8_t>(response_command::START_ACK_TIMER);
     std::strncpy(start_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -704,7 +657,6 @@ TEST_F(ServerTest, DispatchStartAndCancelAckTimer)
     push_response(start_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // CANCEL_ACK_TIMER
     response_slot_t cancel_resp{};
     cancel_resp.command = static_cast<std::uint8_t>(response_command::CANCEL_ACK_TIMER);
     std::strncpy(cancel_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -712,7 +664,6 @@ TEST_F(ServerTest, DispatchStartAndCancelAckTimer)
     push_response(cancel_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Session should still exist (timer was cancelled, no disconnect)
     EXPECT_TRUE(m_sm_ptr->has_session(session_id));
 
     ::close(sock);
@@ -775,7 +726,6 @@ TEST_F(ServerTest, DispatchStartAndResetKeepaliveTimer)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate first
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -784,7 +734,6 @@ TEST_F(ServerTest, DispatchStartAndResetKeepaliveTimer)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // START_KEEPALIVE_TIMER with large timeout so it won't fire during test
     response_slot_t ka_resp{};
     ka_resp.command = static_cast<std::uint8_t>(response_command::START_KEEPALIVE_TIMER);
     std::strncpy(ka_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -792,7 +741,6 @@ TEST_F(ServerTest, DispatchStartAndResetKeepaliveTimer)
     push_response(ka_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // RESET_KEEPALIVE_TIMER
     response_slot_t reset_resp{};
     reset_resp.command = static_cast<std::uint8_t>(response_command::RESET_KEEPALIVE_TIMER);
     std::strncpy(reset_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -801,7 +749,6 @@ TEST_F(ServerTest, DispatchStartAndResetKeepaliveTimer)
 
     EXPECT_TRUE(m_sm_ptr->has_session(session_id));
 
-    // Clean up: clear timers so they don't fire during teardown
     response_slot_t clear_resp{};
     clear_resp.command = static_cast<std::uint8_t>(response_command::CLEAR_TIMERS);
     std::strncpy(clear_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -834,7 +781,6 @@ TEST_F(ServerTest, DispatchDisconnectRemovesSession)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -845,7 +791,6 @@ TEST_F(ServerTest, DispatchDisconnectRemovesSession)
 
     EXPECT_TRUE(m_sm_ptr->has_session(session_id));
 
-    // DISCONNECT
     response_slot_t disc_resp{};
     disc_resp.command = static_cast<std::uint8_t>(response_command::DISCONNECT);
     std::strncpy(disc_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -865,14 +810,12 @@ TEST_F(ServerTest, DispatchBroadcast)
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Connect two clients
     int sock1 = connect_tcp(port);
     ASSERT_GE(sock1, 0);
     int sock2 = connect_tcp(port);
     ASSERT_GE(sock2, 0);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Send messages to get session IDs
     message_t msg1, msg2;
     create_auth_request_message(&msg1, "HUB", "b1", "b1", "h");
     create_auth_request_message(&msg2, "WAREHOUSE", "b2", "b2", "h");
@@ -889,7 +832,6 @@ TEST_F(ServerTest, DispatchBroadcast)
     ASSERT_TRUE(try_pop_request(req2));
     std::string sid1(req1.session_id), sid2(req2.session_id);
 
-    // Authenticate both
     for (auto& [sid, ctype, uname] :
          std::vector<std::tuple<std::string, const char*, const char*>>{{sid1, "HUB", "b1"}, {sid2, "WAREHOUSE", "b2"}})
     {
@@ -902,7 +844,6 @@ TEST_F(ServerTest, DispatchBroadcast)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    // Broadcast
     const char* payload = "{\"broadcast\":true}";
     response_slot_t bcast{};
     bcast.command = static_cast<std::uint8_t>(response_command::BROADCAST);
@@ -911,7 +852,6 @@ TEST_F(ServerTest, DispatchBroadcast)
     push_response(bcast);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    // Both clients should receive the broadcast
     char recv1[BUFFER_SIZE]{}, recv2[BUFFER_SIZE]{};
     EXPECT_TRUE(recv_frame(sock1, recv1));
     EXPECT_TRUE(recv_frame(sock2, recv2));
@@ -945,7 +885,6 @@ TEST_F(ServerTest, KeepaliveTimeoutDisconnectsSession)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -954,17 +893,14 @@ TEST_F(ServerTest, KeepaliveTimeoutDisconnectsSession)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // Start a keepalive timer with short timeout (1s)
     response_slot_t ka_resp{};
     ka_resp.command = static_cast<std::uint8_t>(response_command::START_KEEPALIVE_TIMER);
     std::strncpy(ka_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
     ka_resp.timer_timeout = 1;
     push_response(ka_resp);
 
-    // Wait for the timer to expire
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 
-    // Session should be removed
     EXPECT_FALSE(m_sm_ptr->has_session(session_id));
 
     ::close(sock);
@@ -1001,7 +937,6 @@ TEST_F(ServerTest, AckTimeoutRetriesAndDisconnects)
     ASSERT_TRUE(try_pop_request(req));
     std::string session_id(req.session_id);
 
-    // Authenticate
     response_slot_t auth_resp{};
     auth_resp.command = static_cast<std::uint8_t>(response_command::MARK_AUTHENTICATED);
     std::strncpy(auth_resp.session_id, session_id.c_str(), SESSION_ID_SIZE - 1);
@@ -1010,7 +945,6 @@ TEST_F(ServerTest, AckTimeoutRetriesAndDisconnects)
     push_response(auth_resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // SEND + ack timer with retry_count=0, max_retries=2, timeout=1s
     const char* payload = "{\"need_ack\":1}";
     response_slot_t send_resp{};
     send_resp.command = static_cast<std::uint8_t>(response_command::SEND);
@@ -1024,16 +958,13 @@ TEST_F(ServerTest, AckTimeoutRetriesAndDisconnects)
     send_resp.max_retries = 2;
     push_response(send_resp);
 
-    // Read the initial send
     char recv_buf[BUFFER_SIZE]{};
     EXPECT_TRUE(recv_frame(sock, recv_buf));
 
-    // Wait for retry #1 (at 1s)
     char retry_buf[BUFFER_SIZE]{};
     EXPECT_TRUE(recv_frame(sock, retry_buf, 2000));
     EXPECT_STREQ(retry_buf, payload);
 
-    // After max retries, the session should be disconnected
     std::this_thread::sleep_for(std::chrono::milliseconds(1500));
     EXPECT_FALSE(m_sm_ptr->has_session(session_id));
 
@@ -1085,7 +1016,6 @@ TEST_F(ServerTest, DispatchResponseToGoneSessionIsIgnored)
     start_loop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Push a SEND for a non-existent session — should be silently ignored
     response_slot_t resp{};
     resp.command = static_cast<std::uint8_t>(response_command::SEND);
     std::strncpy(resp.session_id, "nonexistent_session", SESSION_ID_SIZE - 1);
@@ -1094,8 +1024,6 @@ TEST_F(ServerTest, DispatchResponseToGoneSessionIsIgnored)
     resp.payload_len = static_cast<std::uint32_t>(std::strlen(payload));
     push_response(resp);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    // No crash, no hang — test passes if we get here
 }
 
 int main(int argc, char** argv)
