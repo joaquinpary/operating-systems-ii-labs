@@ -1,0 +1,13 @@
+{
+    "ip_v4": "0.0.0.0",
+    "ip_v6": "::",
+    "network_port": 9999,
+    "ack_timeout": 3,
+    "max_auth_attempts": 3,
+    "max_retries": 3,
+    "keepalive_timeout": 120,
+    "pool_size": 24,
+    "worker_threads": 12,
+    "credentials_path": "/etc/server/clients"
+}
+

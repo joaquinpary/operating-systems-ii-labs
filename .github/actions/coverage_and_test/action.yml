@@ -1,0 +1,47 @@
+name: "Test and coverage check"
+description: "Test and coverage check with gcovr, pass if coverage is greater than 50%"
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Run coverage"
+      shell: bash
+      env:
+        POSTGRES_HOST: localhost
+        POSTGRES_DB: dhl_db
+        POSTGRES_USER: dhl_user
+        POSTGRES_PASSWORD: dhl_pass
+      run: |
+        PROJECT_PATH=$(pwd)
+
+        # Run Test
+        cd build/tests
+        ctest --output-on-failure
+        cd ../..
+
+        # Run Coverage with gcovr (only src/ directory)
+        gcovr -r $PROJECT_PATH --filter $PROJECT_PATH/src build > $PROJECT_PATH/coverage.txt
+
+        echo "Running: gcovr -r $PROJECT_PATH --filter $PROJECT_PATH/src build"
+
+        cat $PROJECT_PATH/coverage.txt
+
+        # Find the value of correct coverage
+        COVERAGE_RESULT=$(grep "TOTAL" $PROJECT_PATH/coverage.txt | awk '{print $NF}' | cut -d '%' -f 1)
+
+        # Coverage lines GT 50
+        if [ "$(echo "$COVERAGE_RESULT > 50" | bc)" -eq 1 ]; then
+            echo "Coverage is $COVERAGE_RESULT% - greater than 50%. Nice!"
+            exit 0
+        else
+            echo "Error: Coverage is $COVERAGE_RESULT% - less than or equal to 50%"
+            exit 1
+        fi
+
+    # Upload coverage report as an artifact when failed
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Coverage report (failed)
+        path: coverage.txt
+        retention-days: 1

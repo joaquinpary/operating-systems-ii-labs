@@ -1,0 +1,16 @@
+name: "Build"
+description: "Executes a compilation."
+
+runs:
+  using: "composite"
+  steps:
+      - name: Compile
+        shell: bash
+        run: |
+          mkdir -p build && cd build
+          cmake -DBUILD_TARGET=client .. && make
+          echo "Client built successfully"
+          cmake -DBUILD_TARGET=server .. && make
+          echo "Server built successfully"
+          cmake -DRUN_COVERAGE=1 .. && make
+          echo "Coverage build completed"
