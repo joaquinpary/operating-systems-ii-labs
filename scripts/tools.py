@@ -6,17 +6,20 @@ Usage:
     python3 scripts/tools.py
 """
 
-import sys
 import os
+import sys
 
 # Ensure the scripts/ directory is in the path so 'modules' is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from modules import gen_credentials
+from modules import gen_certs
 from modules import admin_cli
 from modules import rest_api_client
 from modules import benchmark
 from modules import profiling_graph
+from modules import api_gateway_client
+from modules import stress_test
 
 
 # ── ANSI helpers ────────────────────────────────────────────────────────────
@@ -29,7 +32,6 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 RESET = "\033[0m"
 
-
 def _header():
     print()
     print(f"  {CYAN}{BOLD}╔═══════════════════════════════════════╗{RESET}")
@@ -40,6 +42,9 @@ def _header():
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}3){RESET} REST API Client                   {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}4){RESET} Benchmark                         {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}5){RESET} Profiling Graph                   {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}6){RESET} API Gateway Tester                {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}7){RESET} Generate TLS Certs                {CYAN}{BOLD}║{RESET}")
+    print(f"  {CYAN}{BOLD}║{RESET}  {GREEN}8){RESET} Gateway Stress Test               {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}║{RESET}  {RED}0){RESET} Exit                              {CYAN}{BOLD}║{RESET}")
     print(f"  {CYAN}{BOLD}╚═══════════════════════════════════════╝{RESET}")
     print()
@@ -302,6 +307,184 @@ def menu_profiling_graph():
     _pause()
 
 
+# ── Option 6: API Gateway Tester ────────────────────────────────────────────
+
+def _gw_header(base_url, has_token):
+    status = f"{GREEN}yes{RESET}" if has_token else f"{RED}no{RESET}"
+    print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}")
+    print(f"  {DIM}Base URL : {base_url}{RESET}")
+    print(f"  {DIM}JWT token: {status}{RESET}\n")
+    print(f"    {GREEN}1){RESET} Login with credentials  POST /login")
+    print(f"    {GREEN}2){RESET} Create Shipment         POST /shipments")
+    print(f"    {GREEN}3){RESET} Dispatch Shipment       POST /dispatch")
+    print(f"    {GREEN}4){RESET} Get All Statuses        GET  /status")
+    print(f"    {GREEN}5){RESET} Get Shipment Status     GET  /status/:id")
+    print(f"    {GREEN}6){RESET} Open WS Session         WS   /ws/chat")
+    print(f"    {GREEN}7){RESET} Predict Shipment        POST /predict")
+    print(f"    {GREEN}8){RESET} Check /metrics          GET  /metrics")
+    print(f"    {GREEN}9){RESET} Verify X-Request-ID     GET  /metrics + header")
+    print(f"    {RED}0){RESET} ← Back to main menu")
+    print()
+
+
+def _gw_prompt_quantities():
+    """Ask the user for quantities of each item type (food..ammo)."""
+    print(f"  {DIM}Enter quantity for each item (0 to skip):{RESET}")
+    quantities: dict[int, int] = {}
+    for item_id, item_name in api_gateway_client.ITEM_CATALOGUE:
+        qty = _prompt_int(f"    {item_id}) {item_name}", 0)
+        if qty > 0:
+            quantities[item_id] = qty
+    return quantities
+
+
+def menu_gen_certs():
+    print(f"\n  {BOLD}── Generate TLS Certificates ──────────────{RESET}\n")
+    domain = _prompt("Domain", gen_certs.DEFAULT_DOMAIN)
+    days = _prompt_int("Validity (days)", gen_certs.DEFAULT_DAYS)
+    overwrite = _prompt("Overwrite existing certs? (y/N)", "N")
+    force = overwrite.lower() in ("y", "yes")
+    print()
+    result = gen_certs.generate_certs(domain=domain, days=days, force=force)
+    _print_result_error(result)
+    _pause()
+
+
+def menu_stress_test():
+    print(f"\n  {BOLD}── Gateway Stress Test ────────────────────{RESET}\n")
+    print(f"  {DIM}Gateway rate limit: 600 req/min per IP (retries on 429 automatically).{RESET}")
+    print(f"  {DIM}Each client logs in once, then runs random cycles of:{RESET}")
+    print(f"  {DIM}  create+dispatch (50%), predict (25%), status check (25%).{RESET}")
+    print(f"  {DIM}Use ramp-up and inter-request delay to avoid hitting the limit.{RESET}\n")
+    base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
+    num = _prompt_int("Number of clients", 10)
+    c_min = _prompt_int("Min cycles per client", 3)
+    c_max = _prompt_int("Max cycles per client", 8)
+    if c_max < c_min:
+        c_max = c_min
+    ramp_up = _prompt_int("Ramp-up period (seconds, 0 = all at once)", 0)
+    delay_ms = _prompt_int("Delay between requests per client (ms, 0 = none)", 0)
+    ws_choice = _prompt("Enable WebSocket phase? (y/N)", "N")
+    enable_ws = ws_choice.lower() in ("y", "yes")
+    print()
+    stress_test.run_stress_test(
+        base_url, num,
+        enable_ws=enable_ws,
+        ramp_up_s=float(ramp_up),
+        req_delay_s=delay_ms / 1000.0,
+        cycles_min=c_min,
+        cycles_max=c_max,
+    )
+    _pause()
+
+
+def menu_api_gateway():
+    print(f"\n  {BOLD}── API Gateway Tester ─────────────────────{RESET}\n")
+    base_url = _prompt("Base URL", api_gateway_client.DEFAULT_BASE_URL)
+
+    token = None
+
+    while True:
+        _gw_header(base_url, token is not None)
+        choice = _prompt("Select", "0")
+
+        try:
+            if choice == "1":
+                creds = api_gateway_client.list_credentials()
+                if not creds:
+                    print(f"  {RED}No credentials found. Run 'Generate Credentials' first.{RESET}")
+                    _pause()
+                    continue
+                print(f"  {DIM}Found {len(creds)} credential files.{RESET}")
+                client_num = _prompt("Client number (e.g. 1 for go_client_0001)", "1")
+                try:
+                    conf_name = f"go_client_{int(client_num):04d}.conf"
+                except ValueError:
+                    print(f"  {RED}Invalid number.{RESET}")
+                    _pause()
+                    continue
+                conf_path = os.path.join(api_gateway_client.GATEWAY_CREDS_DIR, conf_name)
+                if not os.path.isfile(conf_path):
+                    print(f"  {RED}File not found: {conf_name}{RESET}")
+                    _pause()
+                    continue
+                cred = api_gateway_client.read_credential(conf_path)
+                print(f"  {DIM}Logging in as {cred.get('username', '?')}...{RESET}")
+                resp = api_gateway_client.login(
+                    base_url, cred["username"], cred["password"]
+                )
+                if "token" in resp:
+                    token = resp["token"]
+                    print(f"  {GREEN}Login OK — token: {token[:40]}...{RESET}")
+                else:
+                    print(f"  {RED}Login failed: {resp}{RESET}")
+                _pause()
+
+            elif choice == "2":
+                quantities = _gw_prompt_quantities()
+                if not any(q > 0 for q in quantities.values()):
+                    print(f"  {RED}All quantities are 0 — nothing to ship.{RESET}")
+                else:
+                    print()
+                    api_gateway_client.create_shipment(
+                        base_url, token, quantities
+                    )
+                _pause()
+
+            elif choice == "3":
+                sid = _prompt("Shipment ID")
+                print()
+                api_gateway_client.dispatch_shipment(base_url, token, sid)
+                _pause()
+
+            elif choice == "4":
+                print()
+                api_gateway_client.get_all_statuses(base_url, token)
+                _pause()
+
+            elif choice == "5":
+                sid = _prompt("Shipment / Transaction ID")
+                print()
+                api_gateway_client.get_status(base_url, token, sid)
+                _pause()
+
+            elif choice == "6":
+                print()
+                api_gateway_client.chat_session(base_url, token)
+                _pause()
+
+            elif choice == "7":
+                quantities = _gw_prompt_quantities()
+                if not any(q > 0 for q in quantities.values()):
+                    print(f"  {RED}All quantities are 0 — nothing to predict.{RESET}")
+                else:
+                    print()
+                    api_gateway_client.predict_shipment(
+                        base_url, token, quantities
+                    )
+                _pause()
+
+            elif choice == "8":
+                print()
+                api_gateway_client.fetch_metrics(base_url)
+                _pause()
+
+            elif choice == "9":
+                custom = _prompt("Custom X-Request-ID (leave blank for random)", "")
+                print()
+                api_gateway_client.check_request_id(base_url, custom or None)
+                _pause()
+
+            elif choice == "0":
+                return
+            else:
+                print(f"  {RED}Invalid option.{RESET}")
+
+        except KeyboardInterrupt:
+            print()
+            return
+
+
 # ── Main loop ───────────────────────────────────────────────────────────────
 
 def main():
@@ -320,6 +503,12 @@ def main():
                 menu_benchmark()
             elif choice == "5":
                 menu_profiling_graph()
+            elif choice == "6":
+                menu_api_gateway()
+            elif choice == "7":
+                menu_gen_certs()
+            elif choice == "8":
+                menu_stress_test()
             elif choice == "0":
                 print(f"\n  {DIM}Bye!{RESET}\n")
                 break

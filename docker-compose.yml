@@ -33,6 +33,24 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: dhl_rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - dhl_net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   mongo:
     image: mongo:7
     container_name: dhl_mongo
@@ -82,7 +100,100 @@ services:
     networks:
       - dhl_net
     shm_size: '256m'
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9999' 2>/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
     command: ["/app/dhl_server"]
+
+  traefik:
+    image: traefik:v3.4
+    container_name: dhl_traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8082:8080"        # dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./config/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./config/traefik/certs:/etc/traefik/certs:ro
+    networks:
+      - dhl_net
+
+  eureka:
+    image: steeltoeoss/eureka-server:latest
+    container_name: dhl_eureka
+    restart: always
+    ports:
+      - "8761:8761"
+    networks:
+      - dhl_net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8761/eureka/apps"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  gateway:
+    build:
+      context: ./api_gateway
+      dockerfile: Dockerfile
+    restart: always
+    deploy:
+      replicas: 2
+    depends_on:
+      server:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+      predictor:
+        condition: service_healthy
+      eureka:
+        condition: service_healthy
+    environment:
+      CORE_HOST: server
+      CORE_PORT: 9999
+      HTTP_PORT: 8081
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      JWT_SECRET: change-me
+      CREDENTIALS_DIR: /etc/gateway
+      PREDICTOR_URL: http://predictor:9000
+      LOG_DIR: /var/log/dhl
+      EUREKA_URL: http://eureka:8761/eureka
+      EUREKA_APP_NAME: API-GATEWAY
+    expose:
+      - "8081"
+    volumes:
+      - ./config/gateway:/etc/gateway:ro
+      - ./logs/gateway:/var/log/dhl
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      # HTTPS router
+      - "traefik.http.routers.gateway.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.gateway.entrypoints=websecure"
+      - "traefik.http.routers.gateway.tls=true"
+      # HTTP router (redirect to HTTPS)
+      - "traefik.http.routers.gateway-http.rule=Host(`api.localhost`)"
+      - "traefik.http.routers.gateway-http.entrypoints=web"
+      - "traefik.http.routers.gateway-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      # Load balancer target port
+      - "traefik.http.services.gateway.loadbalancer.server.port=8081"
+      # Sticky sessions for WebSocket affinity
+      - "traefik.http.services.gateway.loadbalancer.sticky.cookie.name=ws_affinity"
+      - "traefik.http.services.gateway.loadbalancer.sticky.cookie.secure=true"
+    networks:
+      - dhl_net
 
   client:
     build:
@@ -92,7 +203,8 @@ services:
         BUILD_TARGET: client
     container_name: dhl_clients
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     environment:
       - NUM_CLIENTS=${NUM_CLIENTS:-10}
       - CONFIG_BASE_PATH=/etc/client/client_%s.conf
@@ -124,6 +236,22 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
+
+  predictor:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: dhl_predictor
+    restart: always
+    ports:
+      - "9000:9000"
+    networks:
+      - dhl_net
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 networks:
   dhl_net:

@@ -3,8 +3,10 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <sys/epoll.h>
 #include <unordered_map>
+#include <vector>
 
 /// Maximum number of events returned per epoll_wait call.
 inline constexpr int MAX_EPOLL_EVENTS = 256;
@@ -59,11 +61,19 @@ class event_loop
      */
     bool is_running() const;
 
+    /**
+     * Post a callback to be executed on the next event loop iteration.
+     * Thread-safe: can be called from any thread.
+     */
+    void post(std::function<void()> fn);
+
   private:
     int m_epoll_fd;
     int m_wakeup_fd; ///< Internal eventfd used by stop() to wake up epoll_wait.
     bool m_running;
     std::unordered_map<int, fd_callback_t> m_callbacks;
+    std::mutex m_deferred_mutex;
+    std::vector<std::function<void()>> m_deferred;
 };
 
 #endif // EVENT_LOOP_HPP

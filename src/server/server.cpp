@@ -589,28 +589,47 @@ void server::dispatch_response(const response_slot_t& resp)
     }
     case response_command::BROADCAST: {
         std::string data(resp.payload, resp.payload_len);
-        auto sessions = m_session_manager->get_authenticated_sessions();
-        for (const auto& target_session : sessions)
-        {
-            send_to_session(target_session, data);
+        auto sessions = std::make_shared<std::vector<std::string>>(m_session_manager->get_authenticated_sessions());
+        bool need_ack = resp.start_ack_timer && resp.timer_timeout > 0;
+        std::string timer_key(resp.timer_key);
+        std::uint32_t retry_count = resp.retry_count;
+        std::uint32_t max_retries = resp.max_retries;
+        std::uint32_t timeout = resp.timer_timeout;
 
-            if (resp.start_ack_timer && resp.timer_timeout > 0 &&
-                m_session_manager->get_client_type(target_session) != CLI)
+        LOG_INFO_MSG("[DISPATCH] BROADCAST len=%u to %zu sessions (batched)", resp.payload_len, sessions->size());
+
+        static constexpr std::size_t BROADCAST_BATCH_SIZE = 100;
+
+        auto send_batch = [this, sessions, data, need_ack, timer_key, retry_count, max_retries,
+                           timeout](std::size_t start, std::size_t end) {
+            for (std::size_t i = start; i < end; ++i)
             {
-                std::string timer_key(resp.timer_key);
-                std::string payload_copy(resp.payload, resp.payload_len);
-                std::uint32_t retry_count = resp.retry_count;
-                std::uint32_t max_retries = resp.max_retries;
-                std::uint32_t timeout = resp.timer_timeout;
+                const auto& target_session = (*sessions)[i];
+                if (!m_session_manager->has_session(target_session))
+                    continue;
+                send_to_session(target_session, data);
 
-                m_timer_manager->start_ack_timer(
-                    target_session, timer_key, static_cast<int>(timeout),
-                    [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
-                        handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
-                    });
+                if (need_ack && m_session_manager->get_client_type(target_session) != CLI)
+                {
+                    std::string payload_copy = data;
+                    m_timer_manager->start_ack_timer(
+                        target_session, timer_key, static_cast<int>(timeout),
+                        [this, target_session, timer_key, payload_copy, retry_count, max_retries]() {
+                            handle_ack_timeout(target_session, timer_key, payload_copy, retry_count, max_retries);
+                        });
+                }
             }
+        };
+
+        std::size_t total = sessions->size();
+        std::size_t first_end = std::min(BROADCAST_BATCH_SIZE, total);
+        send_batch(0, first_end);
+
+        for (std::size_t offset = first_end; offset < total; offset += BROADCAST_BATCH_SIZE)
+        {
+            std::size_t batch_end = std::min(offset + BROADCAST_BATCH_SIZE, total);
+            m_loop.post([send_batch, offset, batch_end]() { send_batch(offset, batch_end); });
         }
-        LOG_INFO_MSG("[DISPATCH] BROADCAST len=%u to %zu sessions", resp.payload_len, sessions.size());
         break;
     }
     }

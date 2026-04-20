@@ -1,5 +1,6 @@
 #include "message_handler.hpp"
 #include "admin_cli_interface.h"
+#include "api_gateway_interface.h"
 
 #include <common/logger.h>
 
@@ -54,6 +55,49 @@ message_handler::message_handler(auth_module& auth, inventory_manager& inv_mgr, 
     {
         LOG_WARNING_MSG("[ADMIN] libadmin_cli.so not found — CLI disabled (%s)", dlerror());
     }
+
+    // --- Load libapi_gateway.so ---
+    m_gateway_lib = dlopen("libapi_gateway.so", RTLD_LAZY);
+    if (!m_gateway_lib)
+        m_gateway_lib = dlopen("libapi_gateway.so.1", RTLD_LAZY);
+
+    if (m_gateway_lib)
+    {
+        using version_fn = const char* (*)();
+        using init_fn = int (*)(const char*);
+
+        auto ver = reinterpret_cast<version_fn>(dlsym(m_gateway_lib, "api_gateway_version"));
+        auto init = reinterpret_cast<init_fn>(dlsym(m_gateway_lib, "api_gateway_init"));
+        m_gateway_handle = reinterpret_cast<gateway_handle_fn>(dlsym(m_gateway_lib, "api_gateway_handle"));
+        m_gateway_shutdown = reinterpret_cast<gateway_shutdown_fn>(dlsym(m_gateway_lib, "api_gateway_shutdown"));
+
+        if (init && m_gateway_handle && !db_conn_string.empty())
+        {
+            if (init(db_conn_string.c_str()) == 0)
+            {
+                LOG_INFO_MSG("[GATEWAY] libapi_gateway.so loaded (v%s)", ver ? ver() : "?");
+            }
+            else
+            {
+                LOG_ERROR_MSG("[GATEWAY] api_gateway_init failed");
+                m_gateway_handle = nullptr;
+            }
+        }
+        else if (db_conn_string.empty())
+        {
+            LOG_WARNING_MSG("[GATEWAY] libapi_gateway.so loaded but no conn_string — gateway disabled");
+            m_gateway_handle = nullptr;
+        }
+        else
+        {
+            LOG_ERROR_MSG("[GATEWAY] libapi_gateway.so missing symbols");
+            m_gateway_handle = nullptr;
+        }
+    }
+    else
+    {
+        LOG_WARNING_MSG("[GATEWAY] libapi_gateway.so not found — gateway disabled (%s)", dlerror());
+    }
 }
 
 message_handler::~message_handler()
@@ -62,6 +106,11 @@ message_handler::~message_handler()
         m_admin_shutdown();
     if (m_admin_lib)
         dlclose(m_admin_lib);
+
+    if (m_gateway_shutdown)
+        m_gateway_shutdown();
+    if (m_gateway_lib)
+        dlclose(m_gateway_lib);
 }
 
 response_slot_t message_handler::make_send_response(const char* session_id, const message_t& msg)
@@ -349,12 +398,13 @@ std::vector<response_slot_t> message_handler::handle_auth_request(const message_
 
         responses.push_back(make_send_response(req.session_id, response_msg));
         const bool is_cli = (auth_res.client_type == CLI);
+        const bool is_gateway = (auth_res.client_type == GATEWAY);
         if (!is_cli)
         {
             responses.push_back(make_start_timer(req.session_id, response_msg));
         }
 
-        if (!is_cli)
+        if (!is_cli && !is_gateway)
         {
             message_t inv_msg;
             if (m_inventory_manager.get_client_inventory_message(auth_res.username, auth_res.client_type, inv_msg))
@@ -423,6 +473,23 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             LOG_INFO_MSG("[MSG] dispatch -> wh=%s txn=%d", fulfilled.assigned_warehouse_id.c_str(),
                          fulfilled.transaction_id);
         }
+
+        // When a HUB reports inventory, check if pending gateway orders can now be fulfilled.
+        if (std::strcmp(msg.source_role, HUB) == 0)
+        {
+            auto gateway_fulfilled = m_inventory_manager.process_pending_gateway_orders(msg.source_id);
+            for (const auto& order : gateway_fulfilled)
+            {
+                message_t dispatch_msg;
+                if (create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, SERVER,
+                                         order.requesting_hub_id.c_str(), order.items, order.item_count, NULL) == 0)
+                {
+                    responses.push_back(make_send_to_username(order.requesting_hub_id.c_str(), dispatch_msg));
+                    LOG_INFO_MSG("[MSG] pending gateway order -> hub=%s txn=%d", order.requesting_hub_id.c_str(),
+                                 order.transaction_id);
+                }
+            }
+        }
     }
     else if (category == message_category::STOCK_REQ)
     {
@@ -456,6 +523,46 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
     else if (category == message_category::RECEIPT_CONFIRM)
     {
         m_inventory_manager.handle_receipt_confirmation(msg);
+
+        // When a HUB receives stock, check if pending gateway orders can now be fulfilled.
+        if (std::strcmp(msg.source_role, HUB) == 0)
+        {
+            auto gateway_fulfilled = m_inventory_manager.process_pending_gateway_orders(msg.source_id);
+            for (const auto& order : gateway_fulfilled)
+            {
+                // Tell the HUB to dispatch the stock.
+                message_t dispatch_msg;
+                if (create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, SERVER,
+                                         order.requesting_hub_id.c_str(), order.items, order.item_count, NULL) == 0)
+                {
+                    responses.push_back(make_send_to_username(order.requesting_hub_id.c_str(), dispatch_msg));
+                    LOG_INFO_MSG("[MSG] pending gateway order -> hub=%s txn=%d", order.requesting_hub_id.c_str(),
+                                 order.transaction_id);
+                }
+            }
+        }
+    }
+    else if (category == message_category::DISPATCH_CONFIRM)
+    {
+        int transaction_id = -1;
+        if (m_inventory_manager.handle_dispatch_confirmation(msg, transaction_id) == 0 && transaction_id >= 0)
+        {
+            // Notify every gateway session that this order was dispatched.
+            message_t notify;
+            std::memset(&notify, 0, sizeof(notify));
+            std::strncpy(notify.msg_type, SERVER_TO_GATEWAY__ORDER_DISPATCHED, MESSAGE_TYPE_SIZE - 1);
+            std::strncpy(notify.source_role, SERVER, ROLE_SIZE - 1);
+            std::strncpy(notify.source_id, SERVER, ID_SIZE - 1);
+            std::strncpy(notify.target_role, GATEWAY, ROLE_SIZE - 1);
+            std::strncpy(notify.timestamp, msg.timestamp, TIMESTAMP_SIZE - 1);
+
+            char txn_str[32];
+            std::snprintf(txn_str, sizeof(txn_str), "%d", transaction_id);
+            std::strncpy(notify.payload.generic_args.args, txn_str, sizeof(notify.payload.generic_args.args) - 1);
+
+            responses.push_back(make_send_to_username("api_gateway", notify));
+            LOG_INFO_MSG("[MSG] order_dispatched -> gateway txn=%d hub=%s", transaction_id, msg.source_id);
+        }
     }
     else if (category == message_category::DISPATCH_NOTICE)
     {
@@ -521,10 +628,6 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
                 std::uint32_t len = static_cast<std::uint32_t>(std::strlen(json_buf));
                 std::memcpy(slot.payload, json_buf, len);
                 slot.payload_len = len;
-                slot.start_ack_timer = true;
-                std::strncpy(slot.timer_key, broadcast_msg.timestamp, TIMESTAMP_SIZE - 1);
-                slot.timer_timeout = m_ack_timeout_seconds;
-                slot.max_retries = m_max_retries;
                 responses.push_back(slot);
             }
             LOG_INFO_MSG("[MSG] emergency broadcast from=%s code=%d", msg.source_id,
@@ -562,6 +665,62 @@ std::vector<response_slot_t> message_handler::handle_other_message(const message
             LOG_ERROR_MSG("[MSG] admin_cli_handle failed from=%s", msg.source_id);
         }
     }
+    else if (category == message_category::GATEWAY_COMMAND)
+    {
+        if (!m_gateway_handle)
+        {
+            LOG_WARNING_MSG("[MSG] Gateway command but gateway plugin not loaded, from=%s", msg.source_id);
+            return responses;
+        }
+
+        char resp_buf[GATEWAY_RESPONSE_MAX];
+        gateway_side_effect_t side;
+        std::memset(&side, 0, sizeof(side));
+
+        if (m_gateway_handle(req.raw_json, resp_buf, sizeof(resp_buf), &side) == 0)
+        {
+            response_slot_t slot;
+            std::memset(&slot, 0, sizeof(slot));
+            slot.command = static_cast<std::uint8_t>(response_command::SEND);
+            std::strncpy(slot.session_id, req.session_id, SESSION_ID_SIZE - 1);
+
+            std::uint32_t len = static_cast<std::uint32_t>(std::strlen(resp_buf));
+            std::memcpy(slot.payload, resp_buf, len);
+            slot.payload_len = len;
+            responses.push_back(slot);
+            LOG_INFO_MSG("[MSG] Gateway response -> sess=%s len=%u", req.session_id, len);
+
+            // If the plugin produced a side-effect message, forward it.
+            if (side.has_message)
+            {
+                // Extract the timestamp from the serialised side-effect so the
+                // ACK timer can be matched when the target client acknowledges.
+                message_t side_msg;
+                std::memset(&side_msg, 0, sizeof(side_msg));
+                deserialize_message_from_json(side.send_json, &side_msg);
+
+                response_slot_t fwd;
+                std::memset(&fwd, 0, sizeof(fwd));
+                fwd.command = static_cast<std::uint8_t>(response_command::SEND);
+                std::strncpy(fwd.target_username, side.target_username, CREDENTIALS_SIZE - 1);
+
+                std::uint32_t fwd_len = static_cast<std::uint32_t>(std::strlen(side.send_json));
+                std::memcpy(fwd.payload, side.send_json, fwd_len);
+                fwd.payload_len = fwd_len;
+                fwd.start_ack_timer = true;
+                fwd.timer_timeout = m_ack_timeout_seconds;
+                fwd.max_retries = m_max_retries;
+                std::strncpy(fwd.timer_key, side_msg.timestamp, TIMESTAMP_SIZE - 1);
+                responses.push_back(fwd);
+
+                LOG_INFO_MSG("[MSG] Gateway side-effect -> user=%s len=%u", side.target_username, fwd_len);
+            }
+        }
+        else
+        {
+            LOG_ERROR_MSG("[MSG] api_gateway_handle failed from=%s", msg.source_id);
+        }
+    }
     else
     {
         LOG_WARNING_MSG("[MSG] unhandled type=%s from=%s", msg.msg_type, msg.source_id);
@@ -574,18 +733,21 @@ message_category message_handler::categorize_message(const char* msg_type) const
 {
     if (std::strcmp(msg_type, HUB_TO_SERVER__AUTH_REQUEST) == 0 ||
         std::strcmp(msg_type, WAREHOUSE_TO_SERVER__AUTH_REQUEST) == 0 ||
-        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0)
+        std::strcmp(msg_type, CLI_TO_SERVER__AUTH_REQUEST) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__AUTH_REQUEST) == 0)
     {
         return message_category::AUTH_REQUEST;
     }
 
-    if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0)
+    if (std::strcmp(msg_type, HUB_TO_SERVER__ACK) == 0 || std::strcmp(msg_type, WAREHOUSE_TO_SERVER__ACK) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__ACK) == 0)
     {
         return message_category::ACK_MESSAGE;
     }
 
     if (std::strcmp(msg_type, HUB_TO_SERVER__KEEPALIVE) == 0 ||
-        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__KEEPALIVE) == 0)
+        std::strcmp(msg_type, WAREHOUSE_TO_SERVER__KEEPALIVE) == 0 ||
+        std::strcmp(msg_type, GATEWAY_TO_SERVER__KEEPALIVE) == 0)
     {
         return message_category::KEEPALIVE_MSG;
     }
@@ -605,6 +767,11 @@ message_category message_handler::categorize_message(const char* msg_type) const
         std::strcmp(msg_type, WAREHOUSE_TO_SERVER__STOCK_RECEIPT_CONFIRMATION) == 0)
     {
         return message_category::RECEIPT_CONFIRM;
+    }
+
+    if (std::strcmp(msg_type, HUB_TO_SERVER__DISPATCH_CONFIRMATION) == 0)
+    {
+        return message_category::DISPATCH_CONFIRM;
     }
 
     if (std::strcmp(msg_type, WAREHOUSE_TO_SERVER__SHIPMENT_NOTICE) == 0)
@@ -628,6 +795,11 @@ message_category message_handler::categorize_message(const char* msg_type) const
         return message_category::CLI_COMMAND;
     }
 
+    if (std::strcmp(msg_type, GATEWAY_TO_SERVER__COMMAND) == 0)
+    {
+        return message_category::GATEWAY_COMMAND;
+    }
+
     return message_category::OTHER;
 }
 
@@ -644,6 +816,10 @@ const char* message_handler::get_auth_response_type(const std::string& client_ty
     else if (client_type == CLI)
     {
         return SERVER_TO_CLI__AUTH_RESPONSE;
+    }
+    else if (client_type == GATEWAY)
+    {
+        return SERVER_TO_GATEWAY__AUTH_RESPONSE;
     }
     return nullptr;
 }

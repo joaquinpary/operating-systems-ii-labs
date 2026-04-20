@@ -59,6 +59,14 @@ class inventory_manager
     int handle_receipt_confirmation(const message_t& msg);
 
     /**
+     * Process a dispatch confirmation from a hub (ORDER_DISPATCH flow).
+     * Reduces the hub's inventory in the DB and marks the transaction DISPATCHED.
+     * @param msg DISPATCH_CONFIRMATION message from a hub.
+     * @return 0 on success, negative value on error.
+     */
+    int handle_dispatch_confirmation(const message_t& msg, int& out_transaction_id);
+
+    /**
      * Update a transaction after a warehouse reports a shipment dispatch.
      * @param msg SHIPMENT_NOTICE message from a warehouse.
      * @return Workflow result with the destination hub to notify.
@@ -71,6 +79,14 @@ class inventory_manager
      * @return Orders that can now be dispatched.
      */
     std::vector<stock_request_result> process_pending_orders(const std::string& warehouse_id);
+
+    /**
+     * Re-evaluate pending gateway orders (ORDER_DISPATCH) against one hub inventory snapshot.
+     * Called when a HUB receives stock, to fulfill pending gateway dispatch requests.
+     * @param hub_id HUB to test against pending gateway orders.
+     * @return Orders that can now be dispatched by this HUB.
+     */
+    std::vector<stock_request_result> process_pending_gateway_orders(const std::string& hub_id);
 
     /**
      * Build an INVENTORY_UPDATE message from the stored inventory of a client.

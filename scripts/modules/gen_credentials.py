@@ -19,6 +19,7 @@ _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(_MODULE_DIR))
 CLIENTS_DIR = os.path.join(_PROJECT_ROOT, "config", "clients")
 SERVER_DIR = os.path.join(_PROJECT_ROOT, "config", "server")
+GATEWAY_DIR = os.path.join(_PROJECT_ROOT, "config", "gateway")
 
 
 def generate_password(username):
@@ -132,7 +133,33 @@ def generate_configs(num_clients=2000):
         cli_username, cli_password, "CLI"
     )
 
+    # Always generate API gateway credential
+    gw_username = "api_gateway"
+    gw_password = generate_password(gw_username)
+    _write_conf_file(
+        os.path.join(SERVER_DIR, "api_gateway.conf"),
+        gw_username, gw_password, "GATEWAY"
+    )
+
+    # --- Generate gateway client credentials (for Go API gateway /login) ---
+    num_gw_clients = 1000
+    if not _ensure_dir(GATEWAY_DIR):
+        return
+    _clean_conf_files(GATEWAY_DIR)
+    for i in range(1, num_gw_clients + 1):
+        gw_client_user = f"go_client_{i:04d}"
+        gw_client_pass = generate_password(gw_client_user)
+        filepath = os.path.join(GATEWAY_DIR, f"{gw_client_user}.conf")
+        try:
+            with open(filepath, "w") as f:
+                f.write(f"username = {gw_client_user}\n")
+                f.write(f"password = {gw_client_pass}\n")
+        except IOError as e:
+            print(f"  Error writing file {filepath}: {e}")
+
     print(f"  Client configs → {CLIENTS_DIR}")
     print(f"  Server configs → {SERVER_DIR}")
+    print(f"  Gateway configs ({num_gw_clients}) → {GATEWAY_DIR}")
     print(f"  Admin CLI config → cli_admin.conf")
+    print(f"  API Gateway config → api_gateway.conf")
     print("  Done.")

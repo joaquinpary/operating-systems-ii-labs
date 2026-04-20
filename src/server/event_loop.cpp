@@ -110,6 +110,16 @@ void event_loop::run()
             {
                 std::uint64_t val;
                 (void)read(m_wakeup_fd, &val, sizeof(val));
+
+                std::vector<std::function<void()>> pending;
+                {
+                    std::lock_guard<std::mutex> lock(m_deferred_mutex);
+                    pending.swap(m_deferred);
+                }
+                for (auto& fn : pending)
+                {
+                    fn();
+                }
                 continue;
             }
 
@@ -133,4 +143,14 @@ void event_loop::stop()
 bool event_loop::is_running() const
 {
     return m_running;
+}
+
+void event_loop::post(std::function<void()> fn)
+{
+    {
+        std::lock_guard<std::mutex> lock(m_deferred_mutex);
+        m_deferred.push_back(std::move(fn));
+    }
+    std::uint64_t val = 1;
+    (void)write(m_wakeup_fd, &val, sizeof(val));
 }
