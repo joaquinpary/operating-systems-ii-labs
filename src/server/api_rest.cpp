@@ -176,10 +176,10 @@ void run_api_rest_process(const config::server_config& cfg)
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
 
-                std::string res_str = R"({"status":"ok","accepted":)" + std::to_string(parsed_map.nodes.size()) + 
-                                      R"(,"discarded":)" + std::to_string(parsed_map.total_discarded) + 
-                                      R"(,"matrix_size":)" + std::to_string(matrix_size) + 
-                                      R"(,"nodes":)" + accepted_ids + "}";
+                std::string res_str = R"({"status":"ok","accepted":)" + std::to_string(parsed_map.nodes.size()) +
+                                      R"(,"discarded":)" + std::to_string(parsed_map.total_discarded) +
+                                      R"(,"matrix_size":)" + std::to_string(matrix_size) + R"(,"nodes":)" +
+                                      accepted_ids + "}";
 
                 response.set_content(res_str, "application/json");
             }
@@ -200,64 +200,59 @@ void run_api_rest_process(const config::server_config& cfg)
                 "application/json");
         });
 
-        server.Post("/request/fulfillment-flow", [shared_graph, graph_mutex](const httplib::Request& request,
-                                                                             httplib::Response& response) {
-            try
-            {
-                server::FlowRequest req = server::parse_flow_request_json(request.body);
-                server::FlowResult flow_res;
-                int node_count = 0;
+        server.Post("/request/fulfillment-flow",
+                    [shared_graph, graph_mutex](const httplib::Request& request, httplib::Response& response) {
+                        try
+                        {
+                            server::FlowRequest req = server::parse_flow_request_json(request.body);
+                            server::FlowResult flow_res;
+                            int node_count = 0;
 
-                {
-                    std::lock_guard<std::mutex> lock(*graph_mutex);
-                    if (!is_graph_loaded(*shared_graph))
-                    {
-                        throw std::runtime_error("No map data loaded. Call /map first.");
-                    }
+                            {
+                                std::lock_guard<std::mutex> lock(*graph_mutex);
+                                if (!is_graph_loaded(*shared_graph))
+                                {
+                                    throw std::runtime_error("No map data loaded. Call /map first.");
+                                }
 
-                    auto source_it = shared_graph->node_to_index.find(req.source);
-                    auto sink_it = shared_graph->node_to_index.find(req.sink);
+                                auto source_it = shared_graph->node_to_index.find(req.source);
+                                auto sink_it = shared_graph->node_to_index.find(req.sink);
 
-                    if (source_it == shared_graph->node_to_index.end())
-                    {
-                        throw std::runtime_error("Source node not found in graph: " + req.source);
-                    }
-                    if (sink_it == shared_graph->node_to_index.end())
-                    {
-                        throw std::runtime_error("Sink node not found in graph: " + req.sink);
-                    }
+                                if (source_it == shared_graph->node_to_index.end())
+                                {
+                                    throw std::runtime_error("Source node not found in graph: " + req.source);
+                                }
+                                if (sink_it == shared_graph->node_to_index.end())
+                                {
+                                    throw std::runtime_error("Sink node not found in graph: " + req.sink);
+                                }
 
-                    int source_idx = source_it->second;
-                    int sink_idx = sink_it->second;
-                    node_count = static_cast<int>(shared_graph->adj_matrix.size());
+                                int source_idx = source_it->second;
+                                int sink_idx = sink_it->second;
+                                node_count = static_cast<int>(shared_graph->adj_matrix.size());
 
-                    flow_res = server::ford_fulkerson(shared_graph->adj_matrix, source_idx, sink_idx);
-                }
+                                flow_res = server::ford_fulkerson(shared_graph->adj_matrix, source_idx, sink_idx);
+                            }
 
-                const std::int64_t timestamp_ms = current_timestamp_ms();
-                const std::string timestamp = server::format_timestamp_iso(timestamp_ms);
-                server::save_flow_result(req.source,
-                                         req.sink,
-                                         node_count,
-                                         flow_res.max_flow,
-                                         flow_res.execution_time_ms,
-                                         timestamp,
-                                         kUseOpenMPFlow);
+                            const std::int64_t timestamp_ms = current_timestamp_ms();
+                            const std::string timestamp = server::format_timestamp_iso(timestamp_ms);
+                            server::save_flow_result(req.source, req.sink, node_count, flow_res.max_flow,
+                                                     flow_res.execution_time_ms, timestamp, kUseOpenMPFlow);
 
-                response.status = 200;
-                response.set_header("Content-Type", "application/json");
-                response.set_content(
-                    server::build_flow_response_json(req, node_count, flow_res, timestamp, kUseOpenMPFlow),
-                    "application/json");
-            }
-            catch (const std::exception& e)
-            {
-                response.status = 400;
-                response.set_header("Content-Type", "application/json");
-                std::string err_json = R"({"status":"error","message":")" + std::string(e.what()) + R"("})";
-                response.set_content(err_json, "application/json");
-            }
-        });
+                            response.status = 200;
+                            response.set_header("Content-Type", "application/json");
+                            response.set_content(
+                                server::build_flow_response_json(req, node_count, flow_res, timestamp, kUseOpenMPFlow),
+                                "application/json");
+                        }
+                        catch (const std::exception& e)
+                        {
+                            response.status = 400;
+                            response.set_header("Content-Type", "application/json");
+                            std::string err_json = R"({"status":"error","message":")" + std::string(e.what()) + R"("})";
+                            response.set_content(err_json, "application/json");
+                        }
+                    });
 
         server.Post("/request/fulfillment-circuit", [shared_graph, graph_mutex](const httplib::Request& request,
                                                                                 httplib::Response& response) {
@@ -278,8 +273,8 @@ void run_api_rest_process(const config::server_config& cfg)
                         collect_node_indices_by_type(*shared_graph, FULFILLMENT_CENTER_NODE_TYPE);
                     if (fulfillment_indices.size() > MAX_FULFILLMENT_CIRCUIT_NODES)
                     {
-                        throw std::runtime_error("Fulfillment-center subgraph exceeds the supported limit of "
-                                                 + std::to_string(MAX_FULFILLMENT_CIRCUIT_NODES) + " nodes");
+                        throw std::runtime_error("Fulfillment-center subgraph exceeds the supported limit of " +
+                                                 std::to_string(MAX_FULFILLMENT_CIRCUIT_NODES) + " nodes");
                     }
 
                     subgraph_node_ids.reserve(fulfillment_indices.size());
@@ -294,7 +289,8 @@ void run_api_rest_process(const config::server_config& cfg)
                         auto start_it = std::find(subgraph_node_ids.begin(), subgraph_node_ids.end(), req.start);
                         if (start_it == subgraph_node_ids.end())
                         {
-                            throw std::runtime_error("Start node is not a secure active fulfillment center: " + req.start);
+                            throw std::runtime_error("Start node is not a secure active fulfillment center: " +
+                                                     req.start);
                         }
 
                         start_index = static_cast<int>(std::distance(subgraph_node_ids.begin(), start_it));
@@ -311,9 +307,9 @@ void run_api_rest_process(const config::server_config& cfg)
 
                 response.status = 200;
                 response.set_header("Content-Type", "application/json");
-                response.set_content(
-                    server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp, kUseOpenMPCircuit),
-                    "application/json");
+                response.set_content(server::build_circuit_response_json(subgraph_node_ids, circuit_result, timestamp,
+                                                                         kUseOpenMPCircuit),
+                                     "application/json");
             }
             catch (const std::exception& e)
             {

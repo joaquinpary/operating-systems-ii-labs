@@ -1,4 +1,5 @@
 #include "server.hpp"
+#include "mqtt_client.hpp"
 
 #include <cerrno>
 #include <common/json_manager.h>
@@ -629,6 +630,13 @@ void server::dispatch_response(const response_slot_t& resp)
         {
             std::size_t batch_end = std::min(offset + BROADCAST_BATCH_SIZE, total);
             m_loop.post([send_batch, offset, batch_end]() { send_batch(offset, batch_end); });
+        }
+        break;
+    }
+    case response_command::MQTT_PUBLISH_ROUTE: {
+        if (m_mqtt)
+        {
+            m_mqtt->assign_route(resp.mqtt_transaction_id);
         }
         break;
     }

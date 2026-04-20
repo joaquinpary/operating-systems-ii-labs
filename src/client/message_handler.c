@@ -209,8 +209,8 @@ int handle_server_message(const message_t* msg)
         log_inventory_snapshot("ORDER_TO_DISPATCH_STOCK recv");
 
         message_t confirm_msg;
-        if (create_items_message(&confirm_msg, HUB_TO_SERVER__DISPATCH_CONFIRMATION, shared_data->client_id,
-                                 SERVER, order->items, QUANTITY_ITEMS, msg->timestamp) != 0)
+        if (create_items_message(&confirm_msg, HUB_TO_SERVER__DISPATCH_CONFIRMATION, shared_data->client_id, SERVER,
+                                 order->items, QUANTITY_ITEMS, msg->timestamp) != 0)
         {
             LOG_ERROR_MSG("Failed to create dispatch confirmation message");
             return -1;
@@ -275,8 +275,6 @@ int handle_server_message(const message_t* msg)
         const payload_server_emergency_alert* alert = &msg->payload.server_emergency;
         LOG_WARNING_MSG("Emergency broadcast received from server: code=%d instructions='%s'", alert->emergency_code,
                         alert->instructions);
-
-        LOG_DEBUG_MSG("ACK sent for SERVER_TO_ALL_CLIENTS__EMERGENCY_ALERT");
         return 0;
     }
 

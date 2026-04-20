@@ -4,8 +4,8 @@
 #include <mongoc/mongoc.h>
 
 #include <cstdint>
-#include <ctime>
 #include <cstdio>
+#include <ctime>
 #include <mutex>
 #include <string>
 
@@ -14,10 +14,10 @@ namespace
 
 constexpr const char* RESULTS_COLLECTION = "results";
 
-std::once_flag    g_init_flag;
-mongoc_client_pool_t* g_pool    = nullptr;
-std::string       g_db_name;
-std::mutex        g_state_mutex;
+std::once_flag g_init_flag;
+mongoc_client_pool_t* g_pool = nullptr;
+std::string g_db_name;
+std::mutex g_state_mutex;
 static bool insert_document(mongoc_client_pool_t* pool, const std::string& db, bson_t* doc)
 {
     mongoc_client_t* client = mongoc_client_pool_pop(pool);
@@ -51,20 +51,13 @@ std::string format_timestamp_iso(std::int64_t timestamp_ms)
         --seconds;
     }
 
-    std::tm utc_tm {};
+    std::tm utc_tm{};
     if (gmtime_r(&seconds, &utc_tm) == nullptr)
         return "1970-01-01T00:00:00.000Z";
 
     char buffer[64];
-    std::snprintf(buffer, sizeof(buffer),
-                  "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-                  utc_tm.tm_year + 1900,
-                  utc_tm.tm_mon + 1,
-                  utc_tm.tm_mday,
-                  utc_tm.tm_hour,
-                  utc_tm.tm_min,
-                  utc_tm.tm_sec,
-                  millis);
+    std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", utc_tm.tm_year + 1900,
+                  utc_tm.tm_mon + 1, utc_tm.tm_mday, utc_tm.tm_hour, utc_tm.tm_min, utc_tm.tm_sec, millis);
     return buffer;
 }
 
@@ -92,26 +85,22 @@ void init_result_store(const std::string& mongo_uri, const std::string& database
     std::lock_guard<std::mutex> lock(g_state_mutex);
     if (g_pool != nullptr)
         mongoc_client_pool_destroy(g_pool);
-    g_pool   = pool;
+    g_pool = pool;
     g_db_name = database_name;
     LOG_INFO_MSG("[Result Store] MongoDB configured (db=%s)", database_name.c_str());
 }
 
-void save_flow_result(const std::string& source,
-                      const std::string& sink,
-                      int node_count,
-                      double max_flow,
-                      double execution_time_ms,
-                      const std::string& timestamp,
-                      bool use_openmp)
+void save_flow_result(const std::string& source, const std::string& sink, int node_count, double max_flow,
+                      double execution_time_ms, const std::string& timestamp, bool use_openmp)
 {
     mongoc_client_pool_t* pool_snap;
     std::string db_snap;
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
-        if (g_pool == nullptr) return;
+        if (g_pool == nullptr)
+            return;
         pool_snap = g_pool;
-        db_snap   = g_db_name;
+        db_snap = g_db_name;
     }
 
     bson_t* doc = bson_new();
@@ -120,7 +109,7 @@ void save_flow_result(const std::string& source,
     bson_t req;
     BSON_APPEND_DOCUMENT_BEGIN(doc, "request", &req);
     BSON_APPEND_UTF8(&req, "source", source.c_str());
-    BSON_APPEND_UTF8(&req, "sink",   sink.c_str());
+    BSON_APPEND_UTF8(&req, "sink", sink.c_str());
     bson_append_document_end(doc, &req);
 
     bson_t res;
@@ -128,28 +117,26 @@ void save_flow_result(const std::string& source,
     BSON_APPEND_DOUBLE(&res, "max_flow", max_flow);
     bson_append_document_end(doc, &res);
 
-    BSON_APPEND_INT32(doc,  "node_count",        node_count);
+    BSON_APPEND_INT32(doc, "node_count", node_count);
     BSON_APPEND_DOUBLE(doc, "execution_time_ms", execution_time_ms);
-    BSON_APPEND_BOOL(doc,   "use_openmp",        use_openmp);
-    BSON_APPEND_UTF8(doc,   "timestamp",         timestamp.c_str());
+    BSON_APPEND_BOOL(doc, "use_openmp", use_openmp);
+    BSON_APPEND_UTF8(doc, "timestamp", timestamp.c_str());
 
     insert_document(pool_snap, db_snap, doc);
     bson_destroy(doc);
 }
 
-void save_circuit_result(const std::string& start,
-                         const std::vector<std::string>& subgraph_node_ids,
-                         const CircuitResult& circuit_result,
-                         const std::string& timestamp,
-                         bool use_openmp)
+void save_circuit_result(const std::string& start, const std::vector<std::string>& subgraph_node_ids,
+                         const CircuitResult& circuit_result, const std::string& timestamp, bool use_openmp)
 {
     mongoc_client_pool_t* pool_snap;
     std::string db_snap;
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
-        if (g_pool == nullptr) return;
+        if (g_pool == nullptr)
+            return;
         pool_snap = g_pool;
-        db_snap   = g_db_name;
+        db_snap = g_db_name;
     }
 
     bson_t* doc = bson_new();
@@ -171,8 +158,8 @@ void save_circuit_result(const std::string& start,
 
     bson_t res;
     BSON_APPEND_DOCUMENT_BEGIN(doc, "result", &res);
-    BSON_APPEND_BOOL(&res,  "has_circuit", circuit_result.has_circuit);
-    BSON_APPEND_INT32(&res, "node_count",  static_cast<int32_t>(subgraph_node_ids.size()));
+    BSON_APPEND_BOOL(&res, "has_circuit", circuit_result.has_circuit);
+    BSON_APPEND_INT32(&res, "node_count", static_cast<int32_t>(subgraph_node_ids.size()));
     bson_t circuits_arr;
     BSON_APPEND_ARRAY_BEGIN(&res, "circuits", &circuits_arr);
     char ci_buf[24], cj_buf[24];
@@ -194,9 +181,9 @@ void save_circuit_result(const std::string& start,
     BSON_APPEND_DOUBLE(&res, "execution_time_ms", circuit_result.execution_time_ms);
     bson_append_document_end(doc, &res);
 
-    BSON_APPEND_INT32(doc,  "node_count",  static_cast<int32_t>(subgraph_node_ids.size()));
-    BSON_APPEND_BOOL(doc,   "use_openmp",  use_openmp);
-    BSON_APPEND_UTF8(doc,   "timestamp",   timestamp.c_str());
+    BSON_APPEND_INT32(doc, "node_count", static_cast<int32_t>(subgraph_node_ids.size()));
+    BSON_APPEND_BOOL(doc, "use_openmp", use_openmp);
+    BSON_APPEND_UTF8(doc, "timestamp", timestamp.c_str());
 
     insert_document(pool_snap, db_snap, doc);
     bson_destroy(doc);
@@ -209,7 +196,7 @@ std::string get_all_results()
     {
         std::lock_guard<std::mutex> lock(g_state_mutex);
         pool_snap = g_pool;
-        db_snap   = g_db_name;
+        db_snap = g_db_name;
     }
 
     if (pool_snap == nullptr || db_snap.empty())
@@ -219,8 +206,7 @@ std::string get_all_results()
     if (client == nullptr)
         return R"({"status":"ok","results":[]})";
 
-    mongoc_collection_t* coll =
-        mongoc_client_get_collection(client, db_snap.c_str(), RESULTS_COLLECTION);
+    mongoc_collection_t* coll = mongoc_client_get_collection(client, db_snap.c_str(), RESULTS_COLLECTION);
 
     bson_t* opts = BCON_NEW("sort", "{", "timestamp", BCON_INT32(-1), "timestamp_ms", BCON_INT32(-1), "}");
     bson_t filter;
@@ -238,7 +224,8 @@ std::string get_all_results()
         char* str = bson_as_relaxed_extended_json(rdoc, &len);
         if (str != nullptr)
         {
-            if (!first) json_array += ',';
+            if (!first)
+                json_array += ',';
             json_array.append(str, len);
             bson_free(str);
             first = false;

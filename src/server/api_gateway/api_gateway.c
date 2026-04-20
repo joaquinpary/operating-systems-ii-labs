@@ -1,8 +1,8 @@
 #include "api_gateway_interface.h"
 #include "cJSON.h"
 
-#include <libpq-fe.h>
 #include <ctype.h>
+#include <libpq-fe.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -152,17 +152,16 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
             quantities[id - 1] = qty_json->valueint;
     }
 
-    const char* find_sql =
-        "SELECT client_id FROM client_inventory "
-        "WHERE client_type = 'HUB' "
-        "  AND food >= $1 AND water >= $2 AND medicine >= $3 "
-        "  AND tools >= $4 AND guns >= $5 AND ammo >= $6 "
-        "OFFSET floor(random() * ("
-        "  SELECT COUNT(*) FROM client_inventory "
-        "  WHERE client_type = 'HUB' "
-        "    AND food >= $1 AND water >= $2 AND medicine >= $3 "
-        "    AND tools >= $4 AND guns >= $5 AND ammo >= $6"
-        ")) LIMIT 1";
+    const char* find_sql = "SELECT client_id FROM client_inventory "
+                           "WHERE client_type = 'HUB' "
+                           "  AND food >= $1 AND water >= $2 AND medicine >= $3 "
+                           "  AND tools >= $4 AND guns >= $5 AND ammo >= $6 "
+                           "OFFSET floor(random() * ("
+                           "  SELECT COUNT(*) FROM client_inventory "
+                           "  WHERE client_type = 'HUB' "
+                           "    AND food >= $1 AND water >= $2 AND medicine >= $3 "
+                           "    AND tools >= $4 AND guns >= $5 AND ammo >= $6"
+                           ")) LIMIT 1";
 
     char q[QUANTITY_ITEMS][16];
     const char* params[QUANTITY_ITEMS];
@@ -183,13 +182,12 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
     }
     PQclear(res);
 
-    const char* txn_sql =
-        "INSERT INTO inventory_transactions "
-        "(transaction_type, source_id, source_type, destination_id, destination_type, "
-        " status, food, water, medicine, tools, guns, ammo) "
-        "VALUES ('ORDER_DISPATCH', $1, 'HUB', 'EXTERNAL_CLIENT', 'EXTERNAL_CLIENT', "
-        " $8, $2, $3, $4, $5, $6, $7) "
-        "RETURNING transaction_id";
+    const char* txn_sql = "INSERT INTO inventory_transactions "
+                          "(transaction_type, source_id, source_type, destination_id, destination_type, "
+                          " status, food, water, medicine, tools, guns, ammo) "
+                          "VALUES ('ORDER_DISPATCH', $1, 'HUB', 'EXTERNAL_CLIENT', 'EXTERNAL_CLIENT', "
+                          " $8, $2, $3, $4, $5, $6, $7) "
+                          "RETURNING transaction_id";
 
     const char* src = hub_found ? hub_id : "";
     const char* status = hub_found ? "ASSIGNED" : "PENDING";
@@ -221,8 +219,8 @@ static int cmd_create_shipment(char* out, size_t max_len, const message_t* req, 
         }
 
         message_t dispatch_msg;
-        create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK,
-                             SERVER, hub_id, items, item_count, NULL);
+        create_items_message(&dispatch_msg, SERVER_TO_HUB__ORDER_TO_DISPATCH_STOCK, SERVER, hub_id, items, item_count,
+                             NULL);
 
         if (serialize_message_to_json(&dispatch_msg, side->send_json) == 0)
         {
@@ -259,8 +257,7 @@ static int cmd_get_shipment_status(char* out, size_t max_len, const message_t* r
 
     const char* transaction_id_str = args_json->valuestring;
 
-    const char* sql =
-        "SELECT status FROM inventory_transactions WHERE transaction_id = $1";
+    const char* sql = "SELECT status FROM inventory_transactions WHERE transaction_id = $1";
     const char* params[] = {transaction_id_str};
 
     PGresult* res = PQexecParams(s_conn, sql, 1, NULL, params, NULL, NULL, 0);
@@ -280,8 +277,7 @@ static int cmd_get_shipment_status(char* out, size_t max_len, const message_t* r
     return build_response_json(out, max_len, req, db_status, NULL);
 }
 
-int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len,
-                       gateway_side_effect_t* side)
+int api_gateway_handle(const char* raw_json, char* resp_json, size_t max_len, gateway_side_effect_t* side)
 {
     if (!raw_json || !resp_json || max_len == 0)
         return -1;

@@ -224,11 +224,8 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body)
     return req;
 }
 
-std::string build_flow_response_json(const FlowRequest& request,
-                                     int node_count,
-                                     const FlowResult& flow_result,
-                                     const std::string& timestamp,
-                                     bool use_openmp)
+std::string build_flow_response_json(const FlowRequest& request, int node_count, const FlowResult& flow_result,
+                                     const std::string& timestamp, bool use_openmp)
 {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "status", "ok");
@@ -250,8 +247,7 @@ std::string build_flow_response_json(const FlowRequest& request,
 }
 
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
-                                        const CircuitResult& circuit_result,
-                                        const std::string& timestamp,
+                                        const CircuitResult& circuit_result, const std::string& timestamp,
                                         bool use_openmp)
 {
     cJSON* root = cJSON_CreateObject();

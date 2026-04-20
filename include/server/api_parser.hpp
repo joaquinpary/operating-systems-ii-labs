@@ -81,11 +81,8 @@ FlowRequest parse_flow_request_json(const std::string& json_body);
  * @param use_openmp Whether the computation used the OpenMP-enabled build
  * @return JSON string with status, endpoints, node_count, timing metadata, and max flow
  */
-std::string build_flow_response_json(const FlowRequest& request,
-                                     int node_count,
-                                     const FlowResult& flow_result,
-                                     const std::string& timestamp,
-                                     bool use_openmp);
+std::string build_flow_response_json(const FlowRequest& request, int node_count, const FlowResult& flow_result,
+                                     const std::string& timestamp, bool use_openmp);
 
 struct CircuitRequest
 {
@@ -113,8 +110,7 @@ CircuitRequest parse_circuit_request_json(const std::string& json_body);
  * @return JSON string with status, has_circuit, node_count, timing metadata, and circuits
  */
 std::string build_circuit_response_json(const std::vector<std::string>& subgraph_node_ids,
-                                        const CircuitResult& circuit_result,
-                                        const std::string& timestamp,
+                                        const CircuitResult& circuit_result, const std::string& timestamp,
                                         bool use_openmp);
 
 } // namespace server

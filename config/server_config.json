@@ -9,6 +9,8 @@
     "keepalive_timeout": 120,
     "pool_size": 24,
     "worker_threads": 12,
-    "credentials_path": "/etc/server/clients"
+    "credentials_path": "/etc/server/clients",
+    "mqtt_broker_host": "localhost",
+    "mqtt_broker_port": 1883
 }
 

@@ -4,6 +4,7 @@
 #include "database.hpp"
 #include "event_loop.hpp"
 #include "ipc.hpp"
+#include "mqtt_client.hpp"
 #include "server.hpp"
 #include "session_manager.hpp"
 #include "timer_manager.hpp"
@@ -114,6 +115,16 @@ int main()
         auto timer_mgr = std::make_unique<timer_manager>(loop);
 
         server srv(loop, shm, response_efd, cfg, std::move(session_mgr), std::move(timer_mgr));
+
+        // MQTT client — connects to broker and wires socket into the event loop.
+        auto mqtt_db_pool = std::make_shared<connection_pool>(build_connection_string(), 2);
+        mqtt_client mqtt(cfg, loop, mqtt_db_pool);
+        srv.set_mqtt_client(&mqtt);
+        if (mqtt.connect() != 0)
+        {
+            LOG_ERROR_MSG("[REACTOR] MQTT connect failed, continuing without MQTT");
+            std::cerr << "[REACTOR] MQTT connect failed, continuing without MQTT\n";
+        }
 
         loop.add_fd(sig_fd, EPOLLIN, [&](std::uint32_t) {
             struct signalfd_siginfo info;

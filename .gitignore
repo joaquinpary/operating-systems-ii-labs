@@ -34,6 +34,8 @@
 
 # Directories
 build/
+firmware/build/
+firmware/external/
 external/
 .github/prompts/
 .vscode/
@@ -59,3 +61,8 @@ scripts/build_test.sh
 scripts/client_msg_tester.py
 scripts/run_test.sh
 api_gateway/server
+
+
+# Firmware 
+
+firmware/build/

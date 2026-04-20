@@ -1,0 +1,93 @@
+mainmenu "DHL Courier Firmware"
+
+menu "DHL Courier Settings"
+
+config DHL_EMPLOYEE_ID
+	string "Courier employee identifier (compile-time fallback)"
+	default "courier-001"
+	help
+	  Compile-time default. At runtime this is overridden by the value
+	  entered in the captive-portal provisioning page and stored in NVS.
+
+config DHL_MQTT_CLIENT_ID
+	string "MQTT client identifier"
+	default "dhl_courier_001"
+	help
+	  MQTT client identifier presented to the broker at connect time.
+
+config DHL_MQTT_BROKER_HOSTNAME
+	string "MQTT broker hostname or IPv4 address"
+	default "localhost"
+	help
+	  Hostname or IP address of the MQTT broker.
+
+config DHL_MQTT_BROKER_PORT
+	int "MQTT broker port"
+	range 1 65535
+	default 1883
+
+config DHL_MQTT_KEEPALIVE
+	int "MQTT keepalive in seconds"
+	range 10 1200
+	default 60
+
+config DHL_MQTT_RECONNECT_DELAY
+	int "MQTT reconnect delay in seconds"
+	range 1 300
+	default 5
+
+config DHL_UI_QT
+	bool "Enable Qt desktop UI for local simulation"
+	depends on BOARD_NATIVE_POSIX || BOARD_NATIVE_POSIX_64 || BOARD_NATIVE_SIM
+	default y
+	help
+	  Build the desktop UI implementation used for local simulation on the
+	  host machine. Real boards keep using the UI bridge API but compile the
+	  stub implementation until an LVGL backend is added.
+
+if WIFI
+
+config DHL_WIFI_SSID
+	string "Wi-Fi SSID (compile-time fallback)"
+	default ""
+	help
+	  Compile-time default only. At runtime the SSID is entered via the
+	  captive-portal and stored in NVS flash. Leave empty to always use
+	  the captive portal on first boot.
+
+config DHL_WIFI_PSK
+	string "Wi-Fi passphrase (compile-time fallback)"
+	default ""
+	help
+	  Compile-time default only. See DHL_WIFI_SSID.
+
+endif
+
+menu "Route Manager"
+
+config DHL_ROUTE_MAX_STOPS
+	int "Maximum number of stops in a delivery route"
+	range 1 64
+	default 16
+	help
+	  Upper bound on the number of stops the device can hold in memory
+	  for a single route.  Each stop occupies DHL_ROUTE_STOP_NAME_MAX
+	  bytes of static RAM, so raising this value increases the
+	  route_state footprint linearly.  16 covers the typical last-mile
+	  delivery run with comfortable margin.
+
+config DHL_ROUTE_STOP_NAME_MAX
+	int "Maximum length of a stop name (bytes, including null terminator)"
+	range 8 256
+	default 64
+	help
+	  Maximum number of bytes (including the trailing null) for a single
+	  stop name received from the backend.  Names longer than this are
+	  silently truncated.  64 bytes is enough for a full street-level
+	  address in Spanish/English.
+
+endmenu
+
+endmenu
+
+source "Kconfig.zephyr"

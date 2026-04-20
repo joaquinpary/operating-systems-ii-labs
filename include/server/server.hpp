@@ -16,6 +16,8 @@
 #include <string>
 #include <unordered_map>
 
+class mqtt_client;
+
 /**
  * A TCP session managed by the reactor.
  * Owns a non-blocking socket fd. All I/O happens in the reactor thread.
@@ -110,6 +112,12 @@ class server
     /** Stop accepting traffic and tear down reactor resources. */
     void stop();
 
+    /** Set the MQTT client (owned externally, lifetime must exceed server). */
+    void set_mqtt_client(mqtt_client* mqtt)
+    {
+        m_mqtt = mqtt;
+    }
+
   private:
     // TCP acceptor setup & callbacks
     int create_listen_socket(const posix_address& addr);
@@ -146,6 +154,9 @@ class server
     // Server modules (reactor-side only)
     std::unique_ptr<session_manager> m_session_manager;
     std::unique_ptr<timer_manager> m_timer_manager;
+
+    // MQTT client (owned by main, not by server)
+    mqtt_client* m_mqtt = nullptr;
 };
 
 #endif // SERVER_HPP
